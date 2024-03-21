@@ -1,0 +1,1 @@
+gcc -o tcc.exe src/buffer.c src/const.c src/lex.c src/log.c src/set.c src/test.c
