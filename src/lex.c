@@ -428,4 +428,3 @@ void lex_delete(lexer_token_t* start)
     free(start);
     lex_delete(nxt);
 }
-

@@ -4,31 +4,14 @@
 
 #include "cc.h"
 
-#define parse_not_found { free(s); return NULL; }
-
 #define dealloc_null_return { free(s); return NULL; }
-
-// deallocates the syntax component being made and returns
 #define null_protection(x) if (!(x)) dealloc_null_return
-
 #define safe_lexer_token_next(tok) { tok = tok->next; if (!tok) return NULL; }
+#define parse_terminate(tok, fmt, ...) terminate("(line %d, col. %d) " fmt, (tok)->row, (tok)->col, ## __VA_ARGS__)
 
-static bool is_keyword(lexer_token_t* tok, unsigned kid)
-{
-    return tok && tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == kid;
-}
+// here are some helper functions i figured would be useful at some point
 
-// -- laws for the maybe functions --
-//
-// a maybe function takes two parameters:
-//  - the translation unit being parsed
-//  - a reference to the local tracing token variable of the function that called it
-//
-// if a maybe function returns null, it must not modify the object
-// at the reference of the second parameter.
-//
-// a maybe function may change the reference of the second parameter to be a null pointer.
-
+// crazy amount of work to find btw
 syntax_component_t* find_typedef(syntax_component_t* unit, char* identifier)
 {
     for (unsigned i = 0; i < unit->sc0_external_declarations->size; ++i)
@@ -60,6 +43,39 @@ syntax_component_t* find_typedef(syntax_component_t* unit, char* identifier)
     }
     return NULL;
 }
+
+bool has_specifier_qualifier(syntax_component_t* declaration, unsigned specifier_qualifier_type)
+{
+    for (unsigned i = 0; i < declaration->sc1_specifiers_qualifiers->size; ++i)
+    {
+        syntax_component_t* spec_qual = vector_get(declaration->sc1_specifiers_qualifiers, i);
+        if (spec_qual->sc2_type == specifier_qualifier_type)
+            return true;
+    }
+    return false;
+}
+
+bool has_declarator_type(syntax_component_t* declaration, unsigned declarator_type)
+{
+    for (unsigned i = 0; i < declaration->sc1_declarators->size; ++i)
+    {
+        syntax_component_t* declarator = vector_get(declaration->sc1_declarators, i);
+        if (declarator->sc3_type == declarator_type)
+            return true;
+    }
+    return false;
+}
+
+// -- laws for the maybe functions --
+//
+// a maybe function takes two parameters:
+//  - the translation unit being parsed
+//  - a reference to the local tracing token variable of the function that called it
+//
+// if a maybe function returns null, it must not modify the object
+// at the reference of the second parameter.
+//
+// a maybe function may change the reference of the second parameter to be a null pointer.
 
 syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
@@ -94,7 +110,7 @@ syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_tok
                 dealloc_null_return;
             vector_add(s->sc5_declarations, decl);
         }
-        if (!tok) dealloc_null_return; // for the instance in which you had like: struct { int a;(end of file)
+        if (!tok) dealloc_null_return; // for the instance in which you had like: struct { int a;(EOF)
         safe_lexer_token_next(tok); // move past ending brace
     }
     *toks_ref = tok;
@@ -480,6 +496,15 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
     dealloc_null_return;
 }
 
+syntax_component_t* maybe_parse_initializer_list(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_INITIALIZER;
+    lexer_token_t* tok = *toks_ref;
+
+    dealloc_null_return;
+}
+
 syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     syntax_component_t* s = calloc(1, sizeof *s);
@@ -490,7 +515,25 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
     if (tok->operator_id != '=')
         dealloc_null_return;
     safe_lexer_token_next(tok);
-    dealloc_null_return;
+    if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '{') // initializer list
+    {
+        s->sc4_type = INITIALIZER_LIST;
+        // TODO initializer list stuff
+    }
+    else // expression
+    {
+        s->sc4_type = INITIALIZER_EXPRESSION;
+        syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+        if (!expr)
+            dealloc_null_return;
+        s->sc4_expression = expr;
+    }
+    if (tok->type != LEXER_TOKEN_SEPARATOR)
+        dealloc_null_return;
+    if (tok->separator_id != ';')
+        dealloc_null_return;
+    *toks_ref = tok->next;
+    return s;
 }
 
 syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_token_t** toks_ref)
@@ -498,7 +541,7 @@ syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_toke
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_DECLARATION;
     lexer_token_t* tok = *toks_ref;
-
+    // TODO
     dealloc_null_return;
 }
 
@@ -507,7 +550,16 @@ syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_EXPRESSION;
     lexer_token_t* tok = *toks_ref;
+    // TODO
+    dealloc_null_return;
+}
 
+syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_STATEMENT;
+    lexer_token_t* tok = *toks_ref;
+    // TODO
     dealloc_null_return;
 }
 
@@ -517,7 +569,23 @@ syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, le
     s->type = SYNTAX_COMPONENT_FUNCTION_DEFINITION;
     lexer_token_t* tok = *toks_ref;
 
-    dealloc_null_return;
+    syntax_component_t* decl = maybe_parse_declaration(unit, &tok);
+    if (!decl)
+        dealloc_null_return;
+    if (decl->sc1_declarators->size != 1) // function definition may only have one declarator
+        dealloc_null_return;
+    syntax_component_t* declarator = vector_get(decl->sc1_declarators, 0);
+    if (declarator->sc3_type != DECLARATOR_FUNCTION) // declarator must be a function declarator (obviously)
+        dealloc_null_return;
+    s->sc9_function_declaration = decl;
+    syntax_component_t* compound_stmt = maybe_parse_statement(unit, &tok);
+    if (!compound_stmt)
+        dealloc_null_return;
+    if (compound_stmt->sc10_type != STATEMENT_COMPOUND) // function body should be a compound statement
+        dealloc_null_return;
+    s->sc9_function_body = compound_stmt;
+    *toks_ref = tok;
+    return s;
 }
 
 syntax_component_t* parse(lexer_token_t* toks)
@@ -539,7 +607,7 @@ syntax_component_t* parse(lexer_token_t* toks)
             vector_add(unit->sc0_external_declarations, function_definition);
             continue;
         }
-        terminate("unknown syntax component encountered");
+        parse_terminate(toks, "unknown syntax encountered");
     }
     return unit;
 }
