@@ -528,7 +528,6 @@ int errorf(char* fmt, ...);
 
 /* buffer.c */
 buffer_t* buffer_init(void);
-static buffer_t* buffer_resize(buffer_t* b, unsigned capacity);
 buffer_t* buffer_append(buffer_t* b, char c);
 buffer_t* buffer_append_str(buffer_t* b, char* str);
 void buffer_delete(buffer_t* b);
