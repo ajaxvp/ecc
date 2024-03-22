@@ -158,7 +158,12 @@ static lexer_token_t* lex_single(FILE* file, filepos_t* pos)
         if (d == '/')
         {
             readc(file, pos); // go past '/'
-            while (readc(file, pos) != '\n');
+            for (;;)
+            {
+                int e = readc_opt_term(file, pos, false);
+                if (e == '\n' || e == EOF)
+                    break;
+            }
             free(tok);
             return IGNORE_TOKEN;
         }

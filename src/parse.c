@@ -9,63 +9,6 @@
 #define safe_lexer_token_next(tok) { tok = tok->next; if (!tok) return NULL; }
 #define parse_terminate(tok, fmt, ...) terminate("(line %d, col. %d) " fmt, (tok)->row, (tok)->col, ## __VA_ARGS__)
 
-// here are some helper functions i figured would be useful at some point
-
-// crazy amount of work to find btw
-syntax_component_t* find_typedef(syntax_component_t* unit, char* identifier)
-{
-    for (unsigned i = 0; i < unit->sc0_external_declarations->size; ++i)
-    {
-        syntax_component_t* decl = vector_get(unit->sc0_external_declarations, i);
-        if (decl->type != SYNTAX_COMPONENT_DECLARATION)
-            continue;
-        bool found_typedef_specifier = false;
-        for (unsigned j = 0; j < decl->sc1_specifiers_qualifiers->size; ++j)
-        {
-            syntax_component_t* specifier = vector_get(decl->sc1_specifiers_qualifiers, j);
-            if (specifier->sc2_type != SPECIFIER_QUALIFIER_STORAGE_CLASS)
-                continue;
-            if (specifier->sc2_storage_class_id == STORAGE_CLASS_TYPEDEF)
-            {
-                found_typedef_specifier = true;
-                break;
-            }
-        }
-        if (!found_typedef_specifier)
-            continue;
-        for (unsigned j = 0; j < decl->sc1_declarators->size; ++j)
-        {
-            syntax_component_t* declarator = vector_get(decl->sc1_declarators, j);
-            if (declarator->sc3_type == DECLARATOR_IDENTIFIER &&
-                !strcmp(declarator->sc3_identifier, identifier))
-                return decl;
-        }
-    }
-    return NULL;
-}
-
-bool has_specifier_qualifier(syntax_component_t* declaration, unsigned specifier_qualifier_type)
-{
-    for (unsigned i = 0; i < declaration->sc1_specifiers_qualifiers->size; ++i)
-    {
-        syntax_component_t* spec_qual = vector_get(declaration->sc1_specifiers_qualifiers, i);
-        if (spec_qual->sc2_type == specifier_qualifier_type)
-            return true;
-    }
-    return false;
-}
-
-bool has_declarator_type(syntax_component_t* declaration, unsigned declarator_type)
-{
-    for (unsigned i = 0; i < declaration->sc1_declarators->size; ++i)
-    {
-        syntax_component_t* declarator = vector_get(declaration->sc1_declarators, i);
-        if (declarator->sc3_type == declarator_type)
-            return true;
-    }
-    return false;
-}
-
 // -- laws for the maybe functions --
 //
 // a maybe function takes two parameters:
@@ -76,6 +19,21 @@ bool has_declarator_type(syntax_component_t* declaration, unsigned declarator_ty
 // at the reference of the second parameter.
 //
 // a maybe function may change the reference of the second parameter to be a null pointer.
+
+// FORWARD DECLARATIONS
+syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_enum(syntax_component_t* unit, lexer_token_t** toks_ref);
+vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* parse(lexer_token_t* toks);
+// FORWARD DECLARATIONS
 
 syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
@@ -170,184 +128,218 @@ syntax_component_t* maybe_parse_enum(syntax_component_t* unit, lexer_token_t** t
     return s;
 }
 
-syntax_component_t* maybe_parse_specifier_qualifier(syntax_component_t* unit, lexer_token_t** toks_ref)
+// yes these need to be parsed together, not i'm not a little baby boy
+vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
-    syntax_component_t* s = calloc(1, sizeof *s);
-    s->type = SYNTAX_COMPONENT_SPECIFIER_QUALIFIER;
-    null_protection(*toks_ref);
+    #define local_dealloc_null_return { free(v); return NULL; }
+    #define is_arithmetic_type_keyword(x) ((x) == KEYWORD_CHAR || \
+        (x) == KEYWORD_SHORT || \
+        (x) == KEYWORD_INT || \
+        (x) == KEYWORD_LONG || \
+        (x) == KEYWORD_SIGNED || \
+        (x) == KEYWORD_UNSIGNED || \
+        (x) == KEYWORD_FLOAT || \
+        (x) == KEYWORD_DOUBLE || \
+        (x) == KEYWORD_COMPLEX || \
+        (x) == KEYWORD_IMAGINARY)
+    vector_t* v = vector_init();
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) local_dealloc_null_return;
 
     unsigned keyword_count[KEYWORDS_LEN];
-    unsigned non_zero_keyword_counts = 0;
+    memset(keyword_count, 0, KEYWORDS_LEN * sizeof(unsigned));
+    unsigned arithmetic_keyword_counts = 0;
 
-    for (lexer_token_t* tok = *toks_ref; tok; tok = tok->next)
+    for (;;)
     {
+        syntax_component_t* s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_SPECIFIER_QUALIFIER;
+        if (!tok)
+        {
+            free(s);
+            break;
+        }
         if (tok->type == LEXER_TOKEN_KEYWORD)
         {
-            // update keyword count and update non-zero keyword counts if necessary
-            if (!keyword_count[tok->keyword_id])
-                ++non_zero_keyword_counts;
+            if (!keyword_count[tok->keyword_id] && is_arithmetic_type_keyword(tok->keyword_id))
+                ++arithmetic_keyword_counts;
             ++(keyword_count[tok->keyword_id]);
 
-            if (keyword_count[KEYWORD_VOID] == 1 && non_zero_keyword_counts == 1)
-            {
-                s->sc2_type = SPECIFIER_QUALIFIER_VOID;
-                *toks_ref = tok->next;
-                return s;
-            }
-
-            #define arithmetic_body(x) \
-            { \
-                s->sc2_type = SPECIFIER_QUALIFIER_ARITHMETIC_TYPE; \
-                s->sc2_arithmetic_type_id = (x); \
-                *toks_ref = tok->next; \
-                return s; \
-            }
-
-            if (keyword_count[KEYWORD_BOOL] == 1 && non_zero_keyword_counts == 1)
-                arithmetic_body(ARITHMETIC_TYPE_BOOL);
-            if (keyword_count[KEYWORD_CHAR] == 1 && non_zero_keyword_counts == 1)
-                arithmetic_body(ARITHMETIC_TYPE_CHAR);
-            if (keyword_count[KEYWORD_CHAR] == 1 && keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_SIGNED_CHAR);
-            if (keyword_count[KEYWORD_CHAR] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_CHAR);
-            if (keyword_count[KEYWORD_SHORT] == 1 && (non_zero_keyword_counts == 1 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 2) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 2) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 3)))
-                arithmetic_body(ARITHMETIC_TYPE_SHORT_INT);
-            if (keyword_count[KEYWORD_SHORT] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && (non_zero_keyword_counts == 2 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 3)))
-                arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_SHORT_INT);
-            if ((keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 1) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 1) ||
-                (keyword_count[KEYWORD_INT] == 1 && keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 2))
-                arithmetic_body(ARITHMETIC_TYPE_INT);
-            if ((keyword_count[KEYWORD_UNSIGNED] == 1 && non_zero_keyword_counts == 1) ||
-                (keyword_count[KEYWORD_INT] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && non_zero_keyword_counts == 2))
-                arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_INT);
-            if (keyword_count[KEYWORD_LONG] == 1 && (non_zero_keyword_counts == 1 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 2) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 2) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 3)))
-                arithmetic_body(ARITHMETIC_TYPE_LONG_INT);
-            if (keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && (non_zero_keyword_counts == 2 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 3)))
-                arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_LONG_INT);
-            if (keyword_count[KEYWORD_LONG] == 2 && (non_zero_keyword_counts == 2 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 3) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && non_zero_keyword_counts == 3) ||
-                (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 4)))
-                arithmetic_body(ARITHMETIC_TYPE_LONG_LONG_INT);
-            if (keyword_count[KEYWORD_LONG] == 2 && keyword_count[KEYWORD_UNSIGNED] == 1 && (non_zero_keyword_counts == 3 ||
-                (keyword_count[KEYWORD_INT] == 1 && non_zero_keyword_counts == 4)))
-                arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT);
-            if (keyword_count[KEYWORD_FLOAT] == 1 && non_zero_keyword_counts == 1)
-                arithmetic_body(ARITHMETIC_TYPE_FLOAT);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && non_zero_keyword_counts == 1)
-                arithmetic_body(ARITHMETIC_TYPE_DOUBLE);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE);
-            if (keyword_count[KEYWORD_FLOAT] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_FLOAT_COMPLEX);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_DOUBLE_COMPLEX);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 &&
-                non_zero_keyword_counts == 3)
-                arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE_COMPLEX);
-            if (keyword_count[KEYWORD_FLOAT] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_FLOAT_IMAGINARY);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 && non_zero_keyword_counts == 2)
-                arithmetic_body(ARITHMETIC_TYPE_DOUBLE_IMAGINARY);
-            if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 &&
-                non_zero_keyword_counts == 3)
-                arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE_IMAGINARY);
-            #undef arithmetic_body
-
-            #define storage_class_body(x) \
+            #define storage_class_if(x, y) \
+            if (keyword_count[(y)] == 1 && tok->keyword_id == (y)) \
             { \
                 s->sc2_type = SPECIFIER_QUALIFIER_STORAGE_CLASS; \
                 s->sc2_storage_class_id = (x); \
-                *toks_ref = tok->next; \
-                return s; \
+                vector_add(v, s); \
             }
-
-            if (keyword_count[KEYWORD_TYPEDEF] == 1 && non_zero_keyword_counts == 1)
-                storage_class_body(STORAGE_CLASS_TYPEDEF);
-            if (keyword_count[KEYWORD_AUTO] == 1 && non_zero_keyword_counts == 1)
-                storage_class_body(STORAGE_CLASS_AUTO);
-            if (keyword_count[KEYWORD_REGISTER] == 1 && non_zero_keyword_counts == 1)
-                storage_class_body(STORAGE_CLASS_REGISTER);
-            if (keyword_count[KEYWORD_STATIC] == 1 && non_zero_keyword_counts == 1)
-                storage_class_body(STORAGE_CLASS_STATIC);
-            if (keyword_count[KEYWORD_EXTERN] == 1 && non_zero_keyword_counts == 1)
-                storage_class_body(STORAGE_CLASS_EXTERN);
-            #undef storage_class_body
-
-            #define qualifier_body(x) \
+            #define qualifier_if(x, y) \
+            if (keyword_count[(y)] == 1 && tok->keyword_id == (y)) \
             { \
                 s->sc2_type = SPECIFIER_QUALIFIER_QUALIFIER; \
                 s->sc2_qualifier_id = (x); \
-                *toks_ref = tok->next; \
-                return s; \
+                vector_add(v, s); \
             }
 
-            if (keyword_count[KEYWORD_CONST] == 1 && non_zero_keyword_counts == 1)
-                qualifier_body(QUALIFIER_CONST);
-            if (keyword_count[KEYWORD_VOLATILE] == 1 && non_zero_keyword_counts == 1)
-                qualifier_body(QUALIFIER_VOLATILE);
-            if (keyword_count[KEYWORD_RESTRICT] == 1 && non_zero_keyword_counts == 1)
-                qualifier_body(QUALIFIER_RESTRICT);
-            #undef qualifier_body
-
-            if (keyword_count[KEYWORD_INLINE] == 1 && non_zero_keyword_counts == 1)
+            // these are the easy type specifiers, arithmetic types come after everything LOL
+            if (keyword_count[KEYWORD_VOID] == 1 && tok->keyword_id == KEYWORD_VOID)
+            {
+                s->sc2_type = SPECIFIER_QUALIFIER_VOID;
+                vector_add(v, s);
+            }
+            else storage_class_if(STORAGE_CLASS_TYPEDEF, KEYWORD_TYPEDEF)
+            else storage_class_if(STORAGE_CLASS_AUTO, KEYWORD_AUTO)
+            else storage_class_if(STORAGE_CLASS_REGISTER, KEYWORD_REGISTER)
+            else storage_class_if(STORAGE_CLASS_STATIC, KEYWORD_STATIC)
+            else storage_class_if(STORAGE_CLASS_EXTERN, KEYWORD_EXTERN)
+            else qualifier_if(QUALIFIER_CONST, KEYWORD_CONST)
+            else qualifier_if(QUALIFIER_VOLATILE, KEYWORD_VOLATILE)
+            else qualifier_if(QUALIFIER_RESTRICT, KEYWORD_RESTRICT)
+            else if (keyword_count[KEYWORD_INLINE] == 1 && tok->keyword_id == KEYWORD_INLINE)
             {
                 s->sc2_type = SPECIFIER_QUALIFIER_FUNCTION;
                 s->sc2_function_id = FUNCTION_SPECIFIER_INLINE;
-                *toks_ref = tok->next;
-                return s;
+                vector_add(v, s);
             }
-
-            if (keyword_count[KEYWORD_STRUCT] == 1 && non_zero_keyword_counts == 1)
+            else if (keyword_count[KEYWORD_STRUCT] == 1 && tok->keyword_id == KEYWORD_STRUCT)
             {
                 s->sc2_type = SPECIFIER_QUALIFIER_STRUCT;
                 s->sc2_struct = maybe_parse_struct_union(unit, &tok);
                 if (!s->sc2_struct)
-                    return NULL;
-                return s;
+                {
+                    free(s);
+                    local_dealloc_null_return;
+                }
+                vector_add(v, s);
             }
-
-            if (keyword_count[KEYWORD_UNION] == 1 && non_zero_keyword_counts == 1)
+            else if (keyword_count[KEYWORD_UNION] == 1 && tok->keyword_id == KEYWORD_UNION)
             {
                 s->sc2_type = SPECIFIER_QUALIFIER_UNION;
                 s->sc2_union = maybe_parse_struct_union(unit, &tok);
                 if (!s->sc2_union)
-                    return NULL;
-                return s;
+                {
+                    free(s);
+                    local_dealloc_null_return;
+                }
+                vector_add(v, s);
             }
-
-            if (keyword_count[KEYWORD_ENUM] == 1 && non_zero_keyword_counts == 1)
+            else if (keyword_count[KEYWORD_ENUM] == 1 && tok->keyword_id == KEYWORD_ENUM)
             {
                 s->sc2_type = SPECIFIER_QUALIFIER_ENUM;
                 s->sc2_enum = maybe_parse_enum(unit, &tok);
                 if (!s->sc2_enum)
-                    return NULL;
-                return s;
+                {
+                    free(s);
+                    local_dealloc_null_return;
+                }
+                vector_add(v, s);
             }
+            else
+                free(s);
+            
+            tok = tok->next;
+            
+            #undef storage_class_body
+            #undef qualifier_body
         }
         else if (tok->type == LEXER_TOKEN_IDENTIFIER)
         {
-            syntax_component_t* maybe_typedef = find_typedef(unit, tok->string_value);
-            null_protection(maybe_typedef);
+            syntax_component_t* typedef_declaration, * typedef_declarator;
+            find_typedef(&typedef_declaration, &typedef_declarator, unit, tok->string_value);
+            if (!typedef_declarator)
+            {
+                free(s);
+                break;
+            }
             s->sc2_type = SPECIFIER_QUALIFIER_TYPEDEF;
-            s->sc2_typedef = maybe_typedef;
-            *toks_ref = tok->next;
-            return s;
+            s->sc2_typedef_declaration = typedef_declaration;
+            s->sc2_typedef_declarator = typedef_declarator;
+            tok = tok->next;
+            vector_add(v, s);
         }
         else
+        {
+            free(s);
             break;
+        }
     }
-    dealloc_null_return;
+
+    syntax_component_t* arith_type_specifier = calloc(1, sizeof *arith_type_specifier);
+    arith_type_specifier->type = SYNTAX_COMPONENT_SPECIFIER_QUALIFIER;
+    arith_type_specifier->sc2_type = SPECIFIER_QUALIFIER_ARITHMETIC_TYPE;
+
+    #define arithmetic_body(x) \
+    { \
+        arith_type_specifier->sc2_arithmetic_type_id = (x); \
+        vector_add(v, arith_type_specifier); \
+    }
+
+    if (keyword_count[KEYWORD_BOOL] == 1 && arithmetic_keyword_counts == 1)
+        arithmetic_body(ARITHMETIC_TYPE_BOOL)
+    else if (keyword_count[KEYWORD_CHAR] == 1 && arithmetic_keyword_counts == 1)
+        arithmetic_body(ARITHMETIC_TYPE_CHAR)
+    else if (keyword_count[KEYWORD_CHAR] == 1 && keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_SIGNED_CHAR)
+    else if (keyword_count[KEYWORD_CHAR] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_CHAR)
+    else if (keyword_count[KEYWORD_SHORT] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && (arithmetic_keyword_counts == 2 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_SHORT_INT)
+    else if (keyword_count[KEYWORD_SHORT] == 1 && (arithmetic_keyword_counts == 1 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_SHORT_INT)
+    else if ((keyword_count[KEYWORD_UNSIGNED] == 1 && arithmetic_keyword_counts == 1) ||
+        (keyword_count[KEYWORD_INT] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && arithmetic_keyword_counts == 2))
+        arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_INT)
+    else if ((keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 1) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 1) ||
+        (keyword_count[KEYWORD_INT] == 1 && keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 2))
+        arithmetic_body(ARITHMETIC_TYPE_INT)
+    else if (keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_UNSIGNED] == 1 && (arithmetic_keyword_counts == 2 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_LONG_INT)
+    else if (keyword_count[KEYWORD_LONG] == 1 && (arithmetic_keyword_counts == 1 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_LONG_INT)
+    else if (keyword_count[KEYWORD_LONG] == 2 && keyword_count[KEYWORD_UNSIGNED] == 1 && (arithmetic_keyword_counts == 2 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT)
+    else if (keyword_count[KEYWORD_LONG] == 2 && (arithmetic_keyword_counts == 1 ||
+        (keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && arithmetic_keyword_counts == 2) ||
+        (keyword_count[KEYWORD_SIGNED] == 1 && keyword_count[KEYWORD_INT] == 1 && arithmetic_keyword_counts == 3)))
+        arithmetic_body(ARITHMETIC_TYPE_LONG_LONG_INT)
+    else if (keyword_count[KEYWORD_FLOAT] == 1 && arithmetic_keyword_counts == 1)
+        arithmetic_body(ARITHMETIC_TYPE_FLOAT)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && arithmetic_keyword_counts == 1)
+        arithmetic_body(ARITHMETIC_TYPE_DOUBLE)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE)
+    else if (keyword_count[KEYWORD_FLOAT] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_FLOAT_COMPLEX)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_DOUBLE_COMPLEX)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_COMPLEX] == 1 &&
+        arithmetic_keyword_counts == 3)
+        arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE_COMPLEX)
+    else if (keyword_count[KEYWORD_FLOAT] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_FLOAT_IMAGINARY)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 && arithmetic_keyword_counts == 2)
+        arithmetic_body(ARITHMETIC_TYPE_DOUBLE_IMAGINARY)
+    else if (keyword_count[KEYWORD_DOUBLE] == 1 && keyword_count[KEYWORD_LONG] == 1 && keyword_count[KEYWORD_IMAGINARY] == 1 &&
+        arithmetic_keyword_counts == 3)
+        arithmetic_body(ARITHMETIC_TYPE_LONG_DOUBLE_IMAGINARY)
+    else
+        free(arith_type_specifier);
+
+    #undef local_dealloc_null_return
+    #undef is_arithmetic_type_keyword
+
+    *toks_ref = tok;
+    return v;
 }
 
 syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_t** toks_ref)
@@ -372,6 +364,8 @@ syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_
 
 syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
+    // TODO fix this code lol
+
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_DECLARATOR;
     lexer_token_t* tok = *toks_ref;
@@ -414,8 +408,13 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
         *toks_ref = tok;
         return s;
     }
+    if (tok->type != LEXER_TOKEN_IDENTIFIER && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '(') &&
+        (tok->type != LEXER_TOKEN_OPERATOR || tok->operator_id != '*'))
+        dealloc_null_return;
     syntax_component_t* subdeclarator = maybe_parse_declarator(unit, &tok);
     if (!subdeclarator)
+        dealloc_null_return;
+    if (subdeclarator->sc3_type == DECLARATOR_POINTER) // only noptr declarators
         dealloc_null_return;
     if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
     {
@@ -496,13 +495,38 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
     dealloc_null_return;
 }
 
-syntax_component_t* maybe_parse_initializer_list(syntax_component_t* unit, lexer_token_t** toks_ref)
+syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     syntax_component_t* s = calloc(1, sizeof *s);
-    s->type = SYNTAX_COMPONENT_INITIALIZER;
+    s->type = SYNTAX_COMPONENT_DESIGNATOR;
+    s->sc8_array_designator_expression = NULL;
+    s->sc8_struct_designator_identifier = NULL;
     lexer_token_t* tok = *toks_ref;
-
-    dealloc_null_return;
+    if (tok->type != LEXER_TOKEN_OPERATOR)
+        dealloc_null_return;
+    if (tok->operator_id == '.')
+    {
+        safe_lexer_token_next(tok);
+        if (tok->type != LEXER_TOKEN_IDENTIFIER)
+            dealloc_null_return;
+        s->sc8_struct_designator_identifier = tok->string_value;
+        safe_lexer_token_next(tok);
+    }
+    else if (tok->operator_id == '[')
+    {
+        safe_lexer_token_next(tok);
+        syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+        if (!expr)
+            dealloc_null_return;
+        s->sc8_array_designator_expression = expr;
+        if (tok->type != LEXER_TOKEN_OPERATOR)
+            dealloc_null_return;
+        if (tok->operator_id != ']')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+    }
+    *toks_ref = tok;
+    return s;
 }
 
 syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref)
@@ -510,15 +534,47 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_INITIALIZER;
     lexer_token_t* tok = *toks_ref;
-    if (tok->type != LEXER_TOKEN_OPERATOR)
-        dealloc_null_return;
-    if (tok->operator_id != '=')
-        dealloc_null_return;
-    safe_lexer_token_next(tok);
+    if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '=')
+        safe_lexer_token_next(tok);
     if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '{') // initializer list
     {
+        safe_lexer_token_next(tok);
         s->sc4_type = INITIALIZER_LIST;
-        // TODO initializer list stuff
+        s->sc4_initializer_list = vector_init();
+        for (;;)
+        {
+            syntax_component_t* initializer = maybe_parse_initializer(unit, &tok);
+            if (!initializer)
+            {
+                initializer = calloc(1, sizeof *initializer);
+                initializer->sc4_type = INITIALIZER_DESIGNATION;
+                initializer->sc4_designator_list = vector_init();
+                for (;;)
+                {
+                    syntax_component_t* designator = maybe_parse_designator(unit, &tok);
+                    if (!designator)
+                        break;
+                    vector_add(initializer->sc4_designator_list, designator);
+                }
+                if (tok->type != LEXER_TOKEN_OPERATOR)
+                    dealloc_null_return;
+                if (tok->operator_id != '=')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* subinitializer = maybe_parse_initializer(unit, &tok);
+                if (!subinitializer)
+                    dealloc_null_return;
+                initializer->sc4_subinitializer = subinitializer;
+            }
+            vector_add(s->sc4_initializer_list, initializer);
+            if (tok->type == LEXER_TOKEN_OPERATOR && tok->separator_id == ',')
+                safe_lexer_token_next(tok)
+            else if (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}')
+                dealloc_null_return
+            else
+                break;
+        }
+        tok = tok->next;
     }
     else // expression
     {
@@ -528,11 +584,7 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
             dealloc_null_return;
         s->sc4_expression = expr;
     }
-    if (tok->type != LEXER_TOKEN_SEPARATOR)
-        dealloc_null_return;
-    if (tok->separator_id != ';')
-        dealloc_null_return;
-    *toks_ref = tok->next;
+    *toks_ref = tok;
     return s;
 }
 
@@ -541,8 +593,54 @@ syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_toke
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_DECLARATION;
     lexer_token_t* tok = *toks_ref;
-    // TODO
-    dealloc_null_return;
+    s->sc1_specifiers_qualifiers = maybe_parse_specifiers_qualifiers(unit, &tok);
+    if (!s->sc1_specifiers_qualifiers)
+        dealloc_null_return;
+    s->sc1_declarators = vector_init();
+    s->sc1_initializers = vector_init();
+
+    // do some checking here to ensure there is at least one type specifier
+    bool found_type_specifier = false;
+    for (unsigned i = 0; i < s->sc1_specifiers_qualifiers->size; ++i)
+    {
+        syntax_component_t* spec_qual = vector_get(s->sc1_specifiers_qualifiers, i);
+        unsigned type = spec_qual->sc2_type;
+        if (type == SPECIFIER_QUALIFIER_VOID ||
+            type == SPECIFIER_QUALIFIER_ARITHMETIC_TYPE ||
+            type == SPECIFIER_QUALIFIER_TYPEDEF ||
+            type == SPECIFIER_QUALIFIER_STRUCT ||
+            type == SPECIFIER_QUALIFIER_UNION ||
+            type == SPECIFIER_QUALIFIER_ENUM)
+        {
+            found_type_specifier = true;
+            break;
+        }
+    }
+    if (!found_type_specifier)
+        dealloc_null_return;
+    for (;;)
+    {
+        syntax_component_t* declarator = maybe_parse_declarator(unit, &tok);
+        if (!declarator)
+            break;
+        vector_add(s->sc1_declarators, declarator);
+        syntax_component_t* initializer = maybe_parse_initializer(unit, &tok);
+        vector_add(s->sc1_initializers, initializer);
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id == ',')
+            safe_lexer_token_next(tok)
+        else if (tok->separator_id == ';')
+            break;
+        else
+            dealloc_null_return;
+    }
+    if (tok->type != LEXER_TOKEN_SEPARATOR)
+        dealloc_null_return;
+    if (tok->separator_id != ';')
+        dealloc_null_return;
+    *toks_ref = tok->next;
+    return s;
 }
 
 syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref)

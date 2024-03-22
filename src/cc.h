@@ -41,6 +41,40 @@
 #define SPECIFIER_QUALIFIER_FUNCTION 7
 #define SPECIFIER_QUALIFIER_QUALIFIER 8
 
+#define ARITHMETIC_TYPE_CHAR 0
+#define ARITHMETIC_TYPE_SIGNED_CHAR 1
+#define ARITHMETIC_TYPE_UNSIGNED_CHAR 2
+#define ARITHMETIC_TYPE_SHORT_INT 3
+#define ARITHMETIC_TYPE_UNSIGNED_SHORT_INT 4
+#define ARITHMETIC_TYPE_INT 5
+#define ARITHMETIC_TYPE_UNSIGNED_INT 6
+#define ARITHMETIC_TYPE_LONG_INT 7
+#define ARITHMETIC_TYPE_UNSIGNED_LONG_INT 8
+#define ARITHMETIC_TYPE_LONG_LONG_INT 9
+#define ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT 10
+#define ARITHMETIC_TYPE_FLOAT 11
+#define ARITHMETIC_TYPE_DOUBLE 12
+#define ARITHMETIC_TYPE_LONG_DOUBLE 13
+#define ARITHMETIC_TYPE_BOOL 14
+#define ARITHMETIC_TYPE_FLOAT_COMPLEX 15
+#define ARITHMETIC_TYPE_DOUBLE_COMPLEX 16
+#define ARITHMETIC_TYPE_LONG_DOUBLE_COMPLEX 17
+#define ARITHMETIC_TYPE_FLOAT_IMAGINARY 18
+#define ARITHMETIC_TYPE_DOUBLE_IMAGINARY 19
+#define ARITHMETIC_TYPE_LONG_DOUBLE_IMAGINARY 20
+
+#define STORAGE_CLASS_TYPEDEF 0
+#define STORAGE_CLASS_AUTO 1
+#define STORAGE_CLASS_REGISTER 2
+#define STORAGE_CLASS_STATIC 3
+#define STORAGE_CLASS_EXTERN 4
+
+#define QUALIFIER_CONST 0
+#define QUALIFIER_VOLATILE 1
+#define QUALIFIER_RESTRICT 2
+
+#define FUNCTION_SPECIFIER_INLINE 0
+
 #define DECLARATOR_IDENTIFIER 0
 #define DECLARATOR_NEST 1
 #define DECLARATOR_POINTER 2
@@ -49,6 +83,7 @@
 
 #define INITIALIZER_EXPRESSION 0
 #define INITIALIZER_LIST 1
+#define INITIALIZER_DESIGNATION 2
 
 #define STATEMENT_LABELED 0
 #define STATEMENT_COMPOUND 1
@@ -157,40 +192,6 @@
 #define KEYWORD_COMPLEX 35
 #define KEYWORD_IMAGINARY 36
 
-#define ARITHMETIC_TYPE_CHAR 0
-#define ARITHMETIC_TYPE_SIGNED_CHAR 1
-#define ARITHMETIC_TYPE_UNSIGNED_CHAR 2
-#define ARITHMETIC_TYPE_SHORT_INT 3
-#define ARITHMETIC_TYPE_UNSIGNED_SHORT_INT 4
-#define ARITHMETIC_TYPE_INT 5
-#define ARITHMETIC_TYPE_UNSIGNED_INT 6
-#define ARITHMETIC_TYPE_LONG_INT 7
-#define ARITHMETIC_TYPE_UNSIGNED_LONG_INT 8
-#define ARITHMETIC_TYPE_LONG_LONG_INT 9
-#define ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT 10
-#define ARITHMETIC_TYPE_FLOAT 11
-#define ARITHMETIC_TYPE_DOUBLE 12
-#define ARITHMETIC_TYPE_LONG_DOUBLE 13
-#define ARITHMETIC_TYPE_BOOL 14
-#define ARITHMETIC_TYPE_FLOAT_COMPLEX 15
-#define ARITHMETIC_TYPE_DOUBLE_COMPLEX 16
-#define ARITHMETIC_TYPE_LONG_DOUBLE_COMPLEX 17
-#define ARITHMETIC_TYPE_FLOAT_IMAGINARY 18
-#define ARITHMETIC_TYPE_DOUBLE_IMAGINARY 19
-#define ARITHMETIC_TYPE_LONG_DOUBLE_IMAGINARY 20
-
-#define STORAGE_CLASS_TYPEDEF 0
-#define STORAGE_CLASS_AUTO 1
-#define STORAGE_CLASS_REGISTER 2
-#define STORAGE_CLASS_STATIC 3
-#define STORAGE_CLASS_EXTERN 4
-
-#define QUALIFIER_CONST 0
-#define QUALIFIER_VOLATILE 1
-#define QUALIFIER_RESTRICT 2
-
-#define FUNCTION_SPECIFIER_INLINE 0
-
 typedef struct lexer_token_t
 {
     unsigned type;
@@ -220,6 +221,7 @@ typedef struct vector_t
 } vector_t;
 
 // THE GREATEST STRUCT OF ALL TIME
+// unless otherwise specified, vectors will not contain null pointers.
 typedef struct syntax_component_t
 {
     unsigned type;
@@ -234,6 +236,7 @@ typedef struct syntax_component_t
             vector_t* sc1_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
             vector_t* sc1_declarators; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATOR)
             // the corresponding declarator for each initializer should be at the same index as the declarator
+            // declarators without initializers will have a NULL at their index in the initializer vector
             vector_t* sc1_initializers; // <syntax_component_t> (SYNTAX_COMPONENT_INITIALIZER)
         };
 
@@ -244,7 +247,11 @@ typedef struct syntax_component_t
             union
             {
                 unsigned sc2_arithmetic_type_id;
-                struct syntax_component_t* sc2_typedef; // (SYNTAX_COMPONENT_DECLARATION)
+                struct
+                {
+                    struct syntax_component_t* sc2_typedef_declaration; // (SYNTAX_COMPONENT_DECLARATION)
+                    struct syntax_component_t* sc2_typedef_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
+                };
                 struct syntax_component_t* sc2_struct; // (SYNTAX_COMPONENT_STRUCT_UNION)
                 struct syntax_component_t* sc2_union; // (SYNTAX_COMPONENT_STRUCT_UNION)
                 struct syntax_component_t* sc2_enum; // (SYNTAX_COMPONENT_ENUM)
@@ -277,13 +284,9 @@ typedef struct syntax_component_t
                 struct
                 {
                     struct syntax_component_t* sc3_function_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                    union
-                    {
-                        vector_t* sc3_function_parameters; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
-                        vector_t* sc3_function_identifiers; // <char*>
-                    };
+                    vector_t* sc3_function_parameters; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
+                    vector_t* sc3_function_identifiers; // <char*>
                 };
-                
             };
         };
 
@@ -297,7 +300,7 @@ typedef struct syntax_component_t
                 vector_t* sc4_initializer_list; // <syntax_component_t> (SYNTAX_COMPONENT_INITIALIZER)
                 struct
                 {
-                    struct syntax_component_t* sc4_designator; // (SYNTAX_COMPONENT_EXPRESSION)
+                    struct vector_t* sc4_designator_list; // <syntax_component_t> (SYNTAX_COMPONENT_DESIGNATOR)
                     struct syntax_component_t* sc4_subinitializer; // (SYNTAX_COMPONENT_INITIALIZER)
                 };
             };
@@ -549,9 +552,35 @@ void set_print(set_t* s, void (*printer)(void*));
 
 /* const.c */
 extern const char* KEYWORDS[37];
+extern const char* SYNTAX_COMPONENT_NAMES[15];
+extern const char* SPECIFIER_QUALIFIER_NAMES[9];
+extern const char* ARITHMETIC_TYPE_NAMES[21];
+extern const char* STORAGE_CLASS_NAMES[5];
+extern const char* QUALIFIER_NAMES[3];
+extern const char* FUNCTION_SPECIFIER_NAMES[1];
+extern const char* DECLARATOR_NAMES[5];
+extern const char* INITIALIZER_NAMES[3];
+extern const char* STATEMENT_NAMES[6];
+extern const char* STATEMENT_LABELED_NAMES[3];
+extern const char* STATEMENT_SELECTION_NAMES[3];
+extern const char* STATEMENT_ITERATION_NAMES[4];
+extern const char* STATEMENT_JUMP_NAMES[4];
+extern const char* EXPRESSION_NAMES[38];
+extern const char* DIRECT_ABSTRACT_DECLARATOR_NAMES[3];
+extern const char* BOOL_NAMES[2];
 
 /* lex.c */
 lexer_token_t* lex(FILE* file);
 void lex_delete(lexer_token_t* start);
+
+/* parse.c */
+syntax_component_t* parse(lexer_token_t* toks);
+
+/* syntax.c */
+syntax_component_t* dig_declarator(syntax_component_t* declarator);
+syntax_component_t* dig_declarator_identifier(syntax_component_t* declarator);
+unsigned count_specifiers(syntax_component_t* declaration, unsigned type);
+void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
+void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
 
 #endif
