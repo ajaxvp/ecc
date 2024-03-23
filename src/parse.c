@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "cc.h"
 
@@ -20,6 +21,10 @@
 //
 // a maybe function may change the reference of the second parameter to be a null pointer.
 
+// i'm introducing something new for left recursive grammars:
+// maybe_parse_(grammar)_extension
+// these functions will create a superstructure of the current syntax component being worked on.
+
 // FORWARD DECLARATIONS
 syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_enum(syntax_component_t* unit, lexer_token_t** toks_ref);
@@ -30,7 +35,24 @@ syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token
 syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_primary_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_postfix_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_unary_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_cast_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_multiplicative_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_additive_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_shift_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_relational_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_equality_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_and_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_xor_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_or_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_logical_and_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_logical_or_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_conditional_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_assignment_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_constant_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* parse(lexer_token_t* toks);
@@ -126,6 +148,23 @@ syntax_component_t* maybe_parse_enum(syntax_component_t* unit, lexer_token_t** t
         safe_lexer_token_next(tok); // move past ending brace
     }
     *toks_ref = tok;
+    return s;
+}
+
+syntax_component_t* maybe_parse_type_name(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_TYPE_NAME;
+    null_protection(*toks_ref);
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* specs_quals = maybe_parse_specifiers_qualifiers(unit, &tok);
+    if (!specs_quals)
+        dealloc_null_return;
+    syntax_component_t* declarator = maybe_parse_declarator(unit, &tok);
+    if (!declarator)
+        dealloc_null_return;
+    s->sc12_specifiers_qualifiers = specs_quals;
+    s->sc12_declarator = declarator;
     return s;
 }
 
@@ -363,11 +402,118 @@ syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_
     return s;
 }
 
+syntax_component_t* maybe_parse_declarator_extension(syntax_component_t* unit, syntax_component_t* super, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) return NULL;
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_DECLARATOR;
+    if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '[')
+    {
+        safe_lexer_token_next(tok);
+        s->sc3_type = DECLARATOR_ARRAY;
+        s->sc3_array_static = false;
+        if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
+        {
+            s->sc3_array_static = true;
+            safe_lexer_token_next(tok);
+        }
+        s->sc3_array_qualifiers = vector_init();
+        s->sc3_array_expression = NULL;
+        s->sc3_array_subdeclarator = super;
+        for (;;)
+        {
+            syntax_component_t* qualifier = maybe_parse_qualifier(unit, &tok);
+            if (!qualifier)
+                break;
+            vector_add(s->sc3_array_qualifiers, qualifier);
+        }
+        if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
+        {
+            if (s->sc3_array_static)
+                dealloc_null_return;
+            s->sc3_array_static = true;
+            safe_lexer_token_next(tok);
+        }
+        if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
+        {
+            if (s->sc3_array_static)
+                dealloc_null_return;
+            safe_lexer_token_next(tok);
+        }
+        else
+            s->sc3_array_expression = maybe_parse_expression(unit, &tok);
+        if (tok->type != LEXER_TOKEN_OPERATOR)
+            dealloc_null_return;
+        if (tok->operator_id != ']')
+            dealloc_null_return;
+        tok = tok->next;
+    }
+    else if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
+    {
+        safe_lexer_token_next(tok);
+        s->sc3_type = DECLARATOR_FUNCTION;
+        bool old_style = tok->type == LEXER_TOKEN_IDENTIFIER || (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ')');
+        s->sc3_function_subdeclarator = super;
+        if (old_style)
+            s->sc3_function_identifiers = vector_init();
+        else
+            s->sc3_function_parameters = vector_init();
+        while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
+        {
+            if (old_style)
+            {
+                if (tok->type != LEXER_TOKEN_IDENTIFIER)
+                    dealloc_null_return;
+                vector_add(s->sc3_function_identifiers, tok->string_value);
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+            }
+            else
+            {
+                syntax_component_t* decl = maybe_parse_parameter_declaration(unit, &tok);
+                if (!decl)
+                    dealloc_null_return;
+                if (decl->sc15_ellipsis && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
+                    dealloc_null_return;
+                vector_add(s->sc3_function_parameters, decl);
+            }
+            if (tok->type != LEXER_TOKEN_SEPARATOR)
+                dealloc_null_return;
+            if (tok->separator_id == ',')
+                safe_lexer_token_next(tok)
+            else if (tok->separator_id != ')')
+                dealloc_null_return;
+        }
+        tok = tok->next;
+    }
+    else
+        dealloc_null_return;
+    syntax_component_t* sub = maybe_parse_declarator_extension(unit, s, &tok);
+    *toks_ref = tok;
+    return sub ? sub : s;
+}
+
+/*
+    GRAMMAR
+
+    declarator:
+        identifier declarator-extend
+        "(" declarator ")"
+        "*" [qualifiers] declarator
+
+    declarator-extend:
+        "[" ["static"] [qualifiers] expression "]" declarator-extend
+        "[" [qualifiers] ["static"] expression "]" declarator-extend
+        "[" [qualifiers] "*" "]" declarator-extend
+        "(" parameters-or-identifiers ")" declarator-extend
+        ""
+*/
 syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_DECLARATOR;
-    s->sc3_type = (unsigned) -1;
     lexer_token_t* tok = *toks_ref;
     if (tok->type == LEXER_TOKEN_IDENTIFIER)
     {
@@ -402,105 +548,10 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
         syntax_component_t* subdeclarator = maybe_parse_declarator(unit, &tok);
         s->sc3_pointer_subdeclarator = subdeclarator;
     }
-
-    if (s->sc3_type == (unsigned) -1)
+    else
         dealloc_null_return;
-
-    #define super_dealloc_null_return { free(s); free(ss); return NULL; }
-
-    for (;;)
-    {
-        if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
-        {
-            syntax_component_t* ss = calloc(1, sizeof *ss);
-            safe_lexer_token_next(tok);
-            ss->type = SYNTAX_COMPONENT_DECLARATOR;
-            ss->sc3_type = DECLARATOR_FUNCTION;
-            bool old_style = tok->type == LEXER_TOKEN_IDENTIFIER || (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ')');
-            ss->sc3_function_subdeclarator = s;
-            if (old_style)
-                ss->sc3_function_identifiers = vector_init();
-            else
-                ss->sc3_function_parameters = vector_init();
-            while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
-            {
-                if (old_style)
-                {
-                    if (tok->type != LEXER_TOKEN_IDENTIFIER)
-                        super_dealloc_null_return;
-                    vector_add(ss->sc3_function_identifiers, tok->string_value);
-                    safe_lexer_token_next(tok);
-                    if (tok->type != LEXER_TOKEN_SEPARATOR)
-                        super_dealloc_null_return;
-                }
-                else
-                {
-                    syntax_component_t* decl = maybe_parse_parameter_declaration(unit, &tok);
-                    if (!decl)
-                        super_dealloc_null_return;
-                    if (decl->sc15_ellipsis && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
-                        super_dealloc_null_return;
-                    vector_add(ss->sc3_function_parameters, decl);
-                }
-                if (tok->type != LEXER_TOKEN_SEPARATOR)
-                    super_dealloc_null_return;
-                if (tok->separator_id == ',')
-                    safe_lexer_token_next(tok)
-                else if (tok->separator_id != ')')
-                    super_dealloc_null_return;
-            }
-            tok = tok->next;
-            s = ss;
-        }
-        else if (tok->type == LEXER_TOKEN_OPERATOR && tok->separator_id == '[')
-        {
-            safe_lexer_token_next(tok);
-            syntax_component_t* ss = calloc(1, sizeof *ss);
-            ss->type = SYNTAX_COMPONENT_DECLARATOR;
-            ss->sc3_type = DECLARATOR_ARRAY;
-            ss->sc3_array_static = false;
-            ss->sc3_array_subdeclarator = s;
-            if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
-            {
-                ss->sc3_array_static = true;
-                safe_lexer_token_next(tok);
-            }
-            ss->sc3_array_qualifiers = vector_init();
-            ss->sc3_array_expression = NULL;
-            for (;;)
-            {
-                syntax_component_t* qualifier = maybe_parse_qualifier(unit, &tok);
-                if (!qualifier)
-                    break;
-                vector_add(ss->sc3_array_qualifiers, qualifier);
-            }
-            if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
-            {
-                if (ss->sc3_array_static)
-                    super_dealloc_null_return;
-                ss->sc3_array_static = true;
-                safe_lexer_token_next(tok);
-            }
-            if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
-            {
-                if (ss->sc3_array_static)
-                    super_dealloc_null_return;
-                safe_lexer_token_next(tok);
-            }
-            else
-                ss->sc3_array_expression = maybe_parse_expression(unit, &tok);
-            if (tok->type != LEXER_TOKEN_OPERATOR)
-                super_dealloc_null_return;
-            if (tok->operator_id != ']')
-                super_dealloc_null_return;
-            tok = tok->next;
-            s = ss;
-        }
-        else
-            break;
-    }
-    
-    #undef super_dealloc_null_return
+    syntax_component_t* ext = maybe_parse_declarator_extension(unit, s, &tok);
+    if (ext) s = ext;
     *toks_ref = tok;
     return s;
 }
@@ -675,13 +726,530 @@ syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, 
     return s;
 }
 
+static bool c(unsigned lhs, unsigned len, ...)
+{
+    va_list args;
+    va_start(args, len);
+    for (unsigned i = 0; i < len; ++i)
+        if (lhs == va_arg(args, unsigned))
+        {
+            va_end(args);
+            return true;
+        }
+    va_end(args);
+    return false;
+}
+
+syntax_component_t* maybe_parse_primary_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) return NULL;
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_EXPRESSION;
+    s->sc11_type = EXPRESSION_PRIMARY;
+    if (tok->type == LEXER_TOKEN_IDENTIFIER)
+    {
+        s->sc11_primary_type = EXPRESSION_PRIMARY_IDENTIFIER;
+        s->sc11_primary_identifier = tok->string_value;
+    }
+    else if (tok->type == LEXER_TOKEN_INTEGER_CONSTANT)
+    {
+        s->sc11_primary_type = EXPRESSION_PRIMARY_INTEGER_CONSTANT;
+        s->sc11_primary_integer_constant = 0; // TODO
+    }
+    else if (tok->type == LEXER_TOKEN_CHARACTER_CONSTANT)
+    {
+        s->sc11_primary_type = EXPRESSION_PRIMARY_INTEGER_CONSTANT;
+        s->sc11_primary_integer_constant = 0; // TODO
+    }
+    else if (tok->type == LEXER_TOKEN_FLOATING_CONSTANT)
+    {
+        s->sc11_primary_type = EXPRESSION_PRIMARY_FLOATING_CONSTANT;
+        s->sc11_primary_floating_constant = 0.0L; // TODO
+    }
+    else if (tok->type == LEXER_TOKEN_STRING_CONSTANT)
+    {
+        s->sc11_primary_type = EXPRESSION_PRIMARY_STRING_LITERAL;
+        s->sc11_primary_string_literal = tok->string_value; // TODO
+    }
+    else if (tok->type == LEXER_TOKEN_SEPARATOR)
+    {
+        if (tok->separator_id != '(')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+        syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+        if (!expr)
+            dealloc_null_return;
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id != ')')
+            dealloc_null_return;
+        s->sc11_primary_type = EXPRESSION_PRIMARY_NEST;
+        s->sc11_primary_nested_expression = expr;
+    }
+    else
+        dealloc_null_return;
+    *toks_ref = tok->next;
+    return s;
+}
+
+syntax_component_t* maybe_parse_postfix_expression_extension(syntax_component_t* unit, syntax_component_t* super, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) return NULL;
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_EXPRESSION;
+    s->sc11_type = EXPRESSION_POSTFIX;
+    if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
+    {
+        safe_lexer_token_next(tok);
+        s->sc11_postfix_type = EXPRESSION_POSTFIX_FUNCTION_CALL;
+        s->sc11_postfix_argument_list = vector_init();
+        for (;;)
+        {
+            syntax_component_t* expr = maybe_parse_assignment_expression(unit, &tok);
+            if (!expr)
+                break;
+            vector_add(s->sc11_postfix_argument_list, expr);
+            if (tok->type != LEXER_TOKEN_SEPARATOR)
+                dealloc_null_return;
+            if (tok->separator_id == ',')
+                safe_lexer_token_next(tok)
+            else if (tok->separator_id != ')')
+                dealloc_null_return
+            else
+                break;
+        }
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id != ')')
+            dealloc_null_return;
+        tok = tok->next;
+    }
+    else if (tok->type == LEXER_TOKEN_OPERATOR)
+    {
+        if (tok->operator_id == '[')
+        {
+            safe_lexer_token_next(tok);
+            s->sc11_postfix_type = EXPRESSION_POSTFIX_SUBSCRIPT;
+            s->sc11_postfix_subscript_expression = maybe_parse_expression(unit, &tok);
+            if (!s->sc11_postfix_subscript_expression)
+                dealloc_null_return;
+            if (tok->type != LEXER_TOKEN_OPERATOR)
+                dealloc_null_return;
+            if (tok->operator_id != ']')
+                dealloc_null_return;
+            tok = tok->next;
+        }
+        else if (tok->operator_id == '.' || tok->operator_id == '-' * '>')
+        {
+            safe_lexer_token_next(tok);
+            s->sc11_postfix_type = tok->operator_id == '.' ? EXPRESSION_POSTFIX_MEMBER : EXPRESSION_POSTFIX_PTR_MEMBER;
+            if (tok->type != LEXER_TOKEN_IDENTIFIER)
+                dealloc_null_return;
+            s->sc11_postfix_member_identifier = tok->string_value;
+            tok = tok->next;
+        }
+        else if (tok->operator_id == '+' * '+' || tok->operator_id == '-' * '-')
+        {
+            s->sc11_postfix_type = tok->operator_id == '+' * '+' ? EXPRESSION_POSTFIX_INCREMENT : EXPRESSION_POSTFIX_DECREMENT;
+            tok = tok->next;
+        }
+        else
+            dealloc_null_return;
+    }
+    else
+        dealloc_null_return;
+    syntax_component_t* sub = maybe_parse_declarator_extension(unit, s, &tok);
+    *toks_ref = tok;
+    return sub ? sub : s;
+}
+
+syntax_component_t* maybe_parse_postfix_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* s = maybe_parse_primary_expression(unit, &tok);
+    if (!s)
+    {
+        if (!tok) return NULL;
+        s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_EXPRESSION;
+        s->sc11_type = EXPRESSION_POSTFIX;
+        s->sc11_postfix_type = EXPRESSION_POSTFIX_COMPOUND_LITERAL;
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id != '(')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+        syntax_component_t* type = maybe_parse_type_name(unit, &tok);
+        if (!type)
+            dealloc_null_return;
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id != ')')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+        syntax_component_t* init_list = maybe_parse_initializer(unit, &tok);
+        if (!init_list)
+            dealloc_null_return;
+        if (!init_list->sc4_type != INITIALIZER_LIST)
+            dealloc_null_return;
+        s->sc11_postfix_type_name = type;
+        s->sc11_postfix_initializer_list = init_list;
+    }
+    syntax_component_t* ext = maybe_parse_postfix_expression_extension(unit, s, &tok);
+    *toks_ref = tok;
+    return ext ? ext : s;
+}
+
+syntax_component_t* maybe_parse_unary_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* s = maybe_parse_postfix_expression(unit, &tok);
+    if (!s)
+    {
+        s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_EXPRESSION;
+        s->sc11_type = EXPRESSION_UNARY;
+        if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_SIZEOF)
+        {
+            s->sc11_operator_id = (unsigned) 'sizeof';
+            safe_lexer_token_next(tok);
+            if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
+            {
+                safe_lexer_token_next(tok);
+                syntax_component_t* type = maybe_parse_type_name(unit, &tok);
+                if (!type)
+                    dealloc_null_return;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                s->sc11_unary_type = type;
+                tok = tok->next;
+            }
+            else
+            {
+                syntax_component_t* nested = maybe_parse_unary_expression(unit, &tok);
+                if (!nested)
+                    dealloc_null_return;
+                s->sc11_unary_nested_expression = nested;
+            }
+        }
+        else if (tok->type == LEXER_TOKEN_OPERATOR)
+        {
+            s->sc11_operator_id = tok->operator_id;
+            if (tok->operator_id == '+' * '+' || tok->operator_id == '-' * '-')
+            {
+                safe_lexer_token_next(tok);
+                syntax_component_t* nested = maybe_parse_unary_expression(unit, &tok);
+                if (!nested)
+                    dealloc_null_return;
+                s->sc11_unary_nested_expression = nested;
+            }
+            else if (is_unary_operator_token(tok))
+            {
+                safe_lexer_token_next(tok);
+                syntax_component_t* cast = maybe_parse_cast_expression(unit, &tok);
+                if (!cast)
+                    dealloc_null_return;
+                s->sc11_unary_cast_expression = cast;
+            }
+            else
+                dealloc_null_return;
+        }
+        else
+            dealloc_null_return;
+    }
+    *toks_ref = tok;
+    return s;
+}
+
+syntax_component_t* maybe_parse_cast_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* s = maybe_parse_unary_expression(unit, &tok);
+    if (!s)
+    {
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            return NULL;
+        if (tok->separator_id != '(')
+            return NULL;
+        safe_lexer_token_next(tok);
+        s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_EXPRESSION;
+        s->sc11_type = EXPRESSION_CAST;
+        s->sc11_operator_id = '(' * ')';
+        s->sc11_cast_type = maybe_parse_type_name(unit, &tok);
+        if (!s->sc11_cast_type)
+            dealloc_null_return;
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id != ')')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+        syntax_component_t* nested = maybe_parse_cast_expression(unit, &tok);
+        if (!nested)
+            dealloc_null_return;
+        s->sc11_cast_nested_expression = nested;
+    }
+    *toks_ref = tok;
+    return s;
+}
+
+#define generate_maybe_parse_binary_operator_expression(name, t, subfunc, l, r, ...) \
+    syntax_component_t* maybe_parse_##name##_expression_extension(syntax_component_t* unit, syntax_component_t* super, lexer_token_t** toks_ref) \
+    { \
+        lexer_token_t* tok = *toks_ref; \
+        if (!tok) return NULL; \
+        syntax_component_t* s = calloc(1, sizeof *s); \
+        s->type = SYNTAX_COMPONENT_EXPRESSION; \
+        s->sc11_type = t; \
+        unsigned oid = tok->operator_id; \
+        if (tok->type == LEXER_TOKEN_OPERATOR && c(oid, numargs(__VA_ARGS__), ## __VA_ARGS__)) \
+        { \
+            s->sc11_operator_id = oid; \
+            safe_lexer_token_next(tok); \
+            syntax_component_t* right = (subfunc)(unit, &tok); \
+            if (!right) \
+                dealloc_null_return; \
+            s->l = super; \
+            s->r = right; \
+        } \
+        else \
+            dealloc_null_return; \
+        syntax_component_t* sub = maybe_parse_logical_or_expression_extension(unit, s, &tok); \
+        *toks_ref = tok; \
+        return sub ? sub : s; \
+    } \
+    syntax_component_t* maybe_parse_##name##_expression(syntax_component_t* unit, lexer_token_t** toks_ref) \
+    { \
+        lexer_token_t* tok = *toks_ref; \
+        syntax_component_t* base = (subfunc)(unit, &tok); \
+        if (!base) \
+            return NULL; \
+        syntax_component_t* ext = maybe_parse_##name##_expression_extension(unit, base, &tok); \
+        if (ext) base = ext; \
+        *toks_ref = tok; \
+        return base; \
+    }
+
+generate_maybe_parse_binary_operator_expression(multiplicative,
+    EXPRESSION_MULTIPLICATIVE,
+    maybe_parse_cast_expression,
+    sc11_multiplicative_cast_expression,
+    sc11_multiplicative_nested_expression,
+    '*',
+    '/',
+    '%'
+)
+
+generate_maybe_parse_binary_operator_expression(additive,
+    EXPRESSION_ADDITIVE,
+    maybe_parse_multiplicative_expression,
+    sc11_additive_multiplicative_expression,
+    sc11_additive_nested_expression,
+    '+',
+    '-'
+)
+
+generate_maybe_parse_binary_operator_expression(shift,
+    EXPRESSION_SHIFT,
+    maybe_parse_additive_expression,
+    sc11_shift_additive_expression,
+    sc11_shift_nested_expression,
+    '<' * '<',
+    '>' * '>'
+)
+
+generate_maybe_parse_binary_operator_expression(relational,
+    EXPRESSION_RELATIONAL,
+    maybe_parse_shift_expression,
+    sc11_relational_shift_expression,
+    sc11_relational_nested_expression,
+    '<',
+    '>',
+    '<' * '=',
+    '>' * '='
+)
+
+generate_maybe_parse_binary_operator_expression(equality,
+    EXPRESSION_EQUALITY,
+    maybe_parse_relational_expression,
+    sc11_equality_relational_expression,
+    sc11_equality_nested_expression,
+    '=' * '=',
+    '!' * '='
+)
+
+generate_maybe_parse_binary_operator_expression(and,
+    EXPRESSION_AND,
+    maybe_parse_equality_expression,
+    sc11_and_equality_expression,
+    sc11_and_nested_expression,
+    '&'
+)
+
+generate_maybe_parse_binary_operator_expression(xor,
+    EXPRESSION_XOR,
+    maybe_parse_and_expression,
+    sc11_xor_and_expression,
+    sc11_xor_nested_expression,
+    '^'
+)
+
+generate_maybe_parse_binary_operator_expression(or,
+    EXPRESSION_OR,
+    maybe_parse_xor_expression,
+    sc11_or_xor_expression,
+    sc11_or_nested_expression,
+    '|'
+)
+
+generate_maybe_parse_binary_operator_expression(logical_and,
+    EXPRESSION_LOGICAL_AND,
+    maybe_parse_or_expression,
+    sc11_land_or_expression,
+    sc11_land_nested_expression,
+    '&' * '&'
+)
+
+generate_maybe_parse_binary_operator_expression(logical_or,
+    EXPRESSION_LOGICAL_OR,
+    maybe_parse_logical_and_expression,
+    sc11_lor_land_expression,
+    sc11_lor_nested_expression,
+    '|' * '|'
+)
+
+/*
+syntax_component_t* maybe_parse_logical_or_expression_extension(syntax_component_t* unit, syntax_component_t* super, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) return NULL;
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_EXPRESSION;
+    s->sc11_type = EXPRESSION_LOGICAL_OR;
+    s->sc11_operator_id = '|' * '|';
+    unsigned oid = tok->operator_id;
+    if (tok->type == LEXER_TOKEN_OPERATOR && oid == '|' * '|')
+    {
+        safe_lexer_token_next(tok);
+        syntax_component_t* right = maybe_parse_logical_and_expression(unit, &tok);
+        if (!right)
+            dealloc_null_return;
+        s->sc11_lor_land_expression = super;
+        s->sc11_lor_nested_expression = right;
+    }
+    else
+        dealloc_null_return;
+    syntax_component_t* sub = maybe_parse_logical_or_expression_extension(unit, s, &tok);
+    *toks_ref = tok;
+    return sub ? sub : s;
+}
+
+syntax_component_t* maybe_parse_logical_or_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* base = maybe_parse_logical_and_expression(unit, &tok);
+    if (!base)
+        return NULL;
+    syntax_component_t* ext = maybe_parse_logical_or_expression_extension(unit, base, &tok);
+    if (ext) base = ext;
+    *toks_ref = tok;
+    return base;
+}
+*/
+
+// 5 * 3 + 5
+
+syntax_component_t* maybe_parse_conditional_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* s = maybe_parse_logical_or_expression(unit, &tok);
+    if (!s)
+        return NULL;
+    if (tok && tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '?')
+    {
+        safe_lexer_token_next(tok);
+        syntax_component_t* super = calloc(1, sizeof *super);
+        super->type = SYNTAX_COMPONENT_EXPRESSION;
+        super->sc11_type = EXPRESSION_CONDITIONAL;
+        super->sc11_operator_id = '?';
+        syntax_component_t* then = maybe_parse_expression(unit, &tok);
+        if (!then)
+            dealloc_null_return;
+        if (!tok)
+            dealloc_null_return;
+        if (tok->type != LEXER_TOKEN_OPERATOR)
+            dealloc_null_return;
+        if (tok->operator_id != ':')
+            dealloc_null_return;
+        safe_lexer_token_next(tok);
+        syntax_component_t* els = maybe_parse_conditional_expression(unit, &tok);
+        if (!els)
+            dealloc_null_return;
+        super->sc11_conditional_lor_expression = s;
+        super->sc11_conditional_then_expression = then;
+        super->sc11_conditional_nested_expression = els;
+        s = super;
+    }
+    *toks_ref = tok;
+    return s;
+}
+
+syntax_component_t* maybe_parse_assignment_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    lexer_token_t* tok = *toks_ref;
+    syntax_component_t* s = maybe_parse_conditional_expression(unit, &tok);
+    if (!s)
+    {
+        s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_EXPRESSION;
+        s->sc11_type = EXPRESSION_ASSIGNMENT;
+        syntax_component_t* unary = maybe_parse_unary_expression(unit, &tok);
+        if (!unary)
+            return NULL;
+        s->sc11_assignment_unary_expression = unary;
+        if (!is_assignment_operator_token(tok))
+        {
+            free(unary);
+            return NULL;
+        }
+        s->sc11_operator_id = tok->operator_id;
+        safe_lexer_token_next(tok);
+        syntax_component_t* nested = maybe_parse_assignment_expression(unit, &tok);
+        if (!nested)
+        {
+            free(unary);
+            return NULL;
+        }
+        s->sc11_assignment_nested_expression = nested;
+    }
+    *toks_ref = tok;
+    return s;
+}
+
 syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_EXPRESSION;
+    s->sc11_type = EXPRESSION_ASSIGNMENT_LIST;
+    s->sc11_assignment_list = vector_init();
     lexer_token_t* tok = *toks_ref;
     // TODO
-    dealloc_null_return;
+    for (;;)
+    {
+        syntax_component_t* expr = maybe_parse_assignment_expression(unit, &tok);
+        if (!expr)
+            dealloc_null_return;
+        vector_add(s->sc11_assignment_list, expr);
+        if (tok && tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ',')
+            continue;
+        break;
+    }
+    *toks_ref = tok;
+    return s;
 }
 
 syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref)

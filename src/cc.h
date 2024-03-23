@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #define terminate(fmt, ...) { errorf(fmt, ## __VA_ARGS__); exit(1); }
+#define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
 
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
@@ -110,6 +111,7 @@
 #define STATEMENT_JUMP_BREAK 2
 #define STATEMENT_JUMP_RETURN 3
 
+/*
 #define EXPRESSION_IDENTIFIER 0
 #define EXPRESSION_INTEGER_CONSTANT 1
 #define EXPRESSION_FLOATING_CONSTANT 2
@@ -148,6 +150,39 @@
 #define EXPRESSION_LOGICAL_OR 35
 #define EXPRESSION_TERNARY 36
 #define EXPRESSION_ASSIGNMENT 37
+*/
+
+#define EXPRESSION_ASSIGNMENT_LIST 0
+#define EXPRESSION_ASSIGNMENT 1
+#define EXPRESSION_CONDITIONAL 2
+#define EXPRESSION_LOGICAL_OR 3
+#define EXPRESSION_LOGICAL_AND 4
+#define EXPRESSION_OR 5
+#define EXPRESSION_XOR 6
+#define EXPRESSION_AND 7
+#define EXPRESSION_EQUALITY 8
+#define EXPRESSION_RELATIONAL 9
+#define EXPRESSION_SHIFT 10
+#define EXPRESSION_ADDITIVE 11
+#define EXPRESSION_MULTIPLICATIVE 12
+#define EXPRESSION_CAST 13
+#define EXPRESSION_UNARY 14
+#define EXPRESSION_POSTFIX 15
+#define EXPRESSION_PRIMARY 16
+
+#define EXPRESSION_POSTFIX_COMPOUND_LITERAL 0
+#define EXPRESSION_POSTFIX_SUBSCRIPT 1
+#define EXPRESSION_POSTFIX_FUNCTION_CALL 2
+#define EXPRESSION_POSTFIX_MEMBER 3
+#define EXPRESSION_POSTFIX_PTR_MEMBER 4
+#define EXPRESSION_POSTFIX_INCREMENT 5
+#define EXPRESSION_POSTFIX_DECREMENT 6
+
+#define EXPRESSION_PRIMARY_IDENTIFIER 0
+#define EXPRESSION_PRIMARY_INTEGER_CONSTANT 1
+#define EXPRESSION_PRIMARY_FLOATING_CONSTANT 2
+#define EXPRESSION_PRIMARY_STRING_LITERAL 3
+#define EXPRESSION_PRIMARY_NEST 4
 
 #define ABSTRACT_DECLARATOR_POINTER 0
 #define ABSTRACT_DECLARATOR_ARRAY 1
@@ -418,6 +453,118 @@ typedef struct syntax_component_t
         struct
         {
             unsigned sc11_type;
+            unsigned sc11_operator_id;
+            union
+            {
+                vector_t* sc11_assignment_list; // <syntax_component_t> (SYNTAX_COMPONENT_EXPRESSION)
+                struct
+                {
+                    struct syntax_component_t* sc11_assignment_unary_expression;
+                    struct syntax_component_t* sc11_assignment_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_conditional_lor_expression;
+                    struct syntax_component_t* sc11_conditional_then_expression;
+                    struct syntax_component_t* sc11_conditional_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_lor_land_expression;
+                    struct syntax_component_t* sc11_lor_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_land_or_expression;
+                    struct syntax_component_t* sc11_land_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_or_xor_expression;
+                    struct syntax_component_t* sc11_or_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_xor_and_expression;
+                    struct syntax_component_t* sc11_xor_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_and_equality_expression;
+                    struct syntax_component_t* sc11_and_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_equality_relational_expression;
+                    struct syntax_component_t* sc11_equality_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_relational_shift_expression;
+                    struct syntax_component_t* sc11_relational_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_shift_additive_expression;
+                    struct syntax_component_t* sc11_shift_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_additive_multiplicative_expression;
+                    struct syntax_component_t* sc11_additive_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_multiplicative_cast_expression;
+                    struct syntax_component_t* sc11_multiplicative_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_cast_type;
+                    struct syntax_component_t* sc11_cast_nested_expression;
+                };
+                struct
+                {
+                    struct syntax_component_t* sc11_unary_nested_expression;
+                    struct syntax_component_t* sc11_unary_cast_expression;
+                    struct syntax_component_t* sc11_unary_type;
+                };
+                struct
+                {
+                    unsigned sc11_postfix_type;
+                    struct syntax_component_t* sc11_postfix_nested_expression;
+                    union
+                    {
+                        struct
+                        {
+                            struct syntax_component_t* sc11_postfix_type_name;
+                            vector_t* sc11_postfix_initializer_list;
+                        };
+                        struct syntax_component_t* sc11_postfix_subscript_expression;
+                        vector_t* sc11_postfix_argument_list;
+                        char* sc11_postfix_member_identifier;
+                        char* sc11_postfix_ptr_member_identifier;
+                    };
+                };
+                struct
+                {
+                    unsigned sc11_primary_type;
+                    union
+                    {
+                        char* sc11_primary_identifier;
+                        unsigned long long sc11_primary_integer_constant;
+                        long double sc11_primary_floating_constant;
+                        char* sc11_primary_string_literal;
+                        struct syntax_component_t* sc11_primary_nested_expression;
+                    };
+                };
+
+            };
+        };
+        /*
+        struct
+        {
+            unsigned sc11_type;
             union
             {
                 char* sc11_identifier;
@@ -482,13 +629,13 @@ typedef struct syntax_component_t
                 };
             };
         };
+        */
 
         // SYNTAX_COMPONENT_TYPE_NAME
         struct
         {
-            vector_t* sc12_specifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER)
-            vector_t* sc12_qualifiers; // <unsigned>
-            struct syntax_component_t* sc12_abstract_declarator; // (SYNTAX_COMPONENT_ABSTRACT_DECLARATOR)
+            vector_t* sc12_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
+            struct syntax_component_t* sc12_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
         };
 
         // SYNTAX_COMPONENT_ABSTRACT_DECLARATOR
@@ -569,7 +716,7 @@ extern const char* STATEMENT_LABELED_NAMES[3];
 extern const char* STATEMENT_SELECTION_NAMES[3];
 extern const char* STATEMENT_ITERATION_NAMES[4];
 extern const char* STATEMENT_JUMP_NAMES[4];
-extern const char* EXPRESSION_NAMES[38];
+//extern const char* EXPRESSION_NAMES[38];
 extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];
@@ -578,6 +725,8 @@ extern const char* LEXER_TOKEN_NAMES[8];
 lexer_token_t* lex(FILE* file);
 void lex_delete(lexer_token_t* start);
 void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...));
+bool is_assignment_operator_token(lexer_token_t* tok);
+bool is_unary_operator_token(lexer_token_t* tok);
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);

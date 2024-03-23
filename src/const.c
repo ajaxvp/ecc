@@ -160,6 +160,7 @@ const char* STATEMENT_JUMP_NAMES[4] = {
     "RETURN"
 };
 
+/*
 const char* EXPRESSION_NAMES[38] = {
     "IDENTIFIER",
     "INTEGER_CONSTANT",
@@ -200,6 +201,7 @@ const char* EXPRESSION_NAMES[38] = {
     "TERNARY",
     "ASSIGNMENT"
 };
+*/
 
 const char* ABSTRACT_DECLARATOR_NAMES[4] = {
     "POINTER",

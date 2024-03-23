@@ -466,3 +466,32 @@ void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...))
     }
     printer("}\n");
 }
+
+bool is_assignment_operator_token(lexer_token_t* tok)
+{
+    if (!tok) return false;
+    if (tok->type != LEXER_TOKEN_OPERATOR) return false;
+    return tok->operator_id == '=' ||
+        tok->operator_id == '*' * '=' ||
+        tok->operator_id == '/' * '=' ||
+        tok->operator_id == '%' * '=' ||
+        tok->operator_id == '+' * '=' ||
+        tok->operator_id == '-' * '=' ||
+        tok->operator_id == '<' * '<' * '=' ||
+        tok->operator_id == '>' * '>' * '=' ||
+        tok->operator_id == '&' * '=' ||
+        tok->operator_id == '^' * '=' ||
+        tok->operator_id == '|' * '=';
+}
+
+bool is_unary_operator_token(lexer_token_t* tok)
+{
+    if (!tok) return false;
+    if (tok->type != LEXER_TOKEN_OPERATOR) return false;
+    return tok->operator_id == '&' ||
+        tok->operator_id == '*' ||
+        tok->operator_id == '+' ||
+        tok->operator_id == '-' ||
+        tok->operator_id == '~' ||
+        tok->operator_id == '!';
+}
