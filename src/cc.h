@@ -29,7 +29,7 @@
 #define SYNTAX_COMPONENT_EXPRESSION 11
 #define SYNTAX_COMPONENT_TYPE_NAME 12
 #define SYNTAX_COMPONENT_ABSTRACT_DECLARATOR 13
-#define SYNTAX_COMPONENT_DIRECT_ABSTRACT_DECLARATOR 14
+#define SYNTAX_COMPONENT_PARAMETER_DECLARATION 15
 
 #define SPECIFIER_QUALIFIER_VOID 0
 #define SPECIFIER_QUALIFIER_ARITHMETIC_TYPE 1
@@ -149,9 +149,10 @@
 #define EXPRESSION_TERNARY 36
 #define EXPRESSION_ASSIGNMENT 37
 
-#define DIRECT_ABSTRACT_DECLARATOR_SUBSCRIPT 0
-#define DIRECT_ABSTRACT_DECLARATOR_ASTERISK 1
-#define DIRECT_ABSTRACT_DECLARATOR_PARAMETER_LIST 2
+#define ABSTRACT_DECLARATOR_POINTER 0
+#define ABSTRACT_DECLARATOR_ARRAY 1
+#define ABSTRACT_DECLARATOR_VLA 2
+#define ABSTRACT_DECLARATOR_FUNCTION 3
 
 #define KEYWORDS_LEN 37
 #define KEYWORD_AUTO 0
@@ -284,7 +285,7 @@ typedef struct syntax_component_t
                 struct
                 {
                     struct syntax_component_t* sc3_function_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                    vector_t* sc3_function_parameters; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
+                    vector_t* sc3_function_parameters; // <syntax_component_t> (SYNTAX_COMPONENT_PARAMETER_DECLARATION)
                     vector_t* sc3_function_identifiers; // <char*>
                 };
             };
@@ -338,7 +339,9 @@ typedef struct syntax_component_t
         // SYNTAX_COMPONENT_FUNCTION_DEFINITION
         struct
         {
-            struct syntax_component_t* sc9_function_declaration; // (SYNTAX_COMPONENT_DECLARATION)
+            vector_t* sc9_function_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
+            struct syntax_component_t* sc9_function_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
+            vector_t* sc9_function_declaration_list; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
             struct syntax_component_t* sc9_function_body; // (SYNTAX_COMPONENT_STATEMENT)
         };
 
@@ -491,21 +494,22 @@ typedef struct syntax_component_t
         // SYNTAX_COMPONENT_ABSTRACT_DECLARATOR
         struct
         {
+            unsigned sc13_type;
             bool sc13_pointer;
-            struct syntax_component_t* sc13_direct_abstract_declarator; // (SYNTAX_COMPONENT_DIRECT_ABSTRACT_DECLARATOR)
-        };
-
-        // SYNTAX_COMPONENT_DIRECT_ABSTRACT_DECLARATOR
-        struct
-        {
-            unsigned sc14_type;
-            struct syntax_component_t* sc14_nested_abstract_declarator; // (SYNTAX_COMPONENT_ABSTRACT_DECLARATOR)
-            struct syntax_component_t* sc14_nested_direct_abstract_declarator; // (SYNTAX_COMPONENT_DIRECT_ABSTRACT_DECLARATOR)
+            struct syntax_component_t* sc13_nested_abstract_declarator;
             union
             {
-                struct syntax_component_t* sc14_subscript_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                vector_t* sc14_parameter_list; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
+                struct syntax_component_t* sc13_assignment_expression;
+                vector_t* sc13_parameter_type_list;
             };
+        };
+
+        // SYNTAX_COMPONENT_PARAMETER_DECLARATION
+        struct
+        {
+            bool sc15_ellipsis;
+            vector_t* sc15_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
+            struct syntax_component_t* sc15_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
         };
     };
 } syntax_component_t;
@@ -552,7 +556,7 @@ void set_print(set_t* s, void (*printer)(void*));
 
 /* const.c */
 extern const char* KEYWORDS[37];
-extern const char* SYNTAX_COMPONENT_NAMES[15];
+extern const char* SYNTAX_COMPONENT_NAMES[16];
 extern const char* SPECIFIER_QUALIFIER_NAMES[9];
 extern const char* ARITHMETIC_TYPE_NAMES[21];
 extern const char* STORAGE_CLASS_NAMES[5];
@@ -566,12 +570,14 @@ extern const char* STATEMENT_SELECTION_NAMES[3];
 extern const char* STATEMENT_ITERATION_NAMES[4];
 extern const char* STATEMENT_JUMP_NAMES[4];
 extern const char* EXPRESSION_NAMES[38];
-extern const char* DIRECT_ABSTRACT_DECLARATOR_NAMES[3];
+extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
+extern const char* LEXER_TOKEN_NAMES[8];
 
 /* lex.c */
 lexer_token_t* lex(FILE* file);
 void lex_delete(lexer_token_t* start);
+void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...));
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);

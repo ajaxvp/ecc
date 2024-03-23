@@ -90,7 +90,7 @@ static lexer_token_t* lex_single(FILE* file, filepos_t* pos)
         buffer_t* b = buffer_init();
         buffer_append(b, c);
         int d = readc(file, pos);
-        for (; isalphanumeric(d) || d == '\\'; d = readc(file, pos))
+        for (; isalphanumeric(d) || d == '\\' || d == '_'; d = readc(file, pos))
         {
             // LOL UNICODEEEEEEEEEEE
             if (d == '\\' || is_unicode_identifier) // is_unicode_identifier is reused here to catch the skipped backslash
@@ -432,4 +432,37 @@ void lex_delete(lexer_token_t* start)
     lexer_token_t* nxt = start->next;
     free(start);
     lex_delete(nxt);
+}
+
+void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...))
+{
+    if (!tok) return;
+    printer("lexer_token_t {\n");
+    printer("    type: %s\n", LEXER_TOKEN_NAMES[tok->type]);
+    printer("    row: %d\n", tok->row);
+    printer("    col: %d\n", tok->col);
+    switch (tok->type)
+    {
+        case LEXER_TOKEN_KEYWORD:
+        {
+            printer("    keyword: %s\n", KEYWORDS[tok->keyword_id]);
+            break;
+        }
+        case LEXER_TOKEN_OPERATOR:
+        {
+            printer("    operator_id: %d\n", tok->operator_id);
+            break;
+        }
+        case LEXER_TOKEN_SEPARATOR:
+        {
+            printer("    separator_id: %d\n", tok->separator_id);
+            break;
+        }
+        default:
+        {
+            printer("    string_value: %s\n", tok->string_value);
+            break;
+        }
+    }
+    printer("}\n");
 }

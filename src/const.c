@@ -38,7 +38,7 @@ const char* KEYWORDS[37] = {
     "_Imaginary"
 };
 
-const char* SYNTAX_COMPONENT_NAMES[15] = {
+const char* SYNTAX_COMPONENT_NAMES[16] = {
     "TRANSLATION_UNIT",
     "DECLARATION",
     "SPECIFIER_QUALIFIER",
@@ -53,7 +53,8 @@ const char* SYNTAX_COMPONENT_NAMES[15] = {
     "EXPRESSION",
     "TYPE_NAME",
     "ABSTRACT_DECLARATOR",
-    "DIRECT_ABSTRACT_DECLARATOR"
+    "",
+    "PARAMETER_DECLARATION"
 };
 
 const char* SPECIFIER_QUALIFIER_NAMES[9] = {
@@ -200,13 +201,25 @@ const char* EXPRESSION_NAMES[38] = {
     "ASSIGNMENT"
 };
 
-const char* DIRECT_ABSTRACT_DECLARATOR_NAMES[3] = {
-    "SUBSCRIPT",
-    "ASTERISK",
-    "PARAMETER_LIST"
+const char* ABSTRACT_DECLARATOR_NAMES[4] = {
+    "POINTER",
+    "ARRAY",
+    "VLA",
+    "FUNCTION"
 };
 
 const char* BOOL_NAMES[2] = {
     "false",
     "true"
+};
+
+const char* LEXER_TOKEN_NAMES[8] = {
+    "KEYWORD",
+    "IDENTIFIER",
+    "OPERATOR",
+    "SEPARATOR",
+    "INTEGER_CONSTANT",
+    "FLOATING_CONSTANT",
+    "CHARACTER_CONSTANT",
+    "STRING_CONSTANT"
 };

@@ -29,6 +29,7 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
 syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, lexer_token_t** toks_ref);
@@ -364,19 +365,17 @@ syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_
 
 syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
-    // TODO fix this code lol
-
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_DECLARATOR;
+    s->sc3_type = (unsigned) -1;
     lexer_token_t* tok = *toks_ref;
     if (tok->type == LEXER_TOKEN_IDENTIFIER)
     {
         s->sc3_type = DECLARATOR_IDENTIFIER;
         s->sc3_identifier = tok->string_value;
-        *toks_ref = tok->next;
-        return s;
+        tok = tok->next;
     }
-    if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
+    else if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
     {
         safe_lexer_token_next(tok);
         s->sc3_type = DECLARATOR_NEST;
@@ -386,10 +385,9 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
         s->sc3_nested_declarator = nested_declarator;
         if (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')')
             dealloc_null_return;
-        *toks_ref = tok->next;
-        return s;
+        tok = tok->next;
     }
-    if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
+    else if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
     {
         safe_lexer_token_next(tok);
         s->sc3_type = DECLARATOR_POINTER;
@@ -402,97 +400,109 @@ syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token
             vector_add(s->sc3_pointer_qualifiers, qualifier);
         }
         syntax_component_t* subdeclarator = maybe_parse_declarator(unit, &tok);
-        if (!subdeclarator)
-            dealloc_null_return;
         s->sc3_pointer_subdeclarator = subdeclarator;
-        *toks_ref = tok;
-        return s;
     }
-    if (tok->type != LEXER_TOKEN_IDENTIFIER && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '(') &&
-        (tok->type != LEXER_TOKEN_OPERATOR || tok->operator_id != '*'))
+
+    if (s->sc3_type == (unsigned) -1)
         dealloc_null_return;
-    syntax_component_t* subdeclarator = maybe_parse_declarator(unit, &tok);
-    if (!subdeclarator)
-        dealloc_null_return;
-    if (subdeclarator->sc3_type == DECLARATOR_POINTER) // only noptr declarators
-        dealloc_null_return;
-    if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
+
+    #define super_dealloc_null_return { free(s); free(ss); return NULL; }
+
+    for (;;)
     {
-        safe_lexer_token_next(tok);
-        s->sc3_type = DECLARATOR_FUNCTION;
-        bool old_style = tok->type == LEXER_TOKEN_IDENTIFIER;
-        if (old_style)
-            s->sc3_function_identifiers = vector_init();
-        else
-            s->sc3_function_parameters = vector_init();
-        while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
+        if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
         {
+            syntax_component_t* ss = calloc(1, sizeof *ss);
+            safe_lexer_token_next(tok);
+            ss->type = SYNTAX_COMPONENT_DECLARATOR;
+            ss->sc3_type = DECLARATOR_FUNCTION;
+            bool old_style = tok->type == LEXER_TOKEN_IDENTIFIER || (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ')');
+            ss->sc3_function_subdeclarator = s;
             if (old_style)
+                ss->sc3_function_identifiers = vector_init();
+            else
+                ss->sc3_function_parameters = vector_init();
+            while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
             {
-                if (tok->type != LEXER_TOKEN_IDENTIFIER)
-                    dealloc_null_return;
-                vector_add(s->sc3_function_identifiers, tok->string_value);
-                safe_lexer_token_next(tok);
+                if (old_style)
+                {
+                    if (tok->type != LEXER_TOKEN_IDENTIFIER)
+                        super_dealloc_null_return;
+                    vector_add(ss->sc3_function_identifiers, tok->string_value);
+                    safe_lexer_token_next(tok);
+                    if (tok->type != LEXER_TOKEN_SEPARATOR)
+                        super_dealloc_null_return;
+                }
+                else
+                {
+                    syntax_component_t* decl = maybe_parse_parameter_declaration(unit, &tok);
+                    if (!decl)
+                        super_dealloc_null_return;
+                    if (decl->sc15_ellipsis && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != ')'))
+                        super_dealloc_null_return;
+                    vector_add(ss->sc3_function_parameters, decl);
+                }
                 if (tok->type != LEXER_TOKEN_SEPARATOR)
-                    dealloc_null_return;
+                    super_dealloc_null_return;
+                if (tok->separator_id == ',')
+                    safe_lexer_token_next(tok)
+                else if (tok->separator_id != ')')
+                    super_dealloc_null_return;
+            }
+            tok = tok->next;
+            s = ss;
+        }
+        else if (tok->type == LEXER_TOKEN_OPERATOR && tok->separator_id == '[')
+        {
+            safe_lexer_token_next(tok);
+            syntax_component_t* ss = calloc(1, sizeof *ss);
+            ss->type = SYNTAX_COMPONENT_DECLARATOR;
+            ss->sc3_type = DECLARATOR_ARRAY;
+            ss->sc3_array_static = false;
+            ss->sc3_array_subdeclarator = s;
+            if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
+            {
+                ss->sc3_array_static = true;
+                safe_lexer_token_next(tok);
+            }
+            ss->sc3_array_qualifiers = vector_init();
+            ss->sc3_array_expression = NULL;
+            for (;;)
+            {
+                syntax_component_t* qualifier = maybe_parse_qualifier(unit, &tok);
+                if (!qualifier)
+                    break;
+                vector_add(ss->sc3_array_qualifiers, qualifier);
+            }
+            if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
+            {
+                if (ss->sc3_array_static)
+                    super_dealloc_null_return;
+                ss->sc3_array_static = true;
+                safe_lexer_token_next(tok);
+            }
+            if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
+            {
+                if (ss->sc3_array_static)
+                    super_dealloc_null_return;
+                safe_lexer_token_next(tok);
             }
             else
-            {
-                syntax_component_t* decl = maybe_parse_declaration(unit, &tok);
-                if (!decl)
-                    dealloc_null_return;
-                vector_add(s->sc3_function_parameters, decl);
-            }
-            if (tok->separator_id == ',')
-                safe_lexer_token_next(tok)
-            else if (tok->separator_id != ')')
-                dealloc_null_return;
-        }
-        *toks_ref = tok->next;
-        return s;
-    }
-    else if (tok->type == LEXER_TOKEN_OPERATOR && tok->separator_id == '[')
-    {
-        safe_lexer_token_next(tok);
-        s->sc3_type = DECLARATOR_ARRAY;
-        s->sc3_array_static = false;
-        if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
-        {
-            s->sc3_array_static = true;
-            safe_lexer_token_next(tok);
-        }
-        s->sc3_array_qualifiers = vector_init();
-        s->sc3_array_expression = NULL;
-        for (;;)
-        {
-            syntax_component_t* qualifier = maybe_parse_qualifier(unit, &tok);
-            if (!qualifier)
-                break;
-            vector_add(s->sc3_array_qualifiers, qualifier);
-        }
-        if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_STATIC)
-        {
-            if (s->sc3_array_static)
-                dealloc_null_return;
-            s->sc3_array_static = true;
-            safe_lexer_token_next(tok);
-        }
-        if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '*')
-        {
-            if (s->sc3_array_static)
-                dealloc_null_return;
-            safe_lexer_token_next(tok);
+                ss->sc3_array_expression = maybe_parse_expression(unit, &tok);
+            if (tok->type != LEXER_TOKEN_OPERATOR)
+                super_dealloc_null_return;
+            if (tok->operator_id != ']')
+                super_dealloc_null_return;
+            tok = tok->next;
+            s = ss;
         }
         else
-            s->sc3_array_expression = maybe_parse_expression(unit, &tok);
-        if (tok->type != LEXER_TOKEN_OPERATOR)
-            dealloc_null_return;
-        if (tok->operator_id != ']')
-            dealloc_null_return;
-        *toks_ref = tok->next;
-        return s;
+            break;
     }
-    dealloc_null_return;
+    
+    #undef super_dealloc_null_return
+    *toks_ref = tok;
+    return s;
 }
 
 syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token_t** toks_ref)
@@ -643,6 +653,28 @@ syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_toke
     return s;
 }
 
+syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_PARAMETER_DECLARATION;
+    s->sc15_ellipsis = false;
+    lexer_token_t* tok = *toks_ref;
+    null_protection(tok);
+    if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '.' * '.' * '.') // ellipsis
+    {
+        s->sc15_ellipsis = true;
+        *toks_ref = tok->next;
+        return s;
+    }
+    s->sc15_specifiers_qualifiers = maybe_parse_specifiers_qualifiers(unit, &tok);
+    if (!s->sc15_specifiers_qualifiers)
+        dealloc_null_return;
+    s->sc15_declarator = maybe_parse_declarator(unit, &tok);
+    // TODO there's probably some abstract declarator stuff i have to do here but i cba rn lol
+    *toks_ref = tok;
+    return s;
+}
+
 syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     syntax_component_t* s = calloc(1, sizeof *s);
@@ -654,11 +686,319 @@ syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token
 
 syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) return NULL;
+    if (tok->type == LEXER_TOKEN_IDENTIFIER && tok->next && tok->next->type == LEXER_TOKEN_OPERATOR && tok->next->operator_id == ':')
+    {
+        syntax_component_t* s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_STATEMENT;
+        s->sc10_type = STATEMENT_LABELED;
+        s->sc10_labeled_type = STATEMENT_LABELED_IDENTIFIER;
+        s->sc10_labeled_identifier = tok->string_value;
+        *toks_ref = tok->next->next;
+        return s;
+    }
+    if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '{')
+    {
+        syntax_component_t* s = calloc(1, sizeof *s);
+        s->type = SYNTAX_COMPONENT_STATEMENT;
+        s->sc10_type = STATEMENT_COMPOUND;
+        s->sc10_compound_block_items = vector_init();
+        safe_lexer_token_next(tok);
+        while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}'))
+        {
+            syntax_component_t* item = maybe_parse_statement(unit, &tok);
+            if (!item)
+            {
+                item = maybe_parse_declaration(unit, &tok);
+                if (!item)
+                    dealloc_null_return;
+            }
+            vector_add(s->sc10_compound_block_items, item);
+        }
+        if (!tok)
+            dealloc_null_return;
+        *toks_ref = tok->next;
+        return s;
+    }
+    if (tok->type == LEXER_TOKEN_KEYWORD)
+    {
+        switch (tok->keyword_id)
+        {
+            case KEYWORD_CASE:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_LABELED;
+                s->sc10_labeled_type = STATEMENT_LABELED_CASE;
+                safe_lexer_token_next(tok);
+                s->sc10_labeled_case_const_expression = maybe_parse_expression(unit, &tok);
+                if (!s->sc10_labeled_case_const_expression)
+                    dealloc_null_return;
+                if (tok->type != LEXER_TOKEN_OPERATOR)
+                    dealloc_null_return;
+                if (tok->operator_id != ':')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+            case KEYWORD_DEFAULT:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_LABELED;
+                s->sc10_labeled_type = STATEMENT_LABELED_DEFAULT;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_OPERATOR)
+                    dealloc_null_return;
+                if (tok->operator_id != ':')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+            case KEYWORD_IF:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_SELECTION;
+                s->sc10_selection_type = STATEMENT_SELECTION_IF;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != '(')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+                if (!expr)
+                    dealloc_null_return;
+                s->sc10_selection_condition = expr;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* stmt = maybe_parse_statement(unit, &tok);
+                if (!stmt)
+                    dealloc_null_return;
+                if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_ELSE)
+                {
+                    s->sc10_selection_type = STATEMENT_SELECTION_IF_ELSE;
+                    safe_lexer_token_next(tok);
+                    syntax_component_t* else_stmt = maybe_parse_statement(unit, &tok);
+                    if (!else_stmt)
+                        dealloc_null_return;
+                    s->sc10_selection_if_else_then = stmt;
+                    s->sc10_selection_if_else_else = else_stmt;
+                }
+                else
+                    s->sc10_selection_then = stmt;
+                *toks_ref = tok;
+                return s;
+            }
+            case KEYWORD_SWITCH:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_SELECTION;
+                s->sc10_selection_type = STATEMENT_SELECTION_SWITCH;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != '(')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+                if (!expr)
+                    dealloc_null_return;
+                s->sc10_selection_condition = expr;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* stmt = maybe_parse_statement(unit, &tok);
+                if (!stmt)
+                    dealloc_null_return;
+                s->sc10_selection_switch = stmt;
+                *toks_ref = tok;
+                return s;
+            }
+            case KEYWORD_WHILE:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_ITERATION;
+                s->sc10_iteration_type = STATEMENT_ITERATION_WHILE;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != '(')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+                if (!expr)
+                    dealloc_null_return;
+                s->sc10_iteration_while_condition = expr;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* stmt = maybe_parse_statement(unit, &tok);
+                if (!stmt)
+                    dealloc_null_return;
+                s->sc10_iteration_while_action = stmt;
+                *toks_ref = tok;
+                return s;
+            }
+            case KEYWORD_DO:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_ITERATION;
+                s->sc10_iteration_type = STATEMENT_ITERATION_DO_WHILE;
+                safe_lexer_token_next(tok);
+                syntax_component_t* stmt = maybe_parse_statement(unit, &tok);
+                if (!stmt)
+                    dealloc_null_return;
+                s->sc10_iteration_do_while_action = stmt;
+                if (tok->type != LEXER_TOKEN_KEYWORD)
+                    dealloc_null_return;
+                if (tok->keyword_id != KEYWORD_WHILE)
+                    dealloc_null_return;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != '(')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+                if (!expr)
+                    dealloc_null_return;
+                s->sc10_iteration_do_while_condition = expr;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+            case KEYWORD_FOR:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_ITERATION;
+                s->sc10_iteration_type = STATEMENT_ITERATION_FOR_DECLARATION;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != '(')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* init = maybe_parse_declaration(unit, &tok);
+                if (!init)
+                {
+                    init = maybe_parse_expression(unit, &tok);
+                    if (init)
+                        s->sc10_iteration_type = STATEMENT_ITERATION_FOR_EXPRESSION;
+                }
+                s->sc10_iteration_for_init = init;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                s->sc10_iteration_for_condition = maybe_parse_expression(unit, &tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                s->sc10_iteration_for_update = maybe_parse_expression(unit, &tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ')')
+                    dealloc_null_return;
+                safe_lexer_token_next(tok);
+                syntax_component_t* stmt = maybe_parse_statement(unit, &tok);
+                if (!stmt)
+                    dealloc_null_return;
+                s->sc10_iteration_for_action = stmt;
+                *toks_ref = tok;
+                return s;
+            }
+            case KEYWORD_BREAK:
+            case KEYWORD_CONTINUE:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_JUMP;
+                s->sc10_jump_type = tok->type == KEYWORD_BREAK ? STATEMENT_JUMP_BREAK : STATEMENT_JUMP_CONTINUE;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+            case KEYWORD_GOTO:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_JUMP;
+                s->sc10_jump_type = STATEMENT_JUMP_GOTO;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_IDENTIFIER)
+                    dealloc_null_return;
+                s->sc10_jump_goto_identifier = tok->string_value;
+                safe_lexer_token_next(tok);
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+            case KEYWORD_RETURN:
+            {
+                syntax_component_t* s = calloc(1, sizeof *s);
+                s->type = SYNTAX_COMPONENT_STATEMENT;
+                s->sc10_type = STATEMENT_JUMP;
+                s->sc10_jump_type = STATEMENT_JUMP_RETURN;
+                s->sc10_jump_return_expression = NULL;
+                safe_lexer_token_next(tok);
+                if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ';')
+                {
+                    *toks_ref = tok->next;
+                    return s;
+                }
+                s->sc10_jump_return_expression = maybe_parse_expression(unit, &tok);
+                if (!s->sc10_jump_return_expression)
+                    dealloc_null_return;
+                if (tok->type != LEXER_TOKEN_SEPARATOR)
+                    dealloc_null_return;
+                if (tok->separator_id != ';')
+                    dealloc_null_return;
+                *toks_ref = tok->next;
+                return s;
+            }
+        }
+    }
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_STATEMENT;
-    lexer_token_t* tok = *toks_ref;
-    // TODO
-    dealloc_null_return;
+    s->sc10_type = STATEMENT_EXPRESSION;
+    s->sc10_expression = maybe_parse_expression(unit, &tok);
+    if (tok->type != LEXER_TOKEN_SEPARATOR)
+        dealloc_null_return;
+    if (tok->separator_id != ';')
+        dealloc_null_return;
+    *toks_ref = tok->next;
+    return s;
 }
 
 syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, lexer_token_t** toks_ref)
@@ -667,15 +1007,35 @@ syntax_component_t* maybe_parse_function_definition(syntax_component_t* unit, le
     s->type = SYNTAX_COMPONENT_FUNCTION_DEFINITION;
     lexer_token_t* tok = *toks_ref;
 
-    syntax_component_t* decl = maybe_parse_declaration(unit, &tok);
-    if (!decl)
+    vector_t* specs_quals = maybe_parse_specifiers_qualifiers(unit, &tok);
+    if (!specs_quals)
         dealloc_null_return;
-    if (decl->sc1_declarators->size != 1) // function definition may only have one declarator
+    s->sc9_function_specifiers_qualifiers = specs_quals;
+
+    // do some checking here to ensure there is at least one type specifier
+    bool found_type_specifier = false;
+    for (unsigned i = 0; i < s->sc9_function_specifiers_qualifiers->size; ++i)
+    {
+        syntax_component_t* spec_qual = vector_get(s->sc9_function_specifiers_qualifiers, i);
+        unsigned type = spec_qual->sc2_type;
+        if (type == SPECIFIER_QUALIFIER_VOID ||
+            type == SPECIFIER_QUALIFIER_ARITHMETIC_TYPE ||
+            type == SPECIFIER_QUALIFIER_TYPEDEF ||
+            type == SPECIFIER_QUALIFIER_STRUCT ||
+            type == SPECIFIER_QUALIFIER_UNION ||
+            type == SPECIFIER_QUALIFIER_ENUM)
+        {
+            found_type_specifier = true;
+            break;
+        }
+    }
+    if (!found_type_specifier)
         dealloc_null_return;
-    syntax_component_t* declarator = vector_get(decl->sc1_declarators, 0);
+
+    syntax_component_t* declarator = maybe_parse_declarator(unit, &tok);
     if (declarator->sc3_type != DECLARATOR_FUNCTION) // declarator must be a function declarator (obviously)
         dealloc_null_return;
-    s->sc9_function_declaration = decl;
+    s->sc9_function_declarator = declarator;
     syntax_component_t* compound_stmt = maybe_parse_statement(unit, &tok);
     if (!compound_stmt)
         dealloc_null_return;

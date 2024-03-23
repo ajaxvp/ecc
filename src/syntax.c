@@ -112,7 +112,7 @@ static void print_vector_str_indented(vector_t* v, unsigned indent, int (*printe
     }
     ps("vector {\n");
     for (unsigned i = 0; i < v->size; ++i)
-        printf("\"%s\"\n", vector_get(v, i));
+        pf("\"%s\"\n", vector_get(v, i));
     ps("}\n");
 }
 
@@ -183,7 +183,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             switch (s->sc3_type)
             {
                 case DECLARATOR_IDENTIFIER:
-                    pf("identifier: %s\n", s->sc3_identifier);
+                    pf("identifier: \"%s\"\n", s->sc3_identifier);
                     break;
                 case DECLARATOR_NEST:
                     pf("nested_declarator:\n");
@@ -208,9 +208,15 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                     pf("function_subdeclarator:\n");
                     print_syntax_indented(s->sc3_function_subdeclarator, indent + 2, printer);
                     if (s->sc3_function_parameters)
+                    {
+                        pf("function_paramaters:\n");
                         print_vector_indented(s->sc3_function_parameters, indent + 2, printer);
+                    }
                     else
+                    {
+                        pf("function_identifiers:\n");
                         print_vector_str_indented(s->sc3_function_identifiers, indent + 2, printer);
+                    }
                     break;
             }
             break;
@@ -242,7 +248,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         {
             ps("STRUCT_UNION {\n");
             pf("is_union: %s\n", BOOL_NAMES[s->sc5_is_union]);
-            pf("identifier: %s\n", s->sc5_identifier);
+            pf("identifier: \"%s\"\n", s->sc5_identifier);
             pf("declarations:\n");
             print_vector_indented(s->sc5_declarations, indent + 2, printer);
             break;
@@ -250,7 +256,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SYNTAX_COMPONENT_ENUM:
         {
             ps("ENUM {\n");
-            pf("identifier: %s\n", s->sc6_identifier);
+            pf("identifier: \"%s\"\n", s->sc6_identifier);
             pf("enumerators:\n");
             print_vector_indented(s->sc6_enumerators, indent + 2, printer);
             break;
@@ -258,7 +264,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SYNTAX_COMPONENT_ENUMERATOR:
         {
             ps("ENUMERATOR {\n");
-            pf("identifier: %s\n", s->sc7_identifier);
+            pf("identifier: \"%s\"\n", s->sc7_identifier);
             pf("const_expression:\n");
             print_syntax_indented(s->sc7_const_expression, indent + 2, printer);
             break;
@@ -268,16 +274,20 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             ps("DESIGNATOR: {\n");
             pf("array_designator_expression:\n");
             print_syntax_indented(s->sc8_array_designator_expression, indent + 2, printer);
-            pf("struct_designator_identifier: %s\n", s->sc8_struct_designator_identifier);
+            pf("struct_designator_identifier: \"%s\"\n", s->sc8_struct_designator_identifier);
             break;
         }
         case SYNTAX_COMPONENT_FUNCTION_DEFINITION:
         {
             ps("FUNCTION_DEFINITION {\n");
-            pf("function_declaration:\n");
-            print_syntax_indented(s->sc9_function_declaration, indent + 2, printer);
+            pf("function_specifiers_qualifiers:\n");
+            print_vector_indented(s->sc9_function_specifiers_qualifiers, indent + 2, printer);
+            pf("function_declarator:\n");
+            print_syntax_indented(s->sc9_function_declarator, indent + 2, printer);
             pf("function_body:\n");
             print_syntax_indented(s->sc9_function_body, indent + 2, printer);
+            pf("function_declaration_list:\n");
+            print_vector_indented(s->sc9_function_declaration_list, indent + 2, printer);
             break;
         }
         case SYNTAX_COMPONENT_STATEMENT:
@@ -292,7 +302,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                     switch (s->sc10_labeled_type)
                     {
                         case STATEMENT_LABELED_IDENTIFIER:
-                            pf("identifier: %s\n", s->sc10_labeled_identifier);
+                            pf("identifier: \"%s\"\n", s->sc10_labeled_identifier);
                             break;
                         case STATEMENT_LABELED_CASE:
                             pf("const_expression:\n");
@@ -376,7 +386,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                         // cont, break, return
                         case STATEMENT_JUMP_GOTO:
                         {
-                            pf("identifier: %s\n", s->sc10_jump_goto_identifier);
+                            pf("identifier: \"%s\"\n", s->sc10_jump_goto_identifier);
                             break;
                         }
                         case STATEMENT_JUMP_CONTINUE:
@@ -416,10 +426,14 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
-        case SYNTAX_COMPONENT_DIRECT_ABSTRACT_DECLARATOR:
+        case SYNTAX_COMPONENT_PARAMETER_DECLARATION:
         {
-            // TODO
-            ps("DIRECT_ABSTRACT_DECLARATOR {\n");
+            ps("PARAMETER_DECLARATION {\n");
+            pf("specifiers_qualifiers:\n");
+            print_vector_indented(s->sc15_specifiers_qualifiers, indent + 2, printer);
+            pf("declarator:\n");
+            print_syntax_indented(s->sc15_declarator, indent + 2, printer);
+            pf("ellipsis: %s\n", BOOL_NAMES[s->sc15_ellipsis]);
             break;
         }
 
