@@ -407,8 +407,192 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
 
         case SYNTAX_COMPONENT_EXPRESSION:
         {
-            // TODO
             ps("EXPRESSION {\n");
+            pf("type: %s\n", EXPRESSION_NAMES[s->sc11_type]);
+            pf("operator_id: %d\n", s->sc11_operator_id);
+            switch (s->sc11_type)
+            {
+                case EXPRESSION_PRIMARY:
+                {
+                    pf("primary_type: %s\n", EXPRESSION_PRIMARY_NAMES[s->sc11_primary_type]);
+                    switch (s->sc11_primary_type)
+                    {
+                        case EXPRESSION_PRIMARY_IDENTIFIER:
+                            pf("identifier: %s\n", s->sc11_primary_identifier);
+                            break;
+                        case EXPRESSION_PRIMARY_INTEGER_CONSTANT:
+                            pf("integer_constant: %llo\n", s->sc11_primary_integer_constant);
+                            break;
+                        case EXPRESSION_PRIMARY_FLOATING_CONSTANT:
+                            pf("floating_constant: %Lf\n", s->sc11_primary_floating_constant);
+                            break;
+                        case EXPRESSION_PRIMARY_STRING_LITERAL:
+                            pf("string_literal: %s\n", s->sc11_primary_string_literal);
+                            break;
+                        case EXPRESSION_PRIMARY_NEST:
+                            pf("nested_expression:\n");
+                            print_syntax_indented(s->sc11_primary_nested_expression, indent + 2, printer);
+                            break;
+                    }
+                    break;
+                }
+                case EXPRESSION_POSTFIX:
+                {
+                    pf("postfix_type: %s\n", EXPRESSION_POSTFIX_NAMES[s->sc11_postfix_type]);
+                    switch (s->sc11_postfix_type)
+                    {
+                        case EXPRESSION_POSTFIX_COMPOUND_LITERAL:
+                        {
+                            pf("type_name:\n");
+                            print_syntax_indented(s->sc11_postfix_type_name, indent + 2, printer);
+                            pf("initializer_list:\n");
+                            print_syntax_indented(s->sc11_postfix_initializer_list, indent + 2, printer);
+                            break;
+                        }
+                        case EXPRESSION_POSTFIX_SUBSCRIPT:
+                        {
+                            pf("expression:\n");
+                            print_syntax_indented(s->sc11_postfix_subscript_expression, indent + 2, printer);
+                            break;
+                        }
+                        case EXPRESSION_POSTFIX_FUNCTION_CALL:
+                        {
+                            pf("argument_list:\n");
+                            print_vector_indented(s->sc11_postfix_argument_list, indent + 2, printer);
+                            break;
+                        }
+                        case EXPRESSION_POSTFIX_MEMBER:
+                        case EXPRESSION_POSTFIX_PTR_MEMBER:
+                        {
+                            pf("identifier: %s\n", s->sc11_postfix_member_identifier);
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case EXPRESSION_UNARY:
+                {
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_unary_nested_expression, indent + 2, printer);
+                    pf("cast_expression:\n");
+                    print_syntax_indented(s->sc11_unary_cast_expression, indent + 2, printer);
+                    pf("type_name:\n");
+                    print_syntax_indented(s->sc11_unary_type, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_CAST:
+                {
+                    pf("type_name:\n");
+                    print_syntax_indented(s->sc11_cast_type, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_cast_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_MULTIPLICATIVE:
+                {
+                    pf("cast_expression:\n");
+                    print_syntax_indented(s->sc11_multiplicative_cast_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_multiplicative_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_ADDITIVE:
+                {
+                    pf("multiplicative_expression:\n");
+                    print_syntax_indented(s->sc11_additive_multiplicative_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_additive_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_SHIFT:
+                {
+                    pf("additive_expression:\n");
+                    print_syntax_indented(s->sc11_shift_additive_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_shift_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_RELATIONAL:
+                {
+                    pf("shift_expression:\n");
+                    print_syntax_indented(s->sc11_relational_shift_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_relational_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_EQUALITY:
+                {
+                    pf("relational_expression:\n");
+                    print_syntax_indented(s->sc11_equality_relational_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_equality_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_AND:
+                {
+                    pf("equality_expression:\n");
+                    print_syntax_indented(s->sc11_and_equality_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_and_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_XOR:
+                {
+                    pf("and_expression:\n");
+                    print_syntax_indented(s->sc11_xor_and_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_xor_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_OR:
+                {
+                    pf("xor_expression:\n");
+                    print_syntax_indented(s->sc11_or_xor_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_or_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_LOGICAL_AND:
+                {
+                    pf("or_expression:\n");
+                    print_syntax_indented(s->sc11_land_or_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_land_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_LOGICAL_OR:
+                {
+                    pf("land_expression:\n");
+                    print_syntax_indented(s->sc11_lor_land_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_lor_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_CONDITIONAL:
+                {
+                    pf("lor_expression:\n");
+                    print_syntax_indented(s->sc11_conditional_lor_expression, indent + 2, printer);
+                    pf("then_expression:\n");
+                    print_syntax_indented(s->sc11_conditional_then_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_conditional_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_ASSIGNMENT:
+                {
+                    pf("unary_expression:\n");
+                    print_syntax_indented(s->sc11_assignment_unary_expression, indent + 2, printer);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_assignment_nested_expression, indent + 2, printer);
+                    break;
+                }
+                case EXPRESSION_ASSIGNMENT_LIST:
+                {
+                    pf("assignment_list:\n");
+                    print_vector_indented(s->sc11_assignment_list, indent + 2, printer);
+                    break;
+                }
+            }
             break;
         }
 
@@ -416,6 +600,10 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         {
             // TODO
             ps("TYPE_NAME {\n");
+            pf("specifiers_qualifiers:\n");
+            print_vector_indented(s->sc12_specifiers_qualifiers, indent + 2, printer);
+            pf("declarator:\n");
+            print_syntax_indented(s->sc12_declarator, indent + 2, printer);
             break;
         }
 

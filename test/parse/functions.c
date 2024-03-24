@@ -1,4 +1,5 @@
-void func(int a, int b)
+int func(int a, int b, int c)
 {
-    return;
+    int a = 5;
+    a += 10;
 }

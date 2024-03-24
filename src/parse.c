@@ -157,14 +157,13 @@ syntax_component_t* maybe_parse_type_name(syntax_component_t* unit, lexer_token_
     s->type = SYNTAX_COMPONENT_TYPE_NAME;
     null_protection(*toks_ref);
     lexer_token_t* tok = *toks_ref;
-    syntax_component_t* specs_quals = maybe_parse_specifiers_qualifiers(unit, &tok);
+    vector_t* specs_quals = maybe_parse_specifiers_qualifiers(unit, &tok);
     if (!specs_quals)
         dealloc_null_return;
     syntax_component_t* declarator = maybe_parse_declarator(unit, &tok);
-    if (!declarator)
-        dealloc_null_return;
     s->sc12_specifiers_qualifiers = specs_quals;
     s->sc12_declarator = declarator;
+    *toks_ref = tok;
     return s;
 }
 
@@ -892,7 +891,7 @@ syntax_component_t* maybe_parse_postfix_expression(syntax_component_t* unit, lex
         syntax_component_t* init_list = maybe_parse_initializer(unit, &tok);
         if (!init_list)
             dealloc_null_return;
-        if (!init_list->sc4_type != INITIALIZER_LIST)
+        if (init_list->sc4_type != INITIALIZER_LIST)
             dealloc_null_return;
         s->sc11_postfix_type_name = type;
         s->sc11_postfix_initializer_list = init_list;
@@ -913,7 +912,7 @@ syntax_component_t* maybe_parse_unary_expression(syntax_component_t* unit, lexer
         s->sc11_type = EXPRESSION_UNARY;
         if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_SIZEOF)
         {
-            s->sc11_operator_id = (unsigned) 'sizeof';
+            s->sc11_operator_id = (unsigned) ('s' * 'i' * 'z' * 'e' * 'o' * 'f');
             safe_lexer_token_next(tok);
             if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
             {
@@ -1018,7 +1017,7 @@ syntax_component_t* maybe_parse_cast_expression(syntax_component_t* unit, lexer_
         } \
         else \
             dealloc_null_return; \
-        syntax_component_t* sub = maybe_parse_logical_or_expression_extension(unit, s, &tok); \
+        syntax_component_t* sub = maybe_parse_##name##_expression_extension(unit, s, &tok); \
         *toks_ref = tok; \
         return sub ? sub : s; \
     } \
@@ -1122,47 +1121,6 @@ generate_maybe_parse_binary_operator_expression(logical_or,
     '|' * '|'
 )
 
-/*
-syntax_component_t* maybe_parse_logical_or_expression_extension(syntax_component_t* unit, syntax_component_t* super, lexer_token_t** toks_ref)
-{
-    lexer_token_t* tok = *toks_ref;
-    if (!tok) return NULL;
-    syntax_component_t* s = calloc(1, sizeof *s);
-    s->type = SYNTAX_COMPONENT_EXPRESSION;
-    s->sc11_type = EXPRESSION_LOGICAL_OR;
-    s->sc11_operator_id = '|' * '|';
-    unsigned oid = tok->operator_id;
-    if (tok->type == LEXER_TOKEN_OPERATOR && oid == '|' * '|')
-    {
-        safe_lexer_token_next(tok);
-        syntax_component_t* right = maybe_parse_logical_and_expression(unit, &tok);
-        if (!right)
-            dealloc_null_return;
-        s->sc11_lor_land_expression = super;
-        s->sc11_lor_nested_expression = right;
-    }
-    else
-        dealloc_null_return;
-    syntax_component_t* sub = maybe_parse_logical_or_expression_extension(unit, s, &tok);
-    *toks_ref = tok;
-    return sub ? sub : s;
-}
-
-syntax_component_t* maybe_parse_logical_or_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
-{
-    lexer_token_t* tok = *toks_ref;
-    syntax_component_t* base = maybe_parse_logical_and_expression(unit, &tok);
-    if (!base)
-        return NULL;
-    syntax_component_t* ext = maybe_parse_logical_or_expression_extension(unit, base, &tok);
-    if (ext) base = ext;
-    *toks_ref = tok;
-    return base;
-}
-*/
-
-// 5 * 3 + 5
-
 syntax_component_t* maybe_parse_conditional_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
     lexer_token_t* tok = *toks_ref;
@@ -1200,32 +1158,40 @@ syntax_component_t* maybe_parse_conditional_expression(syntax_component_t* unit,
 
 syntax_component_t* maybe_parse_assignment_expression(syntax_component_t* unit, lexer_token_t** toks_ref)
 {
-    lexer_token_t* tok = *toks_ref;
-    syntax_component_t* s = maybe_parse_conditional_expression(unit, &tok);
-    if (!s)
+    lexer_token_t* tok = *toks_ref, * tok_first = *toks_ref;
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_EXPRESSION;
+    s->sc11_type = EXPRESSION_ASSIGNMENT;
+    syntax_component_t* unary = maybe_parse_unary_expression(unit, &tok);
+    if (!unary)
     {
-        s = calloc(1, sizeof *s);
-        s->type = SYNTAX_COMPONENT_EXPRESSION;
-        s->sc11_type = EXPRESSION_ASSIGNMENT;
-        syntax_component_t* unary = maybe_parse_unary_expression(unit, &tok);
-        if (!unary)
-            return NULL;
-        s->sc11_assignment_unary_expression = unary;
-        if (!is_assignment_operator_token(tok))
-        {
-            free(unary);
-            return NULL;
-        }
-        s->sc11_operator_id = tok->operator_id;
-        safe_lexer_token_next(tok);
-        syntax_component_t* nested = maybe_parse_assignment_expression(unit, &tok);
-        if (!nested)
-        {
-            free(unary);
-            return NULL;
-        }
-        s->sc11_assignment_nested_expression = nested;
+        free(unary);
+        free(s);
+        s = maybe_parse_conditional_expression(unit, &tok_first);
+        *toks_ref = tok_first;
+        return s;
     }
+    s->sc11_assignment_unary_expression = unary;
+    if (!is_assignment_operator_token(tok))
+    {
+        free(unary);
+        free(s);
+        s = maybe_parse_conditional_expression(unit, &tok_first);
+        *toks_ref = tok_first;
+        return s;
+    }
+    s->sc11_operator_id = tok->operator_id;
+    safe_lexer_token_next(tok);
+    syntax_component_t* nested = maybe_parse_assignment_expression(unit, &tok);
+    if (!nested)
+    {
+        free(unary);
+        free(s);
+        s = maybe_parse_conditional_expression(unit, &tok_first);
+        *toks_ref = tok_first;
+        return s;
+    }
+    s->sc11_assignment_nested_expression = nested;
     *toks_ref = tok;
     return s;
 }
@@ -1237,7 +1203,6 @@ syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token
     s->sc11_type = EXPRESSION_ASSIGNMENT_LIST;
     s->sc11_assignment_list = vector_init();
     lexer_token_t* tok = *toks_ref;
-    // TODO
     for (;;)
     {
         syntax_component_t* expr = maybe_parse_assignment_expression(unit, &tok);
@@ -1247,6 +1212,13 @@ syntax_component_t* maybe_parse_expression(syntax_component_t* unit, lexer_token
         if (tok && tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ',')
             continue;
         break;
+    }
+    if (s->sc11_assignment_list->size == 1)
+    {
+        syntax_component_t* expr = vector_get(s->sc11_assignment_list, 0);
+        vector_delete(s->sc11_assignment_list);
+        free(s);
+        s = expr;
     }
     *toks_ref = tok;
     return s;
@@ -1633,6 +1605,7 @@ syntax_component_t* parse(lexer_token_t* toks)
             vector_add(unit->sc0_external_declarations, function_definition);
             continue;
         }
+        print_token(toks, printf);
         parse_terminate(toks, "unknown syntax encountered");
     }
     return unit;

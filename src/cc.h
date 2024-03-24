@@ -111,47 +111,6 @@
 #define STATEMENT_JUMP_BREAK 2
 #define STATEMENT_JUMP_RETURN 3
 
-/*
-#define EXPRESSION_IDENTIFIER 0
-#define EXPRESSION_INTEGER_CONSTANT 1
-#define EXPRESSION_FLOATING_CONSTANT 2
-#define EXPRESSION_STRING_CONSTANT 3
-#define EXPRESSION_NEST 4
-#define EXPRESSION_SUBSCRIPT 5
-#define EXPRESSION_FUNCTION_CALL 6
-#define EXPRESSION_MEMBER_ACCESS 7
-#define EXPRESSION_PTR_MEMBER_ACCESS 8
-#define EXPRESSION_POSTFIX_INCREMENT 9
-#define EXPRESSION_POSTFIX_DECREMENT 10
-#define EXPRESSION_COMPOUND_LITERAL 11
-#define EXPRESSION_PREFIX_INCREMENT 12
-#define EXPRESSION_PREFIX_DECREMENT 13
-#define EXPRESSION_UNARY_CAST 14
-#define EXPRESSION_SIZEOF_EXPRESSION 15
-#define EXPRESSION_SIZEOF_TYPE 16
-#define EXPRESSION_CAST 17
-#define EXPRESSION_MULTIPLICATION 18
-#define EXPRESSION_DIVISION 19
-#define EXPRESSION_MODULO 20
-#define EXPRESSION_ADDITION 21
-#define EXPRESSION_SUBTRACTION 22
-#define EXPRESSION_SHIFT_LEFT 23
-#define EXPRESSION_SHIFT_RIGHT 24
-#define EXPRESSION_LESS 25
-#define EXPRESSION_GREATER 26
-#define EXPRESSION_LESS_EQUAL 27
-#define EXPRESSION_GREATER_EQUAL 28
-#define EXPRESSION_EQUAL 29
-#define EXPRESSION_NOT_EQUAL 30
-#define EXPRESSION_AND 31
-#define EXPRESSION_XOR 32
-#define EXPRESSION_OR 33
-#define EXPRESSION_LOGICAL_AND 34
-#define EXPRESSION_LOGICAL_OR 35
-#define EXPRESSION_TERNARY 36
-#define EXPRESSION_ASSIGNMENT 37
-*/
-
 #define EXPRESSION_ASSIGNMENT_LIST 0
 #define EXPRESSION_ASSIGNMENT 1
 #define EXPRESSION_CONDITIONAL 2
@@ -538,7 +497,7 @@ typedef struct syntax_component_t
                         struct
                         {
                             struct syntax_component_t* sc11_postfix_type_name;
-                            vector_t* sc11_postfix_initializer_list;
+                            struct syntax_component_t* sc11_postfix_initializer_list;
                         };
                         struct syntax_component_t* sc11_postfix_subscript_expression;
                         vector_t* sc11_postfix_argument_list;
@@ -561,75 +520,6 @@ typedef struct syntax_component_t
 
             };
         };
-        /*
-        struct
-        {
-            unsigned sc11_type;
-            union
-            {
-                char* sc11_identifier;
-                unsigned long long sc11_integer_constant;
-                long double sc11_floating_constant;
-                long long* sc11_string_constant;
-                struct syntax_component_t* sc11_nested_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-
-                // EXPRESSION_FUNCTION_CALL
-                struct
-                {
-                    struct syntax_component_t* sc11_function;
-                    vector_t* sc11_function_arguments; // <syntax_component_t> (SYNTAX_COMPONENT_EXPRESSION)
-                };
-
-                // EXPRESSION_COMPOUND_LITERAL
-                struct
-                {
-                    struct syntax_component_t* sc11_compound_literal_type; // (SYNTAX_COMPONENT_TYPE_NAME)
-                    vector_t* sc11_compound_literal_initializer_list; // <syntax_component_t> (SYNTAX_COMPONENT_INITIALIZER)
-                };
-
-                // EXPRESSION_UNARY_CAST
-                struct
-                {
-                    unsigned sc11_unary_cast_operator_id;
-                    struct syntax_component_t* sc11_unary_cast_expression; // (SYNTAX_COMPONENT_EXPRESSION) 
-                };
-
-                // EXPRESSION_SIZEOF_EXPRESSION
-                // EXPRESSION_SIZEOF_TYPE
-                struct syntax_component_t* sc11_sizeof_arg; // (SYNTAX_COMPONENT_TYPE_NAME | SYNTAX_COMPONENT_EXPRESSION)
-
-                // EXPRESSION_CAST
-                struct
-                {
-                    struct syntax_component_t* sc11_cast_type; // (SYNTAX_COMPONENT_TYPE_NAME)
-                    struct syntax_component_t* sc11_cast_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                };
-
-                // any unary operator
-                struct
-                {
-                    unsigned sc11_unary_operator_id;
-                    struct syntax_component_t* sc11_unary_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                };
-
-                // any binary operator
-                struct
-                {
-                    unsigned sc11_binary_operator_id;
-                    struct syntax_component_t* sc11_binary_left_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                    struct syntax_component_t* sc11_binary_right_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                };
-
-                // EXPRESSION_TERNARY
-                struct
-                {
-                    struct syntax_component_t* sc11_ternary_condition; // (SYNTAX_COMPONENT_EXPRESSION)
-                    struct syntax_component_t* sc11_ternary_then; // (SYNTAX_COMPONENT_EXPRESSION)
-                    struct syntax_component_t* sc11_ternary_else; // (SYNTAX_COMPONENT_EXPRESSION)
-                };
-            };
-        };
-        */
 
         // SYNTAX_COMPONENT_TYPE_NAME
         struct
@@ -716,7 +606,10 @@ extern const char* STATEMENT_LABELED_NAMES[3];
 extern const char* STATEMENT_SELECTION_NAMES[3];
 extern const char* STATEMENT_ITERATION_NAMES[4];
 extern const char* STATEMENT_JUMP_NAMES[4];
-//extern const char* EXPRESSION_NAMES[38];
+extern const char* EXPRESSION_NAMES[17];
+extern const char* EXPRESSION_POSTFIX_NAMES[7];
+extern const char* EXPRESSION_PRIMARY_NAMES[5];
+extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];

@@ -160,48 +160,43 @@ const char* STATEMENT_JUMP_NAMES[4] = {
     "RETURN"
 };
 
-/*
-const char* EXPRESSION_NAMES[38] = {
+const char* EXPRESSION_NAMES[17] = {
+    "ASSIGNMENT_LIST",
+    "ASSIGNMENT",
+    "CONDITIONAL",
+    "LOGICAL_OR",
+    "LOGICAL_AND",
+    "OR",
+    "XOR",
+    "AND",
+    "EQUALITY",
+    "RELATIONAL",
+    "SHIFT",
+    "ADDITIVE",
+    "MULTIPLICATIVE",
+    "CAST",
+    "UNARY",
+    "POSTFIX",
+    "PRIMARY"
+};
+
+const char* EXPRESSION_POSTFIX_NAMES[7] = {
+    "COMPOUND_LITERAL",
+    "SUBSCRIPT",
+    "FUNCTION_CALL",
+    "MEMBER",
+    "PTR_MEMBER",
+    "INCREMENT",
+    "DECREMENT"
+};
+
+const char* EXPRESSION_PRIMARY_NAMES[5] = {
     "IDENTIFIER",
     "INTEGER_CONSTANT",
     "FLOATING_CONSTANT",
-    "STRING_CONSTANT",
-    "NEST",
-    "SUBSCRIPT",
-    "FUNCTION_CALL",
-    "MEMBER_ACCESS",
-    "PTR_MEMBER_ACCESS",
-    "POSTFIX_INCREMENT",
-    "POSTFIX_DECREMENT",
-    "COMPOUND_LITERAL",
-    "PREFIX_INCREMENT",
-    "PREFIX_DECREMENT",
-    "UNARY_CAST",
-    "SIZEOF_EXPRESSION",
-    "SIZEOF_TYPE",
-    "CAST",
-    "MULTIPLICATION",
-    "DIVISION",
-    "MODULO",
-    "ADDITION",
-    "SUBTRACTION",
-    "SHIFT_LEFT",
-    "SHIFT_RIGHT",
-    "LESS",
-    "GREATER",
-    "LESS_EQUAL",
-    "GREATER_EQUAL",
-    "EQUAL",
-    "NOT_EQUAL",
-    "AND",
-    "XOR",
-    "OR",
-    "LOGICAL_AND",
-    "LOGICAL_OR",
-    "TERNARY",
-    "ASSIGNMENT"
+    "STRING_LITERAL",
+    "NEST"
 };
-*/
 
 const char* ABSTRACT_DECLARATOR_NAMES[4] = {
     "POINTER",
