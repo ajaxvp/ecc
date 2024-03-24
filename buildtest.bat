@@ -1,1 +1,1 @@
-gcc -o tcc.exe src/buffer.c src/const.c src/lex.c src/log.c src/parse.c src/set.c src/syntax.c src/test.c src/vector.c
+gcc -Wall -o tcc.exe src/buffer.c src/const.c src/lex.c src/log.c src/parse.c src/set.c src/syntax.c src/test.c src/vector.c

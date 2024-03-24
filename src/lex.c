@@ -309,7 +309,7 @@ static lexer_token_t* lex_single(FILE* file, filepos_t* pos)
             floating = true; // this number is by necessity floating
             buffer_append(b, e); // add the loop failure character
             int f = readc(file, pos);
-            bool numbers = false, sign = f == '+' || f == '-';
+            bool numbers = false;
             // read numbers for the exponent and allow for +s and -s
             for (int signs = 0; isnumeric(f) || f == '+' || f == '-'; f = readc(file, pos))
             {

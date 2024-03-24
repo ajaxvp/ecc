@@ -754,7 +754,7 @@ syntax_component_t* maybe_parse_primary_expression(syntax_component_t* unit, lex
     else if (tok->type == LEXER_TOKEN_INTEGER_CONSTANT)
     {
         s->sc11_primary_type = EXPRESSION_PRIMARY_INTEGER_CONSTANT;
-        s->sc11_primary_integer_constant = 0; // TODO
+        s->sc11_primary_integer_constant = strtoull(tok->string_value, NULL, 0);
     }
     else if (tok->type == LEXER_TOKEN_CHARACTER_CONSTANT)
     {
@@ -764,7 +764,7 @@ syntax_component_t* maybe_parse_primary_expression(syntax_component_t* unit, lex
     else if (tok->type == LEXER_TOKEN_FLOATING_CONSTANT)
     {
         s->sc11_primary_type = EXPRESSION_PRIMARY_FLOATING_CONSTANT;
-        s->sc11_primary_floating_constant = 0.0L; // TODO
+        s->sc11_primary_floating_constant = strtold(tok->string_value, NULL);
     }
     else if (tok->type == LEXER_TOKEN_STRING_CONSTANT)
     {
@@ -912,7 +912,7 @@ syntax_component_t* maybe_parse_unary_expression(syntax_component_t* unit, lexer
         s->sc11_type = EXPRESSION_UNARY;
         if (tok->type == LEXER_TOKEN_KEYWORD && tok->keyword_id == KEYWORD_SIZEOF)
         {
-            s->sc11_operator_id = (unsigned) ('s' * 'i' * 'z' * 'e' * 'o' * 'f');
+            s->sc11_operator_id = 'sizeof';
             safe_lexer_token_next(tok);
             if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
             {
