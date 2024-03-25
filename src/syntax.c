@@ -59,7 +59,7 @@ void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** dec
         *declaration_ref = decl;
         for (unsigned j = 0; j < decl->sc1_declarators->size; ++j)
         {
-            syntax_component_t* declarator = dig_declarator(vector_get(decl->sc1_declarators, j));
+            syntax_component_t* declarator = dig_declarator_identifier(vector_get(decl->sc1_declarators, j));
             if (declarator->sc3_type == DECLARATOR_IDENTIFIER &&
                 !strcmp(declarator->sc3_identifier, identifier))
             {
@@ -156,13 +156,16 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                     pf("typedef: %s\n", dig_declarator_identifier(s->sc2_typedef_declarator)->sc3_identifier);
                     break;
                 case SPECIFIER_QUALIFIER_STRUCT:
-                    pf("struct: %s\n", s->sc2_struct->sc5_identifier);
+                    pf("struct:\n");
+                    print_syntax_indented(s->sc2_struct, indent + 2, printer);
                     break;
                 case SPECIFIER_QUALIFIER_UNION:
-                    pf("union: %s\n", s->sc2_union->sc5_identifier);
+                    pf("union:\n");
+                    print_syntax_indented(s->sc2_union, indent + 2, printer);
                     break;
                 case SPECIFIER_QUALIFIER_ENUM:
-                    pf("enum: %s\n", s->sc2_enum->sc6_identifier);
+                    pf("enum:\n");
+                    print_syntax_indented(s->sc2_enum, indent + 2, printer);
                     break;
                 case SPECIFIER_QUALIFIER_STORAGE_CLASS:
                     pf("storage_class: %s\n", STORAGE_CLASS_NAMES[s->sc2_storage_class_id]);
@@ -421,7 +424,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                             pf("identifier: %s\n", s->sc11_primary_identifier);
                             break;
                         case EXPRESSION_PRIMARY_INTEGER_CONSTANT:
-                            pf("integer_constant: %llo\n", s->sc11_primary_integer_constant);
+                            pf("integer_constant: %lld\n", s->sc11_primary_integer_constant);
                             break;
                         case EXPRESSION_PRIMARY_FLOATING_CONSTANT:
                             pf("floating_constant: %Lf\n", s->sc11_primary_floating_constant);
@@ -439,6 +442,8 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                 case EXPRESSION_POSTFIX:
                 {
                     pf("postfix_type: %s\n", EXPRESSION_POSTFIX_NAMES[s->sc11_postfix_type]);
+                    pf("nested_expression:\n");
+                    print_syntax_indented(s->sc11_postfix_nested_expression, indent + 2, printer);
                     switch (s->sc11_postfix_type)
                     {
                         case EXPRESSION_POSTFIX_COMPOUND_LITERAL:
@@ -598,19 +603,11 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
 
         case SYNTAX_COMPONENT_TYPE_NAME:
         {
-            // TODO
             ps("TYPE_NAME {\n");
             pf("specifiers_qualifiers:\n");
             print_vector_indented(s->sc12_specifiers_qualifiers, indent + 2, printer);
             pf("declarator:\n");
             print_syntax_indented(s->sc12_declarator, indent + 2, printer);
-            break;
-        }
-
-        case SYNTAX_COMPONENT_ABSTRACT_DECLARATOR:
-        {
-            // TODO
-            ps("ABSTRACT_DECLARATOR {\n");
             break;
         }
 

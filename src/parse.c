@@ -86,13 +86,14 @@ syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_tok
         safe_lexer_token_next(tok);
         while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}'))
         {
+            // TODO handle bit field shit
             syntax_component_t* decl = maybe_parse_declaration(unit, &tok);
             if (!decl)
                 dealloc_null_return;
             vector_add(s->sc5_declarations, decl);
         }
         if (!tok) dealloc_null_return; // for the instance in which you had like: struct { int a;(EOF)
-        safe_lexer_token_next(tok); // move past ending brace
+        tok = tok->next;
     }
     *toks_ref = tok;
     return s;
@@ -129,21 +130,24 @@ syntax_component_t* maybe_parse_enum(syntax_component_t* unit, lexer_token_t** t
             enumerator->sc7_identifier = tok->string_value;
             safe_lexer_token_next(tok);
             syntax_component_t* expr = NULL;
-            if (tok->type == ',')
+            if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ',')
                 safe_lexer_token_next(tok)
-            else if (tok->type == '=')
+            else if (tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '=')
             {
                 safe_lexer_token_next(tok);
-                expr = maybe_parse_expression(unit, &tok);
+                expr = maybe_parse_conditional_expression(unit, &tok);
                 if (!expr)
                     dealloc_null_return;
-                if (tok->type == ',')
+                if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ',')
                     safe_lexer_token_next(tok)
-                else if (tok->type != '}')
+                else if (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}')
                     dealloc_null_return;
+                enumerator->sc7_const_expression = expr;
             }
-            vector_add(s->sc6_enumerators, expr);
+            vector_add(s->sc6_enumerators, enumerator);
         }
+        if (!s->sc6_enumerators->size)
+            dealloc_null_return;
         if (!tok) dealloc_null_return; // for the instance in which you had like: struct { int a;(end of file)
         safe_lexer_token_next(tok); // move past ending brace
     }
@@ -210,6 +214,7 @@ vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_toke
                 s->sc2_type = SPECIFIER_QUALIFIER_STORAGE_CLASS; \
                 s->sc2_storage_class_id = (x); \
                 vector_add(v, s); \
+                tok = tok->next; \
             }
             #define qualifier_if(x, y) \
             if (keyword_count[(y)] == 1 && tok->keyword_id == (y)) \
@@ -217,6 +222,7 @@ vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_toke
                 s->sc2_type = SPECIFIER_QUALIFIER_QUALIFIER; \
                 s->sc2_qualifier_id = (x); \
                 vector_add(v, s); \
+                tok = tok->next; \
             }
 
             // these are the easy type specifiers, arithmetic types come after everything LOL
@@ -224,6 +230,7 @@ vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_toke
             {
                 s->sc2_type = SPECIFIER_QUALIFIER_VOID;
                 vector_add(v, s);
+                tok = tok->next;
             }
             else storage_class_if(STORAGE_CLASS_TYPEDEF, KEYWORD_TYPEDEF)
             else storage_class_if(STORAGE_CLASS_AUTO, KEYWORD_AUTO)
@@ -238,6 +245,7 @@ vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_toke
                 s->sc2_type = SPECIFIER_QUALIFIER_FUNCTION;
                 s->sc2_function_id = FUNCTION_SPECIFIER_INLINE;
                 vector_add(v, s);
+                tok = tok->next;
             }
             else if (keyword_count[KEYWORD_STRUCT] == 1 && tok->keyword_id == KEYWORD_STRUCT)
             {
@@ -273,9 +281,10 @@ vector_t* maybe_parse_specifiers_qualifiers(syntax_component_t* unit, lexer_toke
                 vector_add(v, s);
             }
             else
+            {
                 free(s);
-            
-            tok = tok->next;
+                tok = tok->next;
+            }
             
             #undef storage_class_body
             #undef qualifier_body
@@ -585,6 +594,8 @@ syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token
             dealloc_null_return;
         safe_lexer_token_next(tok);
     }
+    else
+        dealloc_null_return;
     *toks_ref = tok;
     return s;
 }
@@ -607,6 +618,7 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
             if (!initializer)
             {
                 initializer = calloc(1, sizeof *initializer);
+                initializer->type = SYNTAX_COMPONENT_INITIALIZER;
                 initializer->sc4_type = INITIALIZER_DESIGNATION;
                 initializer->sc4_designator_list = vector_init();
                 for (;;)
@@ -627,7 +639,7 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
                 initializer->sc4_subinitializer = subinitializer;
             }
             vector_add(s->sc4_initializer_list, initializer);
-            if (tok->type == LEXER_TOKEN_OPERATOR && tok->separator_id == ',')
+            if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == ',')
                 safe_lexer_token_next(tok)
             else if (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}')
                 dealloc_null_return
@@ -639,7 +651,7 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
     else // expression
     {
         s->sc4_type = INITIALIZER_EXPRESSION;
-        syntax_component_t* expr = maybe_parse_expression(unit, &tok);
+        syntax_component_t* expr = maybe_parse_assignment_expression(unit, &tok);
         if (!expr)
             dealloc_null_return;
         s->sc4_expression = expr;
@@ -684,8 +696,11 @@ syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_toke
         if (!declarator)
             break;
         vector_add(s->sc1_declarators, declarator);
+        bool equals = tok && tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == '=';
         syntax_component_t* initializer = maybe_parse_initializer(unit, &tok);
         vector_add(s->sc1_initializers, initializer);
+        if (!equals && initializer)
+            dealloc_null_return;
         if (tok->type != LEXER_TOKEN_SEPARATOR)
             dealloc_null_return;
         if (tok->separator_id == ',')
@@ -720,7 +735,6 @@ syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, 
     if (!s->sc15_specifiers_qualifiers)
         dealloc_null_return;
     s->sc15_declarator = maybe_parse_declarator(unit, &tok);
-    // TODO there's probably some abstract declarator stuff i have to do here but i cba rn lol
     *toks_ref = tok;
     return s;
 }
@@ -799,6 +813,7 @@ syntax_component_t* maybe_parse_postfix_expression_extension(syntax_component_t*
     syntax_component_t* s = calloc(1, sizeof *s);
     s->type = SYNTAX_COMPONENT_EXPRESSION;
     s->sc11_type = EXPRESSION_POSTFIX;
+    s->sc11_postfix_nested_expression = super;
     if (tok->type == LEXER_TOKEN_SEPARATOR && tok->separator_id == '(')
     {
         safe_lexer_token_next(tok);
@@ -1406,6 +1421,7 @@ syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_
                     dealloc_null_return;
                 if (tok->keyword_id != KEYWORD_WHILE)
                     dealloc_null_return;
+                safe_lexer_token_next(tok);
                 if (tok->type != LEXER_TOKEN_SEPARATOR)
                     dealloc_null_return;
                 if (tok->separator_id != '(')
@@ -1447,11 +1463,14 @@ syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_
                         s->sc10_iteration_type = STATEMENT_ITERATION_FOR_EXPRESSION;
                 }
                 s->sc10_iteration_for_init = init;
-                if (tok->type != LEXER_TOKEN_SEPARATOR)
-                    dealloc_null_return;
-                if (tok->separator_id != ';')
-                    dealloc_null_return;
-                safe_lexer_token_next(tok);
+                if (s->sc10_iteration_type != STATEMENT_ITERATION_FOR_DECLARATION)
+                {
+                    if (tok->type != LEXER_TOKEN_SEPARATOR)
+                        dealloc_null_return;
+                    if (tok->separator_id != ';')
+                        dealloc_null_return;
+                    safe_lexer_token_next(tok);
+                }
                 s->sc10_iteration_for_condition = maybe_parse_expression(unit, &tok);
                 if (tok->type != LEXER_TOKEN_SEPARATOR)
                     dealloc_null_return;
@@ -1477,7 +1496,7 @@ syntax_component_t* maybe_parse_statement(syntax_component_t* unit, lexer_token_
                 syntax_component_t* s = calloc(1, sizeof *s);
                 s->type = SYNTAX_COMPONENT_STATEMENT;
                 s->sc10_type = STATEMENT_JUMP;
-                s->sc10_jump_type = tok->type == KEYWORD_BREAK ? STATEMENT_JUMP_BREAK : STATEMENT_JUMP_CONTINUE;
+                s->sc10_jump_type = tok->keyword_id == KEYWORD_BREAK ? STATEMENT_JUMP_BREAK : STATEMENT_JUMP_CONTINUE;
                 safe_lexer_token_next(tok);
                 if (tok->type != LEXER_TOKEN_SEPARATOR)
                     dealloc_null_return;
@@ -1605,6 +1624,7 @@ syntax_component_t* parse(lexer_token_t* toks)
             vector_add(unit->sc0_external_declarations, function_definition);
             continue;
         }
+        printf("fail on: ");
         print_token(toks, printf);
         parse_terminate(toks, "unknown syntax encountered");
     }

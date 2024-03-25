@@ -511,6 +511,7 @@ typedef struct syntax_component_t
                     union
                     {
                         char* sc11_primary_identifier;
+                        // TODO probably store more information about these (like signedness or something idfk)
                         unsigned long long sc11_primary_integer_constant;
                         long double sc11_primary_floating_constant;
                         char* sc11_primary_string_literal;
