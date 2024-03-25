@@ -622,6 +622,26 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SYNTAX_COMPONENT_STRUCT_DECLARATION:
+        {
+            ps("STRUCT_DECLARATION {\n");
+            pf("specifiers_qualifiers:\n");
+            print_vector_indented(s->sc16_specifiers_qualifiers, indent + 2, printer);
+            pf("declarators:\n");
+            print_vector_indented(s->sc16_declarators, indent + 2, printer);
+            break;
+        }
+
+        case SYNTAX_COMPONENT_STRUCT_DECLARATOR:
+        {
+            ps("STRUCT_DECLARATOR {\n");
+            pf("declarator:\n");
+            print_syntax_indented(s->sc17_declarator, indent + 2, printer);
+            pf("const_expression:\n");
+            print_syntax_indented(s->sc17_const_expression, indent + 2, printer);
+            break;
+        }
+
         default:
             ps("unknown syntax component\n");
             return;

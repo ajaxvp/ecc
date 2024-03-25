@@ -31,6 +31,8 @@
 #define SYNTAX_COMPONENT_TYPE_NAME 12
 #define SYNTAX_COMPONENT_ABSTRACT_DECLARATOR 13
 #define SYNTAX_COMPONENT_PARAMETER_DECLARATION 15
+#define SYNTAX_COMPONENT_STRUCT_DECLARATION 16
+#define SYNTAX_COMPONENT_STRUCT_DECLARATOR 17
 
 #define SPECIFIER_QUALIFIER_VOID 0
 #define SPECIFIER_QUALIFIER_ARITHMETIC_TYPE 1
@@ -306,7 +308,7 @@ typedef struct syntax_component_t
         {
             bool sc5_is_union;
             char* sc5_identifier;
-            vector_t* sc5_declarations; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
+            vector_t* sc5_declarations; // <syntax_component_t> (SYNTAX_COMPONENT_STRUCT_DECLARATION)
         };
 
         // SYNTAX_COMPONENT_ENUM
@@ -548,6 +550,20 @@ typedef struct syntax_component_t
             bool sc15_ellipsis;
             vector_t* sc15_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
             struct syntax_component_t* sc15_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
+        };
+
+        // SYNTAX_COMPONENT_STRUCT_DECLARATION
+        struct
+        {
+            vector_t* sc16_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
+            vector_t* sc16_declarators; // <syntax_component_t> (SYNTAX_COMPONENT_STRUCT_DECLARATOR)
+        };
+
+        // SYNTAX_COMPONENT_STRUCT_DECLARATOR
+        struct
+        {
+            struct syntax_component_t* sc17_declarator;
+            struct syntax_component_t* sc17_const_expression;
         };
     };
 } syntax_component_t;

@@ -5,7 +5,7 @@
 
 #include "cc.h"
 
-#define dealloc_null_return { free(s); return NULL; }
+#define dealloc_null_return { printf("failed at %s\n", __func__); free(s); return NULL; }
 #define null_protection(x) if (!(x)) dealloc_null_return
 #define safe_lexer_token_next(tok) { tok = tok->next; if (!tok) return NULL; }
 #define parse_terminate(tok, fmt, ...) terminate("(line %d, col. %d) " fmt, (tok)->row, (tok)->col, ## __VA_ARGS__)
@@ -33,6 +33,8 @@ syntax_component_t* maybe_parse_qualifier(syntax_component_t* unit, lexer_token_
 syntax_component_t* maybe_parse_declarator(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_designator(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_struct_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
+syntax_component_t* maybe_parse_struct_declarator(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_parameter_declaration(syntax_component_t* unit, lexer_token_t** toks_ref);
 syntax_component_t* maybe_parse_primary_expression(syntax_component_t* unit, lexer_token_t** toks_ref);
@@ -86,8 +88,7 @@ syntax_component_t* maybe_parse_struct_union(syntax_component_t* unit, lexer_tok
         safe_lexer_token_next(tok);
         while (tok && (tok->type != LEXER_TOKEN_SEPARATOR || tok->separator_id != '}'))
         {
-            // TODO handle bit field shit
-            syntax_component_t* decl = maybe_parse_declaration(unit, &tok);
+            syntax_component_t* decl = maybe_parse_struct_declaration(unit, &tok);
             if (!decl)
                 dealloc_null_return;
             vector_add(s->sc5_declarations, decl);
@@ -656,6 +657,62 @@ syntax_component_t* maybe_parse_initializer(syntax_component_t* unit, lexer_toke
             dealloc_null_return;
         s->sc4_expression = expr;
     }
+    *toks_ref = tok;
+    return s;
+}
+
+syntax_component_t* maybe_parse_struct_declaration(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_STRUCT_DECLARATION;
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) dealloc_null_return;
+    vector_t* specs_quals = maybe_parse_specifiers_qualifiers(unit, &tok);
+    if (!specs_quals)
+        dealloc_null_return;
+    vector_t* declarators = vector_init();
+    for (;;)
+    {
+        syntax_component_t* declarator = maybe_parse_struct_declarator(unit, &tok);
+        if (!declarator)
+            break;
+        vector_add(declarators, declarator);
+        if (tok->type != LEXER_TOKEN_SEPARATOR)
+            dealloc_null_return;
+        if (tok->separator_id == ',')
+            safe_lexer_token_next(tok)
+        else if (tok->separator_id == ';')
+            break;
+        else
+            dealloc_null_return;
+    }
+    s->sc16_specifiers_qualifiers = specs_quals;
+    s->sc16_declarators = declarators;
+    if (tok->type != LEXER_TOKEN_SEPARATOR)
+        dealloc_null_return;
+    if (tok->separator_id != ';')
+        dealloc_null_return;
+    *toks_ref = tok->next;
+    return s;
+}
+
+syntax_component_t* maybe_parse_struct_declarator(syntax_component_t* unit, lexer_token_t** toks_ref)
+{
+    syntax_component_t* s = calloc(1, sizeof *s);
+    s->type = SYNTAX_COMPONENT_STRUCT_DECLARATOR;
+    lexer_token_t* tok = *toks_ref;
+    if (!tok) dealloc_null_return;
+    s->sc17_declarator = maybe_parse_declarator(unit, &tok);
+    s->sc17_const_expression = NULL;
+    if (tok && tok->type == LEXER_TOKEN_OPERATOR && tok->operator_id == ':')
+    {
+        safe_lexer_token_next(tok);
+        s->sc17_const_expression = maybe_parse_conditional_expression(unit, &tok);
+        if (!s->sc17_const_expression)
+            dealloc_null_return;
+    }
+    else if (!s->sc17_declarator)
+        dealloc_null_return;
     *toks_ref = tok;
     return s;
 }
