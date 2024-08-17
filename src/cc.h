@@ -33,6 +33,7 @@
 #define SYNTAX_COMPONENT_PARAMETER_DECLARATION 15
 #define SYNTAX_COMPONENT_STRUCT_DECLARATION 16
 #define SYNTAX_COMPONENT_STRUCT_DECLARATOR 17
+#define SYNTAX_COMPONENT_POINTER 18
 
 #define SPECIFIER_QUALIFIER_VOID 0
 #define SPECIFIER_QUALIFIER_ARITHMETIC_TYPE 1
@@ -80,7 +81,6 @@
 
 #define DECLARATOR_IDENTIFIER 0
 #define DECLARATOR_NEST 1
-#define DECLARATOR_POINTER 2
 #define DECLARATOR_ARRAY 3
 #define DECLARATOR_FUNCTION 4
 
@@ -262,15 +262,11 @@ typedef struct syntax_component_t
         struct
         {
             unsigned sc3_type;
+            vector_t* sc3_pointers;
             union
             {
                 char* sc3_identifier;
                 struct syntax_component_t* sc3_nested_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                struct
-                {
-                    vector_t* sc3_pointer_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-                    struct syntax_component_t* sc3_pointer_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                };
                 struct
                 {
                     struct syntax_component_t* sc3_array_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
@@ -565,8 +561,36 @@ typedef struct syntax_component_t
             struct syntax_component_t* sc17_declarator;
             struct syntax_component_t* sc17_const_expression;
         };
+
+        // SYNTAX_COMPONENT_POINTER
+        vector_t* sc18_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
     };
 } syntax_component_t;
+
+typedef struct symbol_t
+{
+    struct symbol_t* shaded;
+    syntax_component_t* scope;
+    syntax_component_t* declaration;
+    syntax_component_t* declarator;
+    char* label;
+    int offset;
+} symbol_t;
+
+typedef struct symbol_table_t
+{
+    char** key;
+    symbol_t** value;
+    unsigned size;
+    unsigned capacity;
+} symbol_table_t;
+
+typedef struct emission_details_t
+{
+    FILE* out;
+    syntax_component_t* unit;
+    symbol_table_t* symbols;
+} emission_details_t;
 
 typedef struct binary_node_t
 {
@@ -613,6 +637,7 @@ extern const char* KEYWORDS[37];
 extern const char* SYNTAX_COMPONENT_NAMES[16];
 extern const char* SPECIFIER_QUALIFIER_NAMES[9];
 extern const char* ARITHMETIC_TYPE_NAMES[21];
+extern unsigned ARITHMETIC_TYPE_SIZES[21];
 extern const char* STORAGE_CLASS_NAMES[5];
 extern const char* QUALIFIER_NAMES[3];
 extern const char* FUNCTION_SPECIFIER_NAMES[1];
@@ -641,11 +666,15 @@ bool is_unary_operator_token(lexer_token_t* tok);
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);
 
+/* emit.c */
+bool emit(syntax_component_t* unit, FILE* out);
+
 /* syntax.c */
-syntax_component_t* dig_declarator(syntax_component_t* declarator);
 syntax_component_t* dig_declarator_identifier(syntax_component_t* declarator);
 unsigned count_specifiers(syntax_component_t* declaration, unsigned type);
+unsigned get_declaration_size(syntax_component_t* s);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
+bool has_specifier_qualifier(vector_t* specs_quals, unsigned spec_qual_type, unsigned type);
 
 #endif

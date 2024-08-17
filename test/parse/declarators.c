@@ -28,3 +28,10 @@ int anything();
 int mul(a, b);
 // variadic
 int add_all(int len, ...);
+// pointer to an array of length 3 (ARRAY { NEST { POINTER { IDENTIFIER } } })
+int (*c)[3];
+// an array of 3 int pointers (POINTER { ARRAY { IDENTIFIER } })
+int *c[3];
+// array of 5 function pointers
+int (*d[5])(int, int);
+int* w(int);

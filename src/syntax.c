@@ -5,15 +5,7 @@
 
 #include "cc.h"
 
-// get through nested declarator to get to the first non-nested one
-syntax_component_t* dig_declarator(syntax_component_t* declarator)
-{
-    if (!declarator) return NULL;
-    if (declarator->sc3_type != DECLARATOR_NEST) return declarator;
-    return dig_declarator(declarator->sc3_nested_declarator);
-}
-
-// gets through all nested declarators to get to the identifier declarator
+// gets through all declarators to get to the identifier declarator
 syntax_component_t* dig_declarator_identifier(syntax_component_t* declarator)
 {
     if (!declarator) return NULL;
@@ -22,8 +14,6 @@ syntax_component_t* dig_declarator_identifier(syntax_component_t* declarator)
     {
         case DECLARATOR_NEST:
             return dig_declarator_identifier(declarator->sc3_nested_declarator);
-        case DECLARATOR_POINTER:
-            return dig_declarator_identifier(declarator->sc3_pointer_subdeclarator);
         case DECLARATOR_ARRAY:
             return dig_declarator_identifier(declarator->sc3_array_subdeclarator);
         case DECLARATOR_FUNCTION:
@@ -68,6 +58,102 @@ void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** dec
             }
         }
     }
+}
+
+bool has_specifier_qualifier(vector_t* specs_quals, unsigned spec_qual_type, unsigned type)
+{
+    for (unsigned i = 0; i < specs_quals->size; ++i)
+    {
+        syntax_component_t* spec_qual = vector_get(specs_quals, i);
+        if (spec_qual->sc2_type != spec_qual_type) continue;
+        switch (spec_qual_type)
+        {
+            case SPECIFIER_QUALIFIER_ARITHMETIC_TYPE:
+                if (type == spec_qual->sc2_arithmetic_type_id)
+                    return true;
+                break;
+            case SPECIFIER_QUALIFIER_FUNCTION:
+                if (type == spec_qual->sc2_function_id)
+                    return true;
+                break;
+            case SPECIFIER_QUALIFIER_QUALIFIER:
+                if (type == spec_qual->sc2_qualifier_id)
+                    return true;
+                break;
+            case SPECIFIER_QUALIFIER_STORAGE_CLASS:
+                if (type == spec_qual->sc2_storage_class_id)
+                    return true;
+                break;
+        }
+    }
+    return false;
+}
+
+unsigned get_declaration_size(syntax_component_t* s)
+{
+    if (!s) return 0;
+    if (s->type != SYNTAX_COMPONENT_DECLARATION) return 0;
+    unsigned specifier_size = 0;
+    for (unsigned i = 0; i < s->sc1_specifiers_qualifiers->size; ++i)
+    {
+        syntax_component_t* specifier = vector_get(s->sc1_specifiers_qualifiers, i);
+        switch (specifier->sc2_type)
+        {
+            case SPECIFIER_QUALIFIER_ARITHMETIC_TYPE:
+                specifier_size += ARITHMETIC_TYPE_SIZES[specifier->sc2_arithmetic_type_id];
+                break;
+            case SPECIFIER_QUALIFIER_TYPEDEF:
+                specifier_size += get_declaration_size(specifier->sc2_typedef_declaration);
+                break;
+            case SPECIFIER_QUALIFIER_STRUCT:
+            case SPECIFIER_QUALIFIER_UNION:
+            {
+                syntax_component_t* struct_union = specifier->sc2_struct;
+                for (unsigned j = 0; j < struct_union->sc5_declarations->size; ++j)
+                    specifier_size += get_declaration_size(vector_get(struct_union->sc5_declarations, j));
+                // ^ lil cheat cheat cuz declarations and struct declarations overlap in the right places
+                break;
+            }
+            case SPECIFIER_QUALIFIER_ENUM:
+                specifier_size += 4;
+                break;
+        }
+    }
+    unsigned declarators_size = 0;
+    bool forget_specifier_size = false;
+    for (unsigned i = 0; i < s->sc1_declarators->size; ++i)
+    {
+        syntax_component_t* declarator = vector_get(s->sc1_declarators, i);
+        // syntax_component_t* const_expression = NULL;
+        // TODO maybe do something w/ const_expression
+        if (declarator->type == SYNTAX_COMPONENT_STRUCT_DECLARATOR) // decompose struct declarator
+        {
+            // const_expression = declarator->sc17_const_expression;
+            declarator = declarator->sc17_declarator;
+        }
+        // like: type *(...declarator...)
+        if (declarator->sc3_type != DECLARATOR_ARRAY && declarator->sc3_pointers && declarator->sc3_pointers->size >= 1)
+        {
+            declarators_size = 8;
+            forget_specifier_size = true;
+        }
+        else if (declarator->sc3_type == DECLARATOR_ARRAY)
+        {
+            syntax_component_t* sub = declarator->sc3_array_subdeclarator;
+            forget_specifier_size = true;
+            bool eice_valid;
+            // like: type (*...declarator...)[...expression...]
+            if (sub->sc3_pointers && sub->sc3_pointers->size >= 1)
+                declarators_size = 8;
+            // like: type *(...declarator...)[...expression...]
+            else if (declarator->sc3_pointers && declarator->sc3_pointers->size >= 1)
+                declarators_size = 8 * evaluate_integer_constant_expression(declarator->sc3_array_expression, &eice_valid);
+            // like: type (...declarator...)[...expression...]
+            else
+                declarators_size = specifier_size * evaluate_integer_constant_expression(declarator->sc3_array_expression, &eice_valid);
+        }
+    }
+    return forget_specifier_size ? declarators_size : (specifier_size * s->sc1_declarators->size) + declarators_size;
 }
 
 // ps - print structure
@@ -183,6 +269,8 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         {
             ps("DECLARATOR {\n");
             pf("type: %s\n", DECLARATOR_NAMES[s->sc3_type]);
+            pf("pointers:\n");
+            print_vector_indented(s->sc3_pointers, indent + 2, printer);
             switch (s->sc3_type)
             {
                 case DECLARATOR_IDENTIFIER:
@@ -191,12 +279,6 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
                 case DECLARATOR_NEST:
                     pf("nested_declarator:\n");
                     print_syntax_indented(s->sc3_nested_declarator, indent + 2, printer);
-                    break;
-                case DECLARATOR_POINTER:
-                    pf("pointer_qualifiers:\n");
-                    print_vector_indented(s->sc3_pointer_qualifiers, indent + 2, printer);
-                    pf("pointer_subdeclarator:\n");
-                    print_syntax_indented(s->sc3_pointer_subdeclarator, indent + 2, printer);
                     break;
                 case DECLARATOR_ARRAY:
                     pf("array_subdeclarator:\n");
@@ -642,6 +724,14 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SYNTAX_COMPONENT_POINTER:
+        {
+            ps("POINTER {\n");
+            pf("qualifiers:\n");
+            print_vector_indented(s->sc18_qualifiers, indent + 2, printer);
+            break;
+        }
+
         default:
             ps("unknown syntax component\n");
             return;
@@ -651,6 +741,86 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
 
 #undef ps
 #undef pf
+
+long long evaluate_integer_constant_expression(syntax_component_t* expr, bool* valid)
+{
+    *valid = false;
+    if (!expr) return 0;
+    if (expr->type != SYNTAX_COMPONENT_EXPRESSION) return 0;
+    *valid = true;
+    switch (expr->sc11_type)
+    {
+        case EXPRESSION_PRIMARY:
+        {
+            switch (expr->sc11_primary_type)
+            {
+                case EXPRESSION_PRIMARY_INTEGER_CONSTANT:
+                    return expr->sc11_primary_integer_constant;
+                case EXPRESSION_PRIMARY_IDENTIFIER:
+                {
+                    // TODO might have to use a symbol table to get enumeration constant values
+                    *valid = false;
+                    return 0;
+                }   
+            }
+            *valid = false;
+            return 0;
+        }
+        case EXPRESSION_CAST:
+        {
+            vector_t* cast_type_specs_quals = expr->sc11_cast_type->sc12_specifiers_qualifiers;
+            int arith_type_id = -1;
+            for (unsigned i = 0; i < cast_type_specs_quals->size; ++i)
+            {
+                syntax_component_t* spec_qual = vector_get(cast_type_specs_quals, i);
+                if (spec_qual->sc2_type != SPECIFIER_QUALIFIER_ARITHMETIC_TYPE)
+                    continue;
+                // non-integer type
+                if (spec_qual->sc2_arithmetic_type_id > ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT)
+                {
+                    *valid = false;
+                    return 0;
+                }
+                arith_type_id = (int) spec_qual->sc2_arithmetic_type_id;
+            }
+            if (arith_type_id == -1)
+            {
+                *valid = false;
+                return 0;
+            }
+            // TODO actually do the cast
+            *valid = false;
+            return 0;
+        }
+        case EXPRESSION_UNARY:
+        {
+            if (expr->sc11_operator_id == 'sizeof')
+            {
+                // TODO maybe rework get_declaration_size so it can be used for this?
+                *valid = false;
+                return 0;
+            }
+            break;
+        }
+    }
+    // TODO operators n that
+    switch (expr->sc11_operator_id)
+    {
+        case '+':
+        {
+            bool* lhsv, * rhsv;
+            long long lhs = evaluate_integer_constant_expression(expr->sc11_additive_multiplicative_expression, &lhsv);
+            long long rhs = evaluate_integer_constant_expression(expr->sc11_additive_nested_expression, &rhsv);
+            if (!lhsv)
+                return 0;
+            if (!rhsv)
+                return 0;
+            return lhs + rhs;
+        }
+    }
+    *valid = false;
+    return 0;
+}
 
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...))
 {

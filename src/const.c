@@ -38,7 +38,7 @@ const char* KEYWORDS[37] = {
     "_Imaginary"
 };
 
-const char* SYNTAX_COMPONENT_NAMES[16] = {
+const char* SYNTAX_COMPONENT_NAMES[18] = {
     "TRANSLATION_UNIT",
     "DECLARATION",
     "SPECIFIER_QUALIFIER",
@@ -54,7 +54,9 @@ const char* SYNTAX_COMPONENT_NAMES[16] = {
     "TYPE_NAME",
     "ABSTRACT_DECLARATOR",
     "",
-    "PARAMETER_DECLARATION"
+    "PARAMETER_DECLARATION",
+    "",
+    "POINTER"
 };
 
 const char* SPECIFIER_QUALIFIER_NAMES[9] = {
@@ -91,6 +93,30 @@ const char* ARITHMETIC_TYPE_NAMES[21] = {
     "FLOAT_IMAGINARY",
     "DOUBLE_IMAGINARY",
     "LONG_DOUBLE_IMAGINARY"
+};
+
+unsigned ARITHMETIC_TYPE_SIZES[21] = {
+    1,
+    1,
+    1,
+    2,
+    2,
+    4,
+    4,
+    4,
+    4,
+    8,
+    8,
+    4,
+    8,
+    16,
+    1,
+    8,
+    16,
+    32,
+    4,
+    8,
+    16
 };
 
 const char* STORAGE_CLASS_NAMES[5] = {

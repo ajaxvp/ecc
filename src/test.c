@@ -68,5 +68,8 @@ int main(int argc, char** argv)
     syntax_component_t* unit = parse(toks);
     printf("<<parser output>>\n");
     print_syntax(unit, printf);
+    FILE* out = fopen("out.s", "w");
+    emit(unit, out);
+    fclose(out);
     fclose(file);
 }
