@@ -1,0 +1,8 @@
+For parse tests (at least), the name format of each test goes as follows:
+    <chapter>.<section>_<part of section>_<test no.>_<'a' | 'r'>
+
+<chapter> is the chapter of the ISO standard
+<section> is the section of the ISO standard
+<part of section> is the number in parenthesis in the section
+<test no.> is an identifier for the given test within the location of the ISO standard given by the first three pieces
+<'a' | 'd'> represents 'a' for 'accept' and 'r' for 'reject' based on whether the parser should accept or reject the translation unit

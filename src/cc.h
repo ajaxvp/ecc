@@ -7,6 +7,8 @@
 #define terminate(fmt, ...) { errorf(fmt, ## __VA_ARGS__); exit(1); }
 #define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
 
+#define VECTOR_FOR(type, var, vec) type var = vector_get((vec), 0); for (unsigned i = 0; i < vec->size; ++i, var = vector_get((vec), i))
+
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
 #define LEXER_TOKEN_OPERATOR 2
@@ -15,140 +17,6 @@
 #define LEXER_TOKEN_FLOATING_CONSTANT 5
 #define LEXER_TOKEN_CHARACTER_CONSTANT 6
 #define LEXER_TOKEN_STRING_CONSTANT 7
-
-#define SYNTAX_COMPONENT_TRANSLATION_UNIT 0
-#define SYNTAX_COMPONENT_DECLARATION 1
-#define SYNTAX_COMPONENT_SPECIFIER_QUALIFIER 2
-#define SYNTAX_COMPONENT_DECLARATOR 3
-#define SYNTAX_COMPONENT_INITIALIZER 4
-#define SYNTAX_COMPONENT_STRUCT_UNION 5
-#define SYNTAX_COMPONENT_ENUM 6
-#define SYNTAX_COMPONENT_ENUMERATOR 7
-#define SYNTAX_COMPONENT_DESIGNATOR 8
-#define SYNTAX_COMPONENT_FUNCTION_DEFINITION 9
-#define SYNTAX_COMPONENT_STATEMENT 10
-#define SYNTAX_COMPONENT_EXPRESSION 11
-#define SYNTAX_COMPONENT_TYPE_NAME 12
-#define SYNTAX_COMPONENT_ABSTRACT_DECLARATOR 13
-#define SYNTAX_COMPONENT_PARAMETER_DECLARATION 15
-#define SYNTAX_COMPONENT_STRUCT_DECLARATION 16
-#define SYNTAX_COMPONENT_STRUCT_DECLARATOR 17
-#define SYNTAX_COMPONENT_POINTER 18
-
-#define SPECIFIER_QUALIFIER_VOID 0
-#define SPECIFIER_QUALIFIER_ARITHMETIC_TYPE 1
-#define SPECIFIER_QUALIFIER_TYPEDEF 2
-#define SPECIFIER_QUALIFIER_STRUCT 3
-#define SPECIFIER_QUALIFIER_UNION 4
-#define SPECIFIER_QUALIFIER_ENUM 5
-#define SPECIFIER_QUALIFIER_STORAGE_CLASS 6
-#define SPECIFIER_QUALIFIER_FUNCTION 7
-#define SPECIFIER_QUALIFIER_QUALIFIER 8
-
-#define ARITHMETIC_TYPE_CHAR 0
-#define ARITHMETIC_TYPE_SIGNED_CHAR 1
-#define ARITHMETIC_TYPE_UNSIGNED_CHAR 2
-#define ARITHMETIC_TYPE_SHORT_INT 3
-#define ARITHMETIC_TYPE_UNSIGNED_SHORT_INT 4
-#define ARITHMETIC_TYPE_INT 5
-#define ARITHMETIC_TYPE_UNSIGNED_INT 6
-#define ARITHMETIC_TYPE_LONG_INT 7
-#define ARITHMETIC_TYPE_UNSIGNED_LONG_INT 8
-#define ARITHMETIC_TYPE_LONG_LONG_INT 9
-#define ARITHMETIC_TYPE_UNSIGNED_LONG_LONG_INT 10
-#define ARITHMETIC_TYPE_FLOAT 11
-#define ARITHMETIC_TYPE_DOUBLE 12
-#define ARITHMETIC_TYPE_LONG_DOUBLE 13
-#define ARITHMETIC_TYPE_BOOL 14
-#define ARITHMETIC_TYPE_FLOAT_COMPLEX 15
-#define ARITHMETIC_TYPE_DOUBLE_COMPLEX 16
-#define ARITHMETIC_TYPE_LONG_DOUBLE_COMPLEX 17
-#define ARITHMETIC_TYPE_FLOAT_IMAGINARY 18
-#define ARITHMETIC_TYPE_DOUBLE_IMAGINARY 19
-#define ARITHMETIC_TYPE_LONG_DOUBLE_IMAGINARY 20
-
-#define STORAGE_CLASS_TYPEDEF 0
-#define STORAGE_CLASS_AUTO 1
-#define STORAGE_CLASS_REGISTER 2
-#define STORAGE_CLASS_STATIC 3
-#define STORAGE_CLASS_EXTERN 4
-
-#define QUALIFIER_CONST 0
-#define QUALIFIER_VOLATILE 1
-#define QUALIFIER_RESTRICT 2
-
-#define FUNCTION_SPECIFIER_INLINE 0
-
-#define DECLARATOR_IDENTIFIER 0
-#define DECLARATOR_NEST 1
-#define DECLARATOR_ARRAY 3
-#define DECLARATOR_FUNCTION 4
-
-#define INITIALIZER_EXPRESSION 0
-#define INITIALIZER_LIST 1
-#define INITIALIZER_DESIGNATION 2
-
-#define STATEMENT_LABELED 0
-#define STATEMENT_COMPOUND 1
-#define STATEMENT_EXPRESSION 2
-#define STATEMENT_SELECTION 3
-#define STATEMENT_ITERATION 4
-#define STATEMENT_JUMP 5
-
-#define STATEMENT_LABELED_IDENTIFIER 0
-#define STATEMENT_LABELED_CASE 1
-#define STATEMENT_LABELED_DEFAULT 2
-
-#define STATEMENT_SELECTION_IF 0
-#define STATEMENT_SELECTION_IF_ELSE 1
-#define STATEMENT_SELECTION_SWITCH 2
-
-#define STATEMENT_ITERATION_WHILE 0
-#define STATEMENT_ITERATION_DO_WHILE 1
-#define STATEMENT_ITERATION_FOR_EXPRESSION 2
-#define STATEMENT_ITERATION_FOR_DECLARATION 3
-
-#define STATEMENT_JUMP_GOTO 0
-#define STATEMENT_JUMP_CONTINUE 1
-#define STATEMENT_JUMP_BREAK 2
-#define STATEMENT_JUMP_RETURN 3
-
-#define EXPRESSION_ASSIGNMENT_LIST 0
-#define EXPRESSION_ASSIGNMENT 1
-#define EXPRESSION_CONDITIONAL 2
-#define EXPRESSION_LOGICAL_OR 3
-#define EXPRESSION_LOGICAL_AND 4
-#define EXPRESSION_OR 5
-#define EXPRESSION_XOR 6
-#define EXPRESSION_AND 7
-#define EXPRESSION_EQUALITY 8
-#define EXPRESSION_RELATIONAL 9
-#define EXPRESSION_SHIFT 10
-#define EXPRESSION_ADDITIVE 11
-#define EXPRESSION_MULTIPLICATIVE 12
-#define EXPRESSION_CAST 13
-#define EXPRESSION_UNARY 14
-#define EXPRESSION_POSTFIX 15
-#define EXPRESSION_PRIMARY 16
-
-#define EXPRESSION_POSTFIX_COMPOUND_LITERAL 0
-#define EXPRESSION_POSTFIX_SUBSCRIPT 1
-#define EXPRESSION_POSTFIX_FUNCTION_CALL 2
-#define EXPRESSION_POSTFIX_MEMBER 3
-#define EXPRESSION_POSTFIX_PTR_MEMBER 4
-#define EXPRESSION_POSTFIX_INCREMENT 5
-#define EXPRESSION_POSTFIX_DECREMENT 6
-
-#define EXPRESSION_PRIMARY_IDENTIFIER 0
-#define EXPRESSION_PRIMARY_INTEGER_CONSTANT 1
-#define EXPRESSION_PRIMARY_FLOATING_CONSTANT 2
-#define EXPRESSION_PRIMARY_STRING_LITERAL 3
-#define EXPRESSION_PRIMARY_NEST 4
-
-#define ABSTRACT_DECLARATOR_POINTER 0
-#define ABSTRACT_DECLARATOR_ARRAY 1
-#define ABSTRACT_DECLARATOR_VLA 2
-#define ABSTRACT_DECLARATOR_FUNCTION 3
 
 #define KEYWORDS_LEN 37
 #define KEYWORD_AUTO 0
@@ -217,353 +85,475 @@ typedef struct vector_t
     unsigned size;
 } vector_t;
 
+typedef enum storage_class_specifier
+{
+    SCS_TYPEDEF = 0,
+    SCS_AUTO,
+    SCS_REGISTER,
+    SCS_STATIC,
+    SCS_EXTERN
+} storage_class_specifier_t;
+
+typedef enum basic_type_specifier
+{
+    BTS_VOID = 0,
+    BTS_CHAR,
+    BTS_SHORT,
+    BTS_INT,
+    BTS_LONG,
+    BTS_FLOAT,
+    BTS_DOUBLE,
+    BTS_SIGNED,
+    BTS_UNSIGNED,
+    BTS_BOOL,
+    BTS_COMPLEX,
+    BTS_IMAGINARY
+} basic_type_specifier_t;
+
+typedef enum type_qualifier
+{
+    TQ_CONST = 0,
+    TQ_RESTRICT,
+    TQ_VOLATILE
+} type_qualifier_t;
+
+typedef enum function_specifier
+{
+    FS_INLINE = 0
+} function_specifier_t;
+
+typedef enum struct_or_union
+{
+    SOU_STRUCT = 0,
+    SOU_UNION
+} struct_or_union_t;
+
+typedef enum syntax_component_type_t
+{
+    SC_UNKNOWN = 0, // unk
+    SC_ERROR, // err
+    SC_TRANSLATION_UNIT, // tlu
+    SC_FUNCTION_DEFINITION, // fdef
+    SC_DECLARATION, // decl
+    SC_INIT_DECLARATOR, // ideclr
+    SC_STORAGE_CLASS_SPECIFIER, // scs
+    SC_BASIC_TYPE_SPECIFIER, // bts
+    SC_STRUCT_UNION_SPECIFIER, // sus
+    SC_ENUM_SPECIFIER,
+    SC_TYPE_QUALIFIER,
+    SC_FUNCTION_SPECIFIER,
+    SC_ENUMERATOR,
+    SC_IDENTIFIER,
+    SC_DECLARATOR,
+    SC_POINTER,
+    SC_ARRAY_DECLARATOR,
+    SC_FUNCTION_DECLARATOR,
+    SC_PARAMETER_DECLARATION,
+    SC_ABSTRACT_DECLARATOR,
+    SC_ABSTRACT_ARRAY_DECLARATOR,
+    SC_ABSTRACT_FUNCTION_DECLARATOR,
+    SC_LABELED_STATEMENT,
+    SC_COMPOUND_STATEMENT,
+    SC_EXPRESSION_STATEMENT,
+    SC_IF_STATEMENT,
+    SC_SWITCH_STATEMENT,
+    SC_DO_STATEMENT,
+    SC_WHILE_STATEMENT,
+    SC_FOR_STATEMENT,
+    SC_GOTO_STATEMENT,
+    SC_CONTINUE_STATEMENT,
+    SC_BREAK_STATEMENT,
+    SC_RETURN_STATEMENT,
+    SC_INITIALIZER_LIST,
+    SC_DESIGNATION,
+    SC_EXPRESSION,
+    SC_ASSIGNMENT_EXPRESSION,
+    SC_LOGICAL_OR_EXPRESSION,
+    SC_LOGICAL_AND_EXPRESSION,
+    SC_BITWISE_OR_EXPRESSION,
+    SC_BITWISE_XOR_EXPRESSION,
+    SC_BITWISE_AND_EXPRESSION,
+    SC_EQUALITY_EXPRESSION,
+    SC_INEQUALITY_EXPRESSION,
+    SC_GREATER_EQUAL_EXPRESSION,
+    SC_LESS_EQUAL_EXPRESSION,
+    SC_GREATER_EXPRESSION,
+    SC_LESS_EXPRESSION,
+    SC_BITWISE_RIGHT_EXPRESSION,
+    SC_BITWISE_LEFT_EXPRESSION,
+    SC_SUBTRACTION_EXPRESSION,
+    SC_ADDITION_EXPRESSION,
+    SC_MODULAR_EXPRESSION,
+    SC_DIVISION_EXPRESSION,
+    SC_MULTIPLICATION_EXPRESSION,
+    SC_CONDITIONAL_EXPRESSION,
+    SC_CAST_EXPRESSION,
+    SC_PREFIX_INCREMENT_EXPRESSION,
+    SC_PREFIX_DECREMENT_EXPRESSION,
+    SC_REFERENCE_EXPRESSION,
+    SC_DEREFERENCE_EXPRESSION,
+    SC_PLUS_EXPRESSION,
+    SC_MINUS_EXPRESSION,
+    SC_COMPLEMENT_EXPRESSION,
+    SC_NOT_EXPRESSION,
+    SC_SIZEOF_EXPRESSION,
+    SC_SIZEOF_TYPE_EXPRESSION,
+    SC_INITIALIZER_LIST_EXPRESSION,
+    SC_POSTFIX_INCREMENT_EXPRESSION,
+    SC_POSTFIX_DECREMENT_EXPRESSION,
+    SC_DEREFERENCE_MEMBER_EXPRESSION,
+    SC_MEMBER_EXPRESSION,
+    SC_FUNCTION_CALL_EXPRESSION,
+    SC_SUBSCRIPT_EXPRESSION,
+    SC_TYPE_NAME,
+    SC_TYPEDEF_NAME,
+    SC_ENUMERATION_CONSTANT,
+    SC_FLOATING_CONSTANT,
+    SC_INTEGER_CONSTANT,
+    SC_CHARACTER_CONSTANT,
+    SC_STRING_LITERAL
+} syntax_component_type_t;
+
+// SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
+// SC_DIRECT_DECLARATOR = SC_IDENTIFIER | SC_DECLARATOR | SC_ARRAY_DECLARATOR | SC_FUNCTION_DECLARATOR
+// SC_DIRECT_ABSTRACT_DECLARATOR = SC_ABSTRACT_DECLARATOR | SC_ABSTRACT_ARRAY_DECLARATOR | SC_ABSTRACT_FUNCTION_DECLARATOR
+// SC_STATEMENT = SC_LABELED_STATEMENT | SC_COMPOUND_STATEMENT | SC_EXPRESSION_STATEMENT | SC_SELECTION_STATEMENT | SC_ITERATION_STATEMENT | SC_JUMP_STATEMENT
+// SC_BLOCK_ITEM = SC_DECLARATION | SC_STATEMENT
+// SC_SELECTION_STATEMENT = SC_IF_STATEMENT | SC_SWITCH_STATEMENT
+// SC_ITERATION_STATEMENT = SC_DO_STATEMENT | SC_WHILE_STATEMENT | SC_FOR_STATEMENT
+// SC_JUMP_STATEMENT = SC_GOTO_STATEMENT | SC_CONTINUE_STATEMENT | SC_BREAK_STATEMENT | SC_RETURN_STATEMENT
+// SC_INITIALIZER = SC_ASSIGNMENT_EXPRESSION | SC_INITIALIZER_LIST
+// SC_DESIGNATOR = SC_IDENTIFIER | SC_CONSTANT_EXPRESSION
+// SC_PRIMARY_EXPRESSION = SC_IDENTIFIER | SC_CONSTANT | SC_STRING_LITERAL | SC_EXPRESSION
+// SC_CONSTANT_EXPRESSION = SC_CONDITIONAL_EXPRESSION
+// SC_CONSTANT = SC_INTEGER_CONSTANT | SC_FLOATING_CONSTANT | SC_ENUMERATION_CONSTANT | SC_CHARACTER_CONSTANT
+
 // THE GREATEST STRUCT OF ALL TIME
 // unless otherwise specified, vectors will not contain null pointers.
 typedef struct syntax_component_t
 {
-    unsigned type;
+    syntax_component_type_t type;
+    unsigned row, col;
     union
     {
-        // SYNTAX_COMPONENT_TRANSLATION_UNIT
-        vector_t* sc0_external_declarations; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION | SYNTAX_COMPONENT_FUNCTION_DEFINITION)
-
-        // SYNTAX_COMPONENT_DECLARATION
+        // SC_TRANSLATION_UNIT - tlu
         struct
         {
-            vector_t* sc1_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-            vector_t* sc1_declarators; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATOR)
-            // the corresponding declarator for each initializer should be at the same index as the declarator
-            // declarators without initializers will have a NULL at their index in the initializer vector
-            vector_t* sc1_initializers; // <syntax_component_t> (SYNTAX_COMPONENT_INITIALIZER)
+            vector_t* tlu_external_declarations;
+            vector_t* tlu_errors; // <syntax_component_t> (SC_ERROR)
         };
 
-        // SYNTAX_COMPONENT_SPECIFIER_QUALIFIER
+        // SC_FUNCTION_DEFINITION - fdef
         struct
         {
-            unsigned sc2_type;
-            union
-            {
-                unsigned sc2_arithmetic_type_id;
-                struct
-                {
-                    struct syntax_component_t* sc2_typedef_declaration; // (SYNTAX_COMPONENT_DECLARATION)
-                    struct syntax_component_t* sc2_typedef_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                };
-                struct syntax_component_t* sc2_struct; // (SYNTAX_COMPONENT_STRUCT_UNION)
-                struct syntax_component_t* sc2_union; // (SYNTAX_COMPONENT_STRUCT_UNION)
-                struct syntax_component_t* sc2_enum; // (SYNTAX_COMPONENT_ENUM)
-                unsigned sc2_storage_class_id;
-                unsigned sc2_function_id;
-                unsigned sc2_qualifier_id;
-            };
+            vector_t* fdef_declaration_specifiers; // <syntax_component_t> (SC_STORAGE_CLASS_SPECIFIER | SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER | SC_FUNCTION_SPECIFIER)
+            struct syntax_component_t* fdef_declarator; // SC_DECLARATOR
+            vector_t* fdef_knr_declarations; // <syntax_component_t> (SC_DECLARATION)
+            struct syntax_component_t* fdef_body; // SC_COMPOUND_STATEMENT
         };
 
-        // SYNTAX_COMPONENT_DECLARATOR
+        // SC_DECLARATION - decl
         struct
         {
-            unsigned sc3_type;
-            vector_t* sc3_pointers;
-            union
-            {
-                char* sc3_identifier;
-                struct syntax_component_t* sc3_nested_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                struct
-                {
-                    struct syntax_component_t* sc3_array_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                    bool sc3_array_static;
-                    vector_t* sc3_array_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-                    struct syntax_component_t* sc3_array_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                };
-                struct
-                {
-                    struct syntax_component_t* sc3_function_subdeclarator; // (SYNTAX_COMPONENT_DECLARATOR)
-                    vector_t* sc3_function_parameters; // <syntax_component_t> (SYNTAX_COMPONENT_PARAMETER_DECLARATION)
-                    vector_t* sc3_function_identifiers; // <char*>
-                };
-            };
+            vector_t* decl_declaration_specifiers; // <syntax_component_t> (SC_STORAGE_CLASS_SPECIFIER | SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER | SC_FUNCTION_SPECIFIER)
+            vector_t* decl_init_declarators; // <syntax_component_t> (SC_INIT_DECLARATOR)
         };
 
-        // SYNTAX_COMPONENT_INITIALIZER
+        // SC_INIT_DECLARATOR - ideclr
         struct
         {
-            unsigned sc4_type;
-            union
-            {
-                struct syntax_component_t* sc4_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                vector_t* sc4_initializer_list; // <syntax_component_t> (SYNTAX_COMPONENT_INITIALIZER)
-                struct
-                {
-                    struct vector_t* sc4_designator_list; // <syntax_component_t> (SYNTAX_COMPONENT_DESIGNATOR)
-                    struct syntax_component_t* sc4_subinitializer; // (SYNTAX_COMPONENT_INITIALIZER)
-                };
-            };
+            struct syntax_component_t* ideclr_declarator; // SC_DECLARATOR
+            struct syntax_component_t* ideclr_initializer; // SC_INITIALIZER
         };
 
-        // SYNTAX_COMPONENT_STRUCT_UNION
+        // SC_STORAGE_CLASS_SPECIFIER - scs
+        storage_class_specifier_t scs;
+
+        // SC_BASIC_TYPE_SPECIFIER - bts
+        basic_type_specifier_t bts;
+
+        // SC_TYPE_QUALIFIER - tq
+        type_qualifier_t tq;
+
+        // SC_FUNCTION_SPECIFIER - fs
+        function_specifier_t fs;
+
+        // SC_STRUCT_UNION_SPECIFIER - sus
         struct
         {
-            bool sc5_is_union;
-            char* sc5_identifier;
-            vector_t* sc5_declarations; // <syntax_component_t> (SYNTAX_COMPONENT_STRUCT_DECLARATION)
+            struct_or_union_t sus_sou;
+            struct syntax_component_t* sus_id; // SC_IDENTIFIER
+            vector_t* sus_declarations; // <syntax_component_t> (SC_STRUCT_DECLARATION)
         };
 
-        // SYNTAX_COMPONENT_ENUM
+        // SC_STRUCT_DECLARATION - sdecl
         struct
         {
-            char* sc6_identifier;
-            vector_t* sc6_enumerators; // <syntax_component_t> (SYNTAX_COMPONENT_ENUMERATOR)
+            vector_t* sdecl_specifier_qualifier_list; // <syntax_component_t> (SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER)
+            vector_t* sdecl_declarators; // <syntax_component_t> (SC_STRUCT_DECLARATOR)
         };
 
-        // SYNTAX_COMPONENT_ENUMERATOR
+        // SC_STRUCT_DECLARATOR - sdeclr
         struct
         {
-            char* sc7_identifier;
-            struct syntax_component_t* sc7_const_expression; // (SYNTAX_COMPONENT_EXPRESSION)
+            struct syntax_component_t* sdeclr_declarator; // SC_DECLARATOR
+            struct syntax_component_t* sdeclr_bits_expression; // SC_CONSTANT_EXPRESSION
         };
 
-        // SYNTAX_COMPONENT_DESIGNATOR
+        // SC_ENUM_SPECIFIER - enums
         struct
         {
-            struct syntax_component_t* sc8_array_designator_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-            char* sc8_struct_designator_identifier;
+            struct syntax_component_t* enums_id; // SC_IDENTIFIER
+            vector_t* enums_enumerators; // <syntax_component_t> (SC_ENUMERATOR)
         };
 
-        // SYNTAX_COMPONENT_FUNCTION_DEFINITION
+        // SC_ENUMERATOR - enumr
         struct
         {
-            vector_t* sc9_function_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-            struct syntax_component_t* sc9_function_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
-            vector_t* sc9_function_declaration_list; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION)
-            struct syntax_component_t* sc9_function_body; // (SYNTAX_COMPONENT_STATEMENT)
+            struct syntax_component_t* enumr_constant; // SC_ENUMERATION_CONSTANT
+            struct syntax_component_t* enumr_expression; // SC_CONSTANT_EXPRESSION
         };
 
-        // SYNTAX_COMPONENT_STATEMENT
+        // id (general identifier)
+        // SC_IDENTIFIER
+        // SC_ENUMERATION_CONSTANT
+        // SC_TYPEDEF_NAME
+        char* id;
+
+        // SC_FLOATING_CONSTANT - floc
+        long double floc;
+
+        // SC_INTEGER_CONSTANT - intc
+        long long intc;
+
+        // SC_CHARACTER_CONSTANT - chrc
+        int chrc;
+
+        // SC_STRING_LITERAL - strl
+        char* strl;
+
+        // SC_DECLARATOR - declr
         struct
         {
-            unsigned sc10_type;
-            union
-            {
-                struct
-                {
-                    unsigned sc10_labeled_type;
-                    union
-                    {
-                        char* sc10_labeled_identifier;
-                        struct syntax_component_t* sc10_labeled_case_const_expression;
-                    };
-                    struct syntax_component_t* sc10_labeled_substatement; // (SYNTAX_COMPONENT_STATEMENT)
-                };
-                vector_t* sc10_compound_block_items; // <syntax_component_t> (SYNTAX_COMPONENT_DECLARATION | SYNTAX_COMPONENT_STATEMENT)
-                struct syntax_component_t* sc10_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                struct
-                {
-                    unsigned sc10_selection_type;
-                    struct syntax_component_t* sc10_selection_condition; // (SYNTAX_COMPONENT_EXPRESSION)
-                    union
-                    {
-                        struct syntax_component_t* sc10_selection_then; // (SYNTAX_COMPONENT_STATEMENT)
-                        struct
-                        {
-                            struct syntax_component_t* sc10_selection_if_else_then; // (SYNTAX_COMPONENT_STATEMENT)
-                            struct syntax_component_t* sc10_selection_if_else_else; // (SYNTAX_COMPONENT_STATEMENT)
-                        };
-                        struct syntax_component_t* sc10_selection_switch; // (SYNTAX_COMPONENT_STATEMENT)
-                    };
-                };
-                struct
-                {
-                    unsigned sc10_iteration_type;
-                    union
-                    {
-                        struct
-                        {
-                            struct syntax_component_t* sc10_iteration_while_condition; // (SYNTAX_COMPONENT_EXPRESSION)
-                            struct syntax_component_t* sc10_iteration_while_action; // (SYNTAX_COMPONENT_STATEMENT)
-                        };
-                        struct
-                        {
-                            struct syntax_component_t* sc10_iteration_do_while_action; // (SYNTAX_COMPONENT_STATEMENT)
-                            struct syntax_component_t* sc10_iteration_do_while_condition; // (SYNTAX_COMPONENT_EXPRESSION)
-                        };
-                        struct
-                        {
-                            struct syntax_component_t* sc10_iteration_for_init; // (SYNTAX_COMPONENT_EXPRESSION | SYNTAX_COMPONENT_DECLARATION)
-                            struct syntax_component_t* sc10_iteration_for_condition; // (SYNTAX_COMPONENT_EXPRESSION)
-                            struct syntax_component_t* sc10_iteration_for_update; // (SYNTAX_COMPONENT_EXPRESSION)
-                            struct syntax_component_t* sc10_iteration_for_action; // (SYNTAX_COMPONENT_STATEMENT)
-                        };
-                    };
-                };
-                struct
-                {
-                    unsigned sc10_jump_type;
-                    union
-                    {
-                        char* sc10_jump_goto_identifier;
-                        struct syntax_component_t* sc10_jump_return_expression; // (SYNTAX_COMPONENT_EXPRESSION)
-                    };
-                };
-            };
+            vector_t* declr_pointers; // <syntax_component_t> (SC_POINTER)
+            struct syntax_component_t* declr_direct; // SC_DIRECT_DECLARATOR
         };
-        
-        // SYNTAX_COMPONENT_EXPRESSION
+
+        // SC_POINTER - ptr
+        vector_t* ptr_type_qualifiers; // <syntax_component_t> (SC_TYPE_QUALIFIER)
+
+        // SC_ARRAY_DECLARATOR - adeclr
         struct
         {
-            unsigned sc11_type;
-            unsigned sc11_operator_id;
-            union
-            {
-                vector_t* sc11_assignment_list; // <syntax_component_t> (SYNTAX_COMPONENT_EXPRESSION)
-                struct
-                {
-                    struct syntax_component_t* sc11_assignment_unary_expression;
-                    struct syntax_component_t* sc11_assignment_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_conditional_lor_expression;
-                    struct syntax_component_t* sc11_conditional_then_expression;
-                    struct syntax_component_t* sc11_conditional_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_lor_land_expression;
-                    struct syntax_component_t* sc11_lor_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_land_or_expression;
-                    struct syntax_component_t* sc11_land_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_or_xor_expression;
-                    struct syntax_component_t* sc11_or_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_xor_and_expression;
-                    struct syntax_component_t* sc11_xor_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_and_equality_expression;
-                    struct syntax_component_t* sc11_and_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_equality_relational_expression;
-                    struct syntax_component_t* sc11_equality_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_relational_shift_expression;
-                    struct syntax_component_t* sc11_relational_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_shift_additive_expression;
-                    struct syntax_component_t* sc11_shift_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_additive_multiplicative_expression;
-                    struct syntax_component_t* sc11_additive_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_multiplicative_cast_expression;
-                    struct syntax_component_t* sc11_multiplicative_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_cast_type;
-                    struct syntax_component_t* sc11_cast_nested_expression;
-                };
-                struct
-                {
-                    struct syntax_component_t* sc11_unary_nested_expression;
-                    struct syntax_component_t* sc11_unary_cast_expression;
-                    struct syntax_component_t* sc11_unary_type;
-                };
-                struct
-                {
-                    unsigned sc11_postfix_type;
-                    struct syntax_component_t* sc11_postfix_nested_expression;
-                    union
-                    {
-                        struct
-                        {
-                            struct syntax_component_t* sc11_postfix_type_name;
-                            struct syntax_component_t* sc11_postfix_initializer_list;
-                        };
-                        struct syntax_component_t* sc11_postfix_subscript_expression;
-                        vector_t* sc11_postfix_argument_list;
-                        char* sc11_postfix_member_identifier;
-                        char* sc11_postfix_ptr_member_identifier;
-                    };
-                };
-                struct
-                {
-                    unsigned sc11_primary_type;
-                    union
-                    {
-                        char* sc11_primary_identifier;
-                        // TODO probably store more information about these (like signedness or something idfk)
-                        unsigned long long sc11_primary_integer_constant;
-                        long double sc11_primary_floating_constant;
-                        char* sc11_primary_string_literal;
-                        struct syntax_component_t* sc11_primary_nested_expression;
-                    };
-                };
-
-            };
+            struct syntax_component_t* adeclr_direct; // SC_DIRECT_DECLARATOR
+            bool adeclr_is_static;
+            bool adeclr_unspecified_size;
+            vector_t* adeclr_type_qualifiers; // <syntax_component_t> (SC_TYPE_QUALIFIER)
+            struct syntax_component_t* adeclr_length_expression; // SC_ASSIGNMENT_EXPRESSION
         };
 
-        // SYNTAX_COMPONENT_TYPE_NAME
+        // SC_FUNCTION_DECLARATOR - fdeclr
         struct
         {
-            vector_t* sc12_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-            struct syntax_component_t* sc12_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
+            struct syntax_component_t* fdeclr_direct; // SC_DIRECT_DECLARATOR
+            bool fdeclr_ellipsis;
+            vector_t* fdeclr_parameter_declarations; // <syntax_component_t> (SC_PARAMETER_DECLARATION)
+            vector_t* fdeclr_knr_identifiers; // <syntax_component_t> (SC_IDENTIFIER)
         };
 
-        // SYNTAX_COMPONENT_ABSTRACT_DECLARATOR
+        // SC_PARAMETER_DECLARATION - pdecl
         struct
         {
-            unsigned sc13_type;
-            bool sc13_pointer;
-            struct syntax_component_t* sc13_nested_abstract_declarator;
-            union
-            {
-                struct syntax_component_t* sc13_assignment_expression;
-                vector_t* sc13_parameter_type_list;
-            };
+            vector_t* pdecl_declaration_specifiers; // <syntax_component_t> (SC_STORAGE_CLASS_SPECIFIER | SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER | SC_FUNCTION_SPECIFIER)
+            struct syntax_component_t* pdecl_declr; // (SC_DECLARATOR | SC_ABSTRACT_DECLARATOR)
         };
 
-        // SYNTAX_COMPONENT_PARAMETER_DECLARATION
+        // SC_ABSTRACT_DECLARATOR - abdeclr
         struct
         {
-            bool sc15_ellipsis;
-            vector_t* sc15_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-            struct syntax_component_t* sc15_declarator; // (SYNTAX_COMPONENT_DECLARATOR)
+            vector_t* abdeclr_pointers; // <syntax_component_t> (SC_POINTER)
+            struct syntax_component_t* abdeclr_direct; // SC_DIRECT_ABSTRACT_DECLARATOR
         };
 
-        // SYNTAX_COMPONENT_STRUCT_DECLARATION
+        // SC_ABSTRACT_ARRAY_DECLARATOR - abadeclr
         struct
         {
-            vector_t* sc16_specifiers_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
-            vector_t* sc16_declarators; // <syntax_component_t> (SYNTAX_COMPONENT_STRUCT_DECLARATOR)
+            struct syntax_component_t* abadeclr_direct; // SC_DIRECT_ABSTRACT_DECLARATOR
+            bool abadeclr_unspecified_size;
+            struct syntax_component_t* abadeclr_length_expression; // SC_ASSIGNMENT_EXPRESSION
         };
 
-        // SYNTAX_COMPONENT_STRUCT_DECLARATOR
+        // SC_ABSTRACT_FUNCTION_DECLARATOR - abfdeclr
         struct
         {
-            struct syntax_component_t* sc17_declarator;
-            struct syntax_component_t* sc17_const_expression;
+            struct syntax_component_t* abfdeclr_direct; // SC_DIRECT_ABSTRACT_DECLARATOR
+            bool abfdeclr_ellipsis;
+            vector_t* abfdeclr_parameter_declarations; // <syntax_component_t> (SC_PARAMETER_DECLARATION)
         };
 
-        // SYNTAX_COMPONENT_POINTER
-        vector_t* sc18_qualifiers; // <syntax_component_t> (SYNTAX_COMPONENT_SPECIFIER_QUALIFIER)
+        // SC_LABELED_STATEMENT - lstmt
+        struct
+        {
+            struct syntax_component_t* lstmt_id; // SC_IDENTIFIER
+            struct syntax_component_t* lstmt_case_expression; // SC_CONSTANT_EXPRESSION
+            struct syntax_component_t* lstmt_stmt; // SC_STATEMENT
+        };
+
+        // SC_COMPOUND_STATEMENT - cstmt
+        vector_t* cstmt_block_items; // <syntax_component_t> (SC_BLOCK_ITEM)
+
+        // SC_EXPRESSION_STATEMENT - estmt
+        struct syntax_component_t* estmt_expression; // SC_EXPRESSION
+
+        // SC_IF_STATEMENT - ifstmt
+        struct
+        {
+            struct syntax_component_t* ifstmt_condition; // SC_EXPRESSION
+            struct syntax_component_t* ifstmt_body; // SC_STATEMENT
+            struct syntax_component_t* ifstmt_else; // SC_STATEMENT
+        };
+
+        // SC_SWITCH_STATEMENT - swstmt
+        struct
+        {
+            struct syntax_component_t* swstmt_condition; // SC_EXPRESSION
+            struct syntax_component_t* swstmt_body; // SC_STATEMENT
+        };
+
+        // SC_DO_STATEMENT - dostmt
+        struct
+        {
+            struct syntax_component_t* dostmt_condition; // SC_EXPRESSION
+            struct syntax_component_t* dostmt_body; // SC_STATEMENT
+        };
+
+        // SC_WHILE_STATEMENT - whstmt
+        struct
+        {
+            struct syntax_component_t* whstmt_condition; // SC_EXPRESSION
+            struct syntax_component_t* whstmt_body; // SC_STATEMENT
+        };
+
+        // SC_FOR_STATEMENT - forstmt
+        struct
+        {
+            struct syntax_component_t* forstmt_init; // SC_DECLARATION | SC_EXPRESSION
+            struct syntax_component_t* forstmt_condition; // SC_EXPRESSION
+            struct syntax_component_t* forstmt_post; // SC_EXPRESSION
+            struct syntax_component_t* forstmt_body; // SC_STATEMENT
+        };
+
+        // SC_GOTO_STATEMENT - gtstmt
+        struct syntax_component_t* gtstmt_label_id; // SC_IDENTIFIER
+
+        // SC_RETURN_STATEMENT - retstmt
+        struct syntax_component_t* retstmt_expression; // SC_EXPRESSION
+
+        // SC_INITIALIZER_LIST - inlist
+        struct
+        {
+            vector_t* inlist_designations; // <syntax_component_t> (SC_DESIGNATION)
+            vector_t* inlist_initializers; // <syntax_component_t> (SC_INITIALIZER)
+        };
+
+        // SC_DESIGNATION - desig
+        vector_t* desig_designators; // <syntax_component_t> (SC_DESIGNATOR)
+
+        // SC_EXPRESSION - expr
+        vector_t* expr_expressions; // <syntax_component_t> (SC_ASSIGNMENT_EXPRESSION)
+
+        // bexpr (general binary expression)
+        // SC_ASSIGNMENT_EXPRESSION
+        // SC_LOGICAL_OR_EXPRESSION
+        // SC_LOGICAL_AND_EXPRESSION
+        // SC_BITWISE_OR_EXPRESSION
+        // SC_BITWISE_XOR_EXPRESSION
+        // SC_BITWISE_AND_EXPRESSION
+        // SC_EQUALITY_EXPRESSION
+        // SC_INEQUALITY_EXPRESSION
+        // SC_GREATER_EQUAL_EXPRESSION
+        // SC_LESS_EQUAL_EXPRESSION
+        // SC_GREATER_EXPRESSION
+        // SC_LESS_EXPRESSION
+        // SC_BITWISE_RIGHT_EXPRESSION
+        // SC_BITWISE_LEFT_EXPRESSION
+        // SC_SUBTRACTION_EXPRESSION
+        // SC_ADDITION_EXPRESSION
+        // SC_MODULAR_EXPRESSION
+        // SC_DIVISION_EXPRESSION
+        // SC_MULTIPLICATION_EXPRESSION
+        struct
+        {
+            struct syntax_component_t* bexpr_lhs;
+            struct syntax_component_t* bexpr_rhs;
+        };
+
+        // SC_CONDITIONAL_EXPRESSION - cexpr
+        struct
+        {
+            struct syntax_component_t* cexpr_condition; // SC_LOGICAL_OR_EXPRESSION
+            struct syntax_component_t* cexpr_if; // SC_EXPRESSION
+            struct syntax_component_t* cexpr_else; // SC_CONDITIONAL_EXPRESSION
+        };
+
+        // SC_CAST_EXPRESSION - caexpr
+        struct
+        {
+            struct syntax_component_t* caexpr_type_name; // SC_TYPE_NAME
+            struct syntax_component_t* caexpr_operand;
+        };
+
+        // uexpr (general unary expression)
+        // SC_PREFIX_INCREMENT_EXPRESSION
+        // SC_PREFIX_DECREMENT_EXPRESSION
+        // SC_REFERENCE_EXPRESSION
+        // SC_DEREFERENCE_EXPRESSION
+        // SC_PLUS_EXPRESSION
+        // SC_MINUS_EXPRESSION
+        // SC_COMPLEMENT_EXPRESSION
+        // SC_NOT_EXPRESSION
+        // SC_SIZEOF_EXPRESSION
+        // SC_SIZEOF_TYPE_EXPRESSION
+        // SC_POSTFIX_INCREMENT_EXPRESSION
+        // SC_POSTFIX_DECREMENT_EXPRESSION
+        // SC_DEREFERENCE_MEMBER_EXPRESSION
+        // SC_MEMBER_EXPRESSION
+        struct syntax_component_t* uexpr_operand;
+
+        // SC_INITIALIZER_LIST_EXPRESSION - inlexpr
+        struct
+        {
+            struct syntax_component_t* inlexpr_type_name; // SC_TYPE_NAME
+            struct syntax_component_t* inlexpr_inlist; // SC_INITIALIZER_LIST
+        };
+
+        // SC_FUNCTION_CALL_EXPRESSION - fcallexpr
+        struct
+        {
+            struct syntax_component_t* fcallexpr_expression; // SC_POSTFIX_EXPRESSION
+            vector_t* fcallexpr_args; // <syntax_component_t> (SC_ASSIGNMENT_EXPRESSION)
+        };
+
+        // SC_SUBSCRIPT_EXPRESSION - subsexpr
+        struct
+        {
+            struct syntax_component_t* subsexpr_expression; // SC_POSTFIX_EXPRESSION
+            struct syntax_component_t* subsexpr_index_expression; // SC_EXPRESSION
+        };
+
+        // SC_TYPE_NAME - tn
+        struct
+        {
+            vector_t* tn_specifier_qualifier_list; // <syntax_component_t> (SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER)
+            vector_t* tn_declarator; // <syntax_component_t> (SC_ABSTRACT_DECLARATOR)
+        };
+
+        // SC_ERROR - err
+        struct
+        {
+            char* err_message;
+            int err_depth;
+        };
     };
 } syntax_component_t;
 
@@ -610,6 +600,9 @@ typedef struct set_t
 int infof(char* fmt, ...);
 int warnf(char* fmt, ...);
 int errorf(char* fmt, ...);
+int sninfof(char* buffer, size_t maxlen, char* fmt, ...);
+int snwarnf(char* buffer, size_t maxlen, char* fmt, ...);
+int snerrorf(char* buffer, size_t maxlen, char* fmt, ...);
 
 /* buffer.c */
 buffer_t* buffer_init(void);
@@ -638,8 +631,9 @@ extern const char* SYNTAX_COMPONENT_NAMES[16];
 extern const char* SPECIFIER_QUALIFIER_NAMES[9];
 extern const char* ARITHMETIC_TYPE_NAMES[21];
 extern unsigned ARITHMETIC_TYPE_SIZES[21];
+extern const char* BASIC_TYPE_SPECIFIER_NAMES[12];
 extern const char* STORAGE_CLASS_NAMES[5];
-extern const char* QUALIFIER_NAMES[3];
+extern const char* TYPE_QUALIFIER_NAMES[3];
 extern const char* FUNCTION_SPECIFIER_NAMES[1];
 extern const char* DECLARATOR_NAMES[5];
 extern const char* INITIALIZER_NAMES[3];
@@ -670,11 +664,12 @@ syntax_component_t* parse(lexer_token_t* toks);
 bool emit(syntax_component_t* unit, FILE* out);
 
 /* syntax.c */
-syntax_component_t* dig_declarator_identifier(syntax_component_t* declarator);
+syntax_component_t* find_declarator_identifier(syntax_component_t* declarator);
 unsigned count_specifiers(syntax_component_t* declaration, unsigned type);
 unsigned get_declaration_size(syntax_component_t* s);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
-bool has_specifier_qualifier(vector_t* specs_quals, unsigned spec_qual_type, unsigned type);
+bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type);
+void free_syntax(syntax_component_t* syn);
 
 #endif

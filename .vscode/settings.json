@@ -1,6 +1,9 @@
 {
     "files.associations": {
+        "*.sgcll": "plaintext",
         "typeinfo": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "cc.h": "c",
+        "stdio.h": "c"
     }
 }

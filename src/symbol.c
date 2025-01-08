@@ -9,7 +9,7 @@ static unsigned long hash(char* str)
     unsigned long hash = 5381;
     int c;
 
-    while (c = *str++)
+    while ((c = *str++))
         hash = ((hash << 5) + hash) + c;
 
     return hash;
@@ -42,7 +42,7 @@ static symbol_t* symbol_table_get_internal(symbol_table_t* t, char* k, int* i)
     unsigned long index = hash(k) % t->capacity;
     for (;; index = (index + 1 == t->capacity ? 0 : index + 1))
     {
-        if (t->key[index] != NULL && !strcmp(t->key[index], t))
+        if (t->key[index] != NULL && !strcmp(t->key[index], k))
         {
             if (i) *i = index;
             return t->value[index];
@@ -114,7 +114,7 @@ symbol_t* symbol_table_remove(symbol_table_t* t, char* k)
     unsigned long index = hash(k) % t->capacity;
     for (unsigned long i = index;;)
     {
-        if (t->key[index] != NULL && !strcmp(t->key[index], t))
+        if (t->key[index] != NULL && !strcmp(t->key[index], k))
         {
             symbol_t* sy = t->value[index];
             if (t->value[index]->shaded)

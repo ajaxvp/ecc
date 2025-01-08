@@ -10,8 +10,8 @@
 #define isloweralpha(x) ((x) >= 'a' && (x) <= 'z')
 #define isupperalpha(x) ((x) >= 'A' && (x) <= 'Z')
 #define isnumeric(x) ((x) >= '0' && (x) <= '9')
-#define isalpha(x) (isloweralpha((x)) || isupperalpha((x)))
-#define isalphanumeric(x) (isalpha((x)) || isnumeric((x)))
+#define isalpha_cc(x) (isloweralpha((x)) || isupperalpha((x)))
+#define isalphanumeric(x) (isalpha_cc((x)) || isnumeric((x)))
 
 #define IGNORE_TOKEN ((lexer_token_t*) 1)
 
@@ -85,7 +85,7 @@ static lexer_token_t* lex_single(FILE* file, filepos_t* pos)
     int cpk = peekc(file, pos);
     bool chk_long_const = c == 'L' && (cpk == '"' || cpk == '\'');
     bool is_unicode_identifier = c == '\\' && (tolower(cpk) == 'u');
-    if ((isalpha(c) || c == '_' || is_unicode_identifier) && !chk_long_const)
+    if ((isalpha_cc(c) || c == '_' || is_unicode_identifier) && !chk_long_const)
     {
         buffer_t* b = buffer_init();
         buffer_append(b, c);

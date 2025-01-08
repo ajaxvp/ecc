@@ -32,7 +32,12 @@ void* vector_get(vector_t* v, unsigned index)
 {
     if (index < 0 || index >= v->size)
         return NULL;
-    return v->data[index];
+    return v
+    ->
+    data
+    [
+        index
+    ];
 }
 
 bool vector_contains(vector_t* v, void* el, int (*c)(void*, void*))

@@ -119,22 +119,37 @@ unsigned ARITHMETIC_TYPE_SIZES[21] = {
     16
 };
 
-const char* STORAGE_CLASS_NAMES[5] = {
-    "TYPEDEF",
-    "AUTO",
-    "REGISTER",
-    "STATIC",
-    "EXTERN"
+const char* BASIC_TYPE_SPECIFIER_NAMES[12] = {
+    "void",
+    "char",
+    "short",
+    "int",
+    "long",
+    "float",
+    "double",
+    "signed",
+    "unsigned",
+    "bool",
+    "_Complex",
+    "_Imaginary"
 };
 
-const char* QUALIFIER_NAMES[3] = {
-    "CONST",
-    "VOLATILE",
-    "RESTRICT"
+const char* STORAGE_CLASS_NAMES[5] = {
+    "typedef",
+    "auto",
+    "register",
+    "static",
+    "extern"
+};
+
+const char* TYPE_QUALIFIER_NAMES[3] = {
+    "const",
+    "restrict",
+    "volatile"
 };
 
 const char* FUNCTION_SPECIFIER_NAMES[1] = {
-    "INLINE"
+    "inline"
 };
 
 const char* DECLARATOR_NAMES[5] = {
