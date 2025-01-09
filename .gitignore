@@ -68,3 +68,7 @@ cc
 
 # Testing file
 help.c
+
+# Temporary files
+temp.c
+test/temp.c

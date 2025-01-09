@@ -1,3 +1,0 @@
-start ${1-"test/parse/accept/6.7_1_2_a.c"}
-break test.c:28
-continue

@@ -74,7 +74,6 @@ EXPECTED:
 // does NOT free anything. you should do this!
 #define fail_parse(token, fmt, ...) \
     fail_status; \
-    if (req == EXPECTED) \
     { \
         char buffer[MAX_ERROR_LEN]; \
         snprintf(buffer, MAX_ERROR_LEN, fmt, ## __VA_ARGS__); \
@@ -166,7 +165,7 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
 }
 
 // 6.4.2.1
-syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, bool declare)
+syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
 {
     init_parse;
     if (!token)
@@ -186,13 +185,6 @@ syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_
 
     syn->id = strdup(token->string_value);
 
-    if (declare)
-    {
-        // add to symbol table //
-        symbol_t* sy = symbol_init(syn);
-        symbol_table_add(tlu->tlu_st, syn->id, sy);
-    }
-
     advance_token;
     update_status(FOUND);
     return syn;
@@ -204,9 +196,70 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     return parse_stub(tokens, req, stat, tlu, depth);
 }
 
+// 6.7.2.1
+syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_STRUCT_DECLARATION);
+    return parse_stub(tokens, req, stat, tlu, depth);
+}
+
+// 6.7.2.1
 syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
-    return parse_stub(tokens, req, stat, tlu, depth);
+    init_parse;
+    if (!is_keyword(token, KEYWORD_STRUCT) && !is_keyword(token, KEYWORD_UNION))
+    {
+        // ISO: 6.7.2.1 (1)
+        fail_parse(token, "expected 'struct' or 'union'");
+        return NULL;
+    }
+    init_syn(SC_STRUCT_UNION_SPECIFIER);
+    switch (token->keyword_id)
+    {
+        case KEYWORD_STRUCT: syn->sus_sou = SOU_STRUCT; break;
+        case KEYWORD_UNION: syn->sus_sou = SOU_UNION; break;
+    }
+    advance_token;
+    parse_status_code_t id_stat = UNKNOWN_STATUS;
+    syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+    if (!is_separator(token, '{'))
+    {
+        if (id_stat == NOT_FOUND)
+        {
+            // ISO: 6.7.2.1 (1)
+            fail_parse(token, "identifier is required if no declaration list is provided");
+            free_syntax(syn);
+            return NULL;
+        }
+        update_status(FOUND);
+        return syn;
+    }
+    advance_token;
+    syn->sus_declarations = vector_init();
+    if (id_stat == FOUND)
+    {
+        // add to symbol table //
+        symbol_t* sy = symbol_init(syn->sus_id);
+        symbol_table_add(tlu->tlu_st, syn->sus_id->id, sy);
+    }
+    for (;;)
+    {
+        parse_status_code_t sdecl_stat = UNKNOWN_STATUS;
+        syntax_component_t* sdecl = parse_struct_declaration(&token, OPTIONAL, &sdecl_stat, tlu, next_depth);
+        if (sdecl_stat == NOT_FOUND)
+            break;
+        vector_add(syn->sus_declarations, sdecl);
+    }
+    if (!syn->sus_declarations->size)
+    {
+        // ISO: 6.7.2.1 (1)
+        fail_parse(token, "struct is empty");
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
 }
 
 syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
@@ -317,7 +370,7 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
         return es;
     }
     parse_status_code_t td_stat = UNKNOWN_STATUS;
-    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, SC_TYPEDEF_NAME, false);
+    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, SC_TYPEDEF_NAME);
     link_to_parent(td);
     if (td_stat == FOUND)
     {
@@ -690,7 +743,8 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     for (;;)
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER, false);
+        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+        // TODO: consider adding to symbol table?
         link_to_parent(id);
         if (id_stat == NOT_FOUND)
             break;
@@ -760,12 +814,15 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
     else
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER, true);
+        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
         if (id_stat == ABORT)
         {
             fail_parse(token, "expected identifier");
             return NULL;
         }
+        // add to symbol table //
+        symbol_t* sy = symbol_init(left);
+        symbol_table_add(tlu->tlu_st, left->id, sy);
     }
     for (;;)
     {

@@ -4,8 +4,11 @@ BUILD=$(addprefix build/, $(OBJS))
 
 default: buildfolder $(EXE)
 
+test: buildfolder $(EXE)
+	cd test && $(MAKE) clean && $(MAKE) && ./test
+
 buildfolder:
-	mkdir build
+	mkdir -p build
 
 $(EXE): $(BUILD)
 		gcc -g -o $(EXE) $^ $(LIBS)

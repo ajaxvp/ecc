@@ -4,13 +4,6 @@
 
 #include "cc.h"
 
-const bool debug_m = true;
-
-bool in_debug(void)
-{
-    return debug_m;
-}
-
 // parser test code
 int main(int argc, char** argv)
 {
