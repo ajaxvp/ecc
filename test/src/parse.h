@@ -28,4 +28,15 @@ EXPORT_TEST(test_declspec21_a);
 
 EXPORT_TEST(test_declspec22_a);
 
+EXPORT_TEST(test_struct_basic_a);
+EXPORT_TEST(test_struct_named_a);
+EXPORT_TEST(test_struct_bitfield_a);
+EXPORT_TEST(test_struct_bitfield_no_declr_a);
+EXPORT_TEST(test_struct_bitfield_no_declr2_a);
+EXPORT_TEST(test_struct_no_declr_r);
+EXPORT_TEST(test_struct_empty_r);
+EXPORT_TEST(test_struct_no_spec_qual_r);
+
+EXPORT_TEST(test_union_a);
+
 #endif

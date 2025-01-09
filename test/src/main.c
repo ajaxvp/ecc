@@ -26,8 +26,18 @@ int main(void)
     add_test(test_declspec19_a);
     add_test(test_declspec20_a);
     add_test(test_declspec21_a);
-
     add_test(test_declspec22_a);
+
+    add_test(test_struct_basic_a);
+    add_test(test_struct_named_a);
+    add_test(test_struct_bitfield_a);
+    add_test(test_struct_bitfield_no_declr_a);
+    add_test(test_struct_bitfield_no_declr2_a);
+    add_test(test_struct_no_declr_r);
+    add_test(test_struct_empty_r);
+    add_test(test_struct_no_spec_qual_r);
+
+    add_test(test_union_a);
 
     run_tests();
 }

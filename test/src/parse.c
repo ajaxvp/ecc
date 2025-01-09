@@ -43,3 +43,14 @@ parse_test(test_declspec19_a, accept("int f();"))
 parse_test(test_declspec20_a, accept("int g(x, y);"))
 parse_test(test_declspec21_a, accept("int h(int x, ...);"))
 parse_test(test_declspec22_a, accept("int i[5];"))
+
+parse_test(test_struct_basic_a, accept("struct { int a; };"));
+parse_test(test_struct_named_a, accept("struct foo { int a; int b; };"));
+parse_test(test_struct_bitfield_a, accept("struct foo { int a : 5; };"));
+parse_test(test_struct_bitfield_no_declr_a, accept("struct foo { int : 5; };"));
+parse_test(test_struct_bitfield_no_declr2_a, accept("struct foo { const : 5; };"));
+parse_test(test_struct_no_declr_r, reject("struct foo { int; };"));
+parse_test(test_struct_empty_r, reject("struct foo { };"));
+parse_test(test_struct_no_spec_qual_r, reject("struct foo { b; };"));
+
+parse_test(test_union_a, accept("union foo { int b; };"));

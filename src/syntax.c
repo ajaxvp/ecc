@@ -510,6 +510,24 @@ void free_syntax(syntax_component_t* syn)
             deep_free_syntax_vector(syn->pdecl_declaration_specifiers, s);
             break;
         }
+        case SC_STRUCT_UNION_SPECIFIER:
+        {
+            deep_free_syntax_vector(syn->sus_declarations, s);
+            free_syntax(syn->sus_id);
+            break;
+        }
+        case SC_STRUCT_DECLARATION:
+        {
+            deep_free_syntax_vector(syn->sdecl_declarators, s1);
+            deep_free_syntax_vector(syn->sdecl_specifier_qualifier_list, s2);
+            break;
+        }
+        case SC_STRUCT_DECLARATOR:
+        {
+            free_syntax(syn->sdeclr_declarator);
+            free_syntax(syn->sdeclr_bits_expression);
+            break;
+        }
         // nothing to free
         case SC_UNKNOWN:
         case SC_BASIC_TYPE_SPECIFIER:

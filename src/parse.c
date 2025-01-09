@@ -74,6 +74,7 @@ EXPECTED:
 // does NOT free anything. you should do this!
 #define fail_parse(token, fmt, ...) \
     fail_status; \
+    if (req == EXPECTED) \
     { \
         char buffer[MAX_ERROR_LEN]; \
         snprintf(buffer, MAX_ERROR_LEN, fmt, ## __VA_ARGS__); \
@@ -123,6 +124,8 @@ typedef enum parse_request_code
 } parse_request_code_t;
 
 syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 
 bool is_keyword(lexer_token_t* token, unsigned keyword_id)
 {
@@ -157,6 +160,12 @@ syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req,
     init_parse;
     fail_parse(token, "this syntax element cannot be parsed yet");
     return NULL;
+}
+
+syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
+{
+    //init_syn(type);
+    return parse_stub(tokens, req, stat, tlu, depth);
 }
 
 syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
@@ -196,12 +205,99 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     return parse_stub(tokens, req, stat, tlu, depth);
 }
 
+syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_STRUCT_DECLARATOR);
+    parse_status_code_t declr_stat = UNKNOWN_STATUS;
+    syn->sdeclr_declarator = parse_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth);
+    link_to_parent(syn->sdeclr_declarator);
+    if (is_operator(token, ':'))
+    {
+        advance_token;
+        parse_status_code_t ce_stat = UNKNOWN_STATUS;
+        syn->sdeclr_bits_expression = parse_conditional_expression(&token, EXPECTED, &ce_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
+        link_to_parent(syn->sdeclr_bits_expression);
+        if (ce_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        update_status(FOUND);
+        return syn;
+    }
+    if (declr_stat == NOT_FOUND)
+    {
+        fail_parse(token, "declarator required for struct declarator if it does not have a bitfield");
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
 // 6.7.2.1
 syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
     init_parse;
     init_syn(SC_STRUCT_DECLARATION);
-    return parse_stub(tokens, req, stat, tlu, depth);
+    syn->sdecl_specifier_qualifier_list = vector_init();
+    for (;;)
+    {
+        parse_status_code_t tq_stat = UNKNOWN_STATUS;
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
+        link_to_parent(tq);
+        if (tq_stat == FOUND)
+        {
+            vector_add(syn->sdecl_specifier_qualifier_list, tq);
+            continue;
+        }
+        parse_status_code_t ts_stat = UNKNOWN_STATUS;
+        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth);
+        link_to_parent(ts);
+        if (ts_stat == FOUND)
+        {
+            vector_add(syn->sdecl_specifier_qualifier_list, ts);
+            continue;
+        }
+        break;
+    }
+    if (!syn->sdecl_specifier_qualifier_list->size)
+    {
+        // ISO: 6.7.2.1 (1)
+        fail_parse(token, "expected at least one type specifier or qualifier for struct declaration");
+        free_syntax(syn);
+        return NULL;
+    }
+    syn->sdecl_declarators = vector_init();
+    for (;;)
+    {
+        parse_status_code_t sdeclr_stat = UNKNOWN_STATUS;
+        syntax_component_t* sdeclr = parse_struct_declarator(&token, EXPECTED, &sdeclr_stat, tlu, next_depth);
+        link_to_parent(sdeclr);
+        if (sdeclr_stat == ABORT)
+        {
+            // ISO: 6.7.2.1 (1)
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        vector_add(syn->sdecl_declarators, sdeclr);
+        if (!is_separator(token, ','))
+            break;
+        advance_token;
+    }
+    if (!is_separator(token, ';'))
+    {
+        // ISO: 6.7.2.1 (1)
+        fail_parse(token, "expected semicolon at end of struct declaration");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
 }
 
 // 6.7.2.1
@@ -223,6 +319,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
     syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+    link_to_parent(syn->sus_id);
     if (!is_separator(token, '{'))
     {
         if (id_stat == NOT_FOUND)
@@ -247,10 +344,18 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     {
         parse_status_code_t sdecl_stat = UNKNOWN_STATUS;
         syntax_component_t* sdecl = parse_struct_declaration(&token, OPTIONAL, &sdecl_stat, tlu, next_depth);
+        link_to_parent(sdecl);
         if (sdecl_stat == NOT_FOUND)
             break;
         vector_add(syn->sus_declarations, sdecl);
     }
+    if (!is_separator(token, '}'))
+    {
+        fail_parse(token, "expected right brace for end of declaration list for struct");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
     if (!syn->sus_declarations->size)
     {
         // ISO: 6.7.2.1 (1)
@@ -262,9 +367,94 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     return syn;
 }
 
+syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_ENUMERATOR);
+    parse_status_code_t id_stat = UNKNOWN_STATUS;
+    syn->enumr_constant = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_ENUMERATION_CONSTANT);
+    link_to_parent(syn->enumr_constant);
+    if (id_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_operator(token, '='))
+    {
+        update_status(FOUND);
+        return syn;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->enumr_expression = parse_conditional_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
+    link_to_parent(syn->enumr_expression);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
 syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
-    return parse_stub(tokens, req, stat, tlu, depth);
+    init_parse;
+    if (!is_keyword(token, KEYWORD_ENUM))
+    {
+        // ISO: 6.7.2.2 (1)
+        fail_parse(token, "expected 'enum'");
+        return NULL;
+    }
+    init_syn(SC_ENUM_SPECIFIER);
+    advance_token;
+    parse_status_code_t id_stat = UNKNOWN_STATUS;
+    syn->enums_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+    link_to_parent(syn->enums_id);
+    if (!is_separator(token, '{'))
+    {
+        if (id_stat == NOT_FOUND)
+        {
+            // ISO: 6.7.2.2 (1)
+            fail_parse(token, "identifier is required if no enumerator list is provided");
+            free_syntax(syn);
+            return NULL;
+        }
+        update_status(FOUND);
+        return syn;
+    }
+    advance_token;
+    syn->enums_enumerators = vector_init();
+    if (id_stat == FOUND)
+    {
+        // add to symbol table //
+        symbol_t* sy = symbol_init(syn->enums_id);
+        symbol_table_add(tlu->tlu_st, syn->enums_id->id, sy);
+    }
+    for (;;)
+    {
+        parse_status_code_t enumr_stat = UNKNOWN_STATUS;
+        syntax_component_t* enumr = parse_enumerator(&token, EXPECTED, &enumr_stat, tlu, next_depth);
+        link_to_parent(enumr);
+        if (enumr_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        vector_add(syn->enums_enumerators, enumr);
+        if (is_separator(token, ','))
+        {
+            advance_token;
+        }
+        if (is_separator(token, '}'))
+            break;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
 }
 
 // 6.7.1
