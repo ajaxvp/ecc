@@ -4,10 +4,13 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#define debug in_debug()
+
 #define terminate(fmt, ...) { errorf(fmt, ## __VA_ARGS__); exit(1); }
 #define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
 
 #define VECTOR_FOR(type, var, vec) type var = vector_get((vec), 0); for (unsigned i = 0; i < vec->size; ++i, var = vector_get((vec), i))
+#define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var); vector_delete((vec)); }
 
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
@@ -56,6 +59,8 @@
 #define KEYWORD_BOOL 34
 #define KEYWORD_COMPLEX 35
 #define KEYWORD_IMAGINARY 36
+
+typedef struct symbol_table_t symbol_table_t;
 
 typedef struct lexer_token_t
 {
@@ -128,6 +133,7 @@ typedef enum struct_or_union
     SOU_UNION
 } struct_or_union_t;
 
+/* !IMPORTANT! DON'T MAKE CHANGES TO THIS ORDER W/O CHANGING THE CONST.C NAME ORDER */
 typedef enum syntax_component_type_t
 {
     SC_UNKNOWN = 0, // unk
@@ -211,7 +217,9 @@ typedef enum syntax_component_type_t
     SC_FLOATING_CONSTANT,
     SC_INTEGER_CONSTANT,
     SC_CHARACTER_CONSTANT,
-    SC_STRING_LITERAL
+    SC_STRING_LITERAL,
+    SC_STRUCT_DECLARATION,
+    SC_STRUCT_DECLARATOR,
 } syntax_component_type_t;
 
 // SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
@@ -229,11 +237,11 @@ typedef enum syntax_component_type_t
 // SC_CONSTANT = SC_INTEGER_CONSTANT | SC_FLOATING_CONSTANT | SC_ENUMERATION_CONSTANT | SC_CHARACTER_CONSTANT
 
 // THE GREATEST STRUCT OF ALL TIME
-// unless otherwise specified, vectors will not contain null pointers.
 typedef struct syntax_component_t
 {
     syntax_component_type_t type;
     unsigned row, col;
+    struct syntax_component_t* parent;
     union
     {
         // SC_TRANSLATION_UNIT - tlu
@@ -241,6 +249,7 @@ typedef struct syntax_component_t
         {
             vector_t* tlu_external_declarations;
             vector_t* tlu_errors; // <syntax_component_t> (SC_ERROR)
+            symbol_table_t* tlu_st;
         };
 
         // SC_FUNCTION_DEFINITION - fdef
@@ -557,14 +566,51 @@ typedef struct syntax_component_t
     };
 } syntax_component_t;
 
+/*
+
+IMPORTANT NOTES:
+
+An identifier can denote an object; a function; a tag or a member of a structure, union, or
+enumeration; a typedef name; a label name; a macro name; or a macro parameter. The
+same identifier can denote different entities at different points in the program.
+
+There are four kinds of scopes: function, file, block, and function prototype.
+
+A label name is the only kind of identifier that has function scope.
+
+If the declarator or type specifier that declares the identifier appears outside of any block
+or list of parameters, the identifier has file scope.
+
+If the declarator or type specifier that declares the identifier appears inside a block or
+within the list of parameter declarations in a function definition, the identifier has block scope.
+
+If the declarator or type specifier that declares the identifier appears within the list of parameter declarations
+in a function prototype (not part of a function definition), the identifier has function prototype scope
+
+Structure, union, and enumeration tags have scope that begins just after the appearance of
+the tag in a type specifier that declares the tag. Each enumeration constant has scope that
+begins just after the appearance of its defining enumerator in an enumerator list. Any
+other identifier has scope that begins just after the completion of its declarator.
+
+*/
+
+/*
+
+function scope: defined by a SC_FUNCTION_DEFINITION syntax element
+file scope: defined by a SC_TRANSLATION_UNIT syntax element
+block scope: defined by a SC_STATEMENT syntax element (depends on the circumstance but yeh)
+function prototype scope: defined by a SC_FUNCTION_DECLARATOR syntax element (only if not part of a function definition)
+
+object: declared by a SC_DECLARATOR
+function: declared by a SC_DECLARATOR
+tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
+
+*/
+
 typedef struct symbol_t
 {
-    struct symbol_t* shaded;
-    syntax_component_t* scope;
-    syntax_component_t* declaration;
-    syntax_component_t* declarator;
-    char* label;
-    int offset;
+    syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
+    struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
 } symbol_t;
 
 typedef struct symbol_table_t
@@ -663,13 +709,37 @@ syntax_component_t* parse(lexer_token_t* toks);
 /* emit.c */
 bool emit(syntax_component_t* unit, FILE* out);
 
+/* symbol.c */
+symbol_t* symbol_init(syntax_component_t* declarer);
+syntax_component_t* symbol_get_scope(symbol_t* sy);
+void symbol_print(symbol_t* sy, int (*printer)(const char*, ...));
+void symbol_delete(symbol_t* sy);
+symbol_table_t* symbol_table_init(void);
+symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
+symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
+symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id);
+symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id);
+void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
+void symbol_table_delete(symbol_table_t* t, bool free_contents);
+
 /* syntax.c */
 syntax_component_t* find_declarator_identifier(syntax_component_t* declarator);
 unsigned count_specifiers(syntax_component_t* declaration, unsigned type);
 unsigned get_declaration_size(syntax_component_t* s);
+bool syntax_is_declarator_type(syntax_component_type_t type);
+syntax_component_t* syntax_get_declarator_identifier(syntax_component_t* declr);
+syntax_component_t* syntax_get_declarator_function_definition(syntax_component_t* declr);
+syntax_component_t* syntax_get_declarator_declaration(syntax_component_t* declr);
+syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type);
 void free_syntax(syntax_component_t* syn);
+
+/* util.c */
+char* strdup(char* str);
+
+/* from somewhere */
+bool in_debug(void);
 
 #endif

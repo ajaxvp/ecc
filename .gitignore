@@ -56,3 +56,6 @@ ignored
 
 # Compiler output
 *.s
+
+build
+.vscode

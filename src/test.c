@@ -4,6 +4,13 @@
 
 #include "cc.h"
 
+const bool debug_m = true;
+
+bool in_debug(void)
+{
+    return debug_m;
+}
+
 // parser test code
 int main(int argc, char** argv)
 {
@@ -14,14 +21,20 @@ int main(int argc, char** argv)
     }
     FILE* file = fopen(argv[1], "r");
     lexer_token_t* tokens = lex(file);
+    if (!tokens) return 1;
     // printf("<<lexer output>>\n");
     // for (lexer_token_t* tok = toks; tok; tok = tok->next)
     //     print_token(tok, printf);
     syntax_component_t* tlu = parse(tokens);
+    if (!tlu) return 1;
     printf("<<parser output>>\n");
     print_syntax(tlu, printf);
+    printf("<<symbol table>>\n");
+    symbol_table_print(tlu->tlu_st, printf);
     //FILE* out = fopen("out.s", "w");
     //emit(unit, out);
     //fclose(out);
     fclose(file);
+    free_syntax(tlu);
+    return 0;
 }
