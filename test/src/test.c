@@ -5,8 +5,11 @@
 #include <stdbool.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <getopt.h>
 
 #include "test.h"
+
+bool test_debug = false;
 
 bool first_pass_test = true;
 size_t no_tests = 0;
@@ -76,8 +79,63 @@ void add_test(test_exit_code_t (*t)(void))
     tests[no_tests++] = t;
 }
 
-void run_tests(void)
+/*
+  int option;
+  while ((option = getopt (argc, argv, "aps")) != -1)
+  {
+    switch (option)
+      {
+      case 'a':
+        *all = true;
+        break;
+      case 'p':
+        *perms = true;
+        break;
+      case 's':
+        *sizes = true;
+        break;
+      default:
+        return -1;
+      }
+  }
+  return 0;
+*/
+
+bool handle_options(int argc, char** argv)
 {
+    for (int op; (op = getopt(argc, argv, "d")) != -1;)
+    {
+        switch (op)\
+        {
+            case 'd':
+                test_debug = true;
+                break;
+            default:
+                opterr = 0;
+                return false;
+        }
+    }
+    return true;
+}
+
+bool contains(char** array, size_t length, char* item)
+{
+    for (size_t i = 0; i < length; ++i)
+    {
+        if (!strcmp(array[i], item))
+            return true;
+    }
+    return false;
+}
+
+void run_tests(int argc, char** argv)
+{
+    if (!handle_options(argc, argv))
+    {
+        printf("usage: %s [-d] [tests...]\n", argv[0]);
+        return;
+    }
+    bool only_selected_tests = optind < argc;
     if (!no_tests)
     {
         printf("no tests to run\n");
@@ -89,6 +147,11 @@ void run_tests(void)
         tests[i]();
     first_pass_test = false;
     for (size_t i = 0; i < nt; ++i)
-        test(tests[i], i);
-    printf("passed %ld/%ld (%.1f%%) tests!\n", passed_tests, no_tests, ((double) passed_tests / (double) no_tests) * 100.0);
+    {
+        if (!only_selected_tests || contains(argv + optind, argc - optind, test_names[i]))
+            test(tests[i], i);
+    }
+    size_t total = !only_selected_tests ? no_tests : argc - optind;
+    printf("passed %ld/%ld (%.1f%%) test(s)!\n", passed_tests, total, ((double) passed_tests / (double) total) * 100.0);
+    return;
 }

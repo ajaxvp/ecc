@@ -126,6 +126,8 @@ typedef enum parse_request_code
 syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, bool* ellipsis);
+syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 
 bool is_keyword(lexer_token_t* token, unsigned keyword_id)
 {
@@ -380,6 +382,9 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
         free_syntax(syn);
         return NULL;
     }
+    // add to symbol table //
+    symbol_t* sy = symbol_init(syn->enumr_constant);
+    symbol_table_add(tlu->tlu_st, syn->enumr_constant->id, sy);
     if (!is_operator(token, '='))
     {
         update_status(FOUND);
@@ -757,9 +762,160 @@ syntax_component_t* parse_pointer(lexer_token_t** tokens, parse_request_code_t r
     return syn;
 }
 
+// does not parse optional direct abstract declarator
+syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_ABSTRACT_FUNCTION_DECLARATOR);
+
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for abstract function declarator");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+
+    parse_status_code_t ptlist_stat = UNKNOWN_STATUS;
+    syn->abfdeclr_parameter_declarations = parse_parameter_type_list(&token, OPTIONAL, &ptlist_stat, tlu, next_depth, &syn->abfdeclr_ellipsis);
+    link_vector_to_parent(syn->abfdeclr_parameter_declarations);
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for abstract function declarator");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse optional direct abstract declarator
+syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_ABSTRACT_ARRAY_DECLARATOR);
+
+    if (!is_operator(token, '['))
+    {
+        fail_parse(token, "expected left bracket for abstract array declarator");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (is_operator(token, '*'))
+    {
+        syn->abadeclr_unspecified_size = true;
+        advance_token;
+    }
+    else
+    {
+        syn->abadeclr_length_expression = parse_assignment_expression(&token, OPTIONAL, NULL, tlu, next_depth);
+        link_to_parent(syn->abadeclr_length_expression);
+    }
+    if (!is_operator(token, ']'))
+    {
+        fail_parse(token, "expected right bracket for abstract array declarator");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+// 6.7.6
+syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    // nested declarator
+    syntax_component_t* left = NULL;
+    if (is_separator(token, '('))
+    {
+        advance_token;
+        parse_status_code_t abdeclr_stat = UNKNOWN_STATUS;
+        left = parse_abstract_declarator(&token, EXPECTED, &abdeclr_stat, tlu, next_depth);
+        if (abdeclr_stat == ABORT)
+        {
+            fail_parse(token, "expected abstract declarator");
+            return NULL;
+        }
+        if (!is_separator(token, ')'))
+        {
+            fail_parse(token, "expected right parenthesis");
+            free_syntax(left);
+            return NULL;
+        }
+        advance_token;
+    }
+    for (;;)
+    {
+        parse_status_code_t abfdeclr_stat = UNKNOWN_STATUS;
+        syntax_component_t* abfdeclr = parse_partial_abstract_function_declarator(&token, OPTIONAL, &abfdeclr_stat, tlu, next_depth);
+        if (abfdeclr_stat == FOUND)
+        {
+            if (left)
+            {
+                link_to_specific_parent(left, abfdeclr);
+                abfdeclr->abfdeclr_direct = left;
+            }
+            left = abfdeclr;
+            continue;
+        }
+        parse_status_code_t abadeclr_stat = UNKNOWN_STATUS;
+        syntax_component_t* abadeclr = parse_partial_abstract_array_declarator(&token, OPTIONAL, &abadeclr_stat, tlu, next_depth);
+        if (abadeclr_stat == FOUND)
+        {
+            if (left)
+            {
+                link_to_specific_parent(left, abadeclr);
+                abadeclr->abadeclr_direct = left;
+            }
+            left = abadeclr;
+            continue;
+        }
+        break;
+    }
+    update_status(FOUND);
+    return left;
+}
+
+// 6.7.6
 syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
-    return parse_stub(tokens, req, stat, tlu, depth);
+    init_parse;
+    init_syn(SC_ABSTRACT_DECLARATOR);
+    syn->abdeclr_pointers = vector_init();
+    for (;;)
+    {
+        parse_status_code_t ptr_stat = UNKNOWN_STATUS;
+        syntax_component_t* ptr = parse_pointer(&token, OPTIONAL, &ptr_stat, tlu, next_depth);
+        link_to_parent(ptr);
+        if (ptr_stat == NOT_FOUND)
+            break;
+        vector_add(syn->abdeclr_pointers, ptr);
+    }
+    parse_status_code_t dabdeclr_stat = UNKNOWN_STATUS;
+    syn->abdeclr_direct = parse_direct_abstract_declarator(&token, OPTIONAL, &dabdeclr_stat, tlu, next_depth);
+    link_to_parent(syn->abdeclr_direct);
+    if (!syn->abdeclr_pointers->size && dabdeclr_stat == NOT_FOUND)
+    {
+        // ISO: 6.7.6 (1)
+        fail_parse(token, "expected a pointer or a declarator");
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!syn->abdeclr_pointers->size) // no pointers
+    {
+        syntax_component_t* direct = syn->abdeclr_direct;
+        syn->abdeclr_direct = NULL;
+        free_syntax(syn);
+        update_status(FOUND);
+        return direct;
+    }
+    update_status(FOUND);
+    return syn;
 }
 
 syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)

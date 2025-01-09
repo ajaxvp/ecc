@@ -9,6 +9,7 @@ static bool tparse(char* tlu_str)
 {
     lexer_token_t* tokens = testutils_tokenize(tlu_str);
     syntax_component_t* tlu = parse(tokens);
+    if (test_debug) print_syntax(tlu, printf);
     bool accepted = tlu != NULL;
     free_syntax(tlu);
     lex_delete(tokens);
@@ -49,8 +50,29 @@ parse_test(test_struct_named_a, accept("struct foo { int a; int b; };"));
 parse_test(test_struct_bitfield_a, accept("struct foo { int a : 5; };"));
 parse_test(test_struct_bitfield_no_declr_a, accept("struct foo { int : 5; };"));
 parse_test(test_struct_bitfield_no_declr2_a, accept("struct foo { const : 5; };"));
+parse_test(test_struct_specifier_a, accept("struct foo;"));
 parse_test(test_struct_no_declr_r, reject("struct foo { int; };"));
 parse_test(test_struct_empty_r, reject("struct foo { };"));
 parse_test(test_struct_no_spec_qual_r, reject("struct foo { b; };"));
+parse_test(test_struct_specifier_unnamed_r, reject("struct;"));
 
 parse_test(test_union_a, accept("union foo { int b; };"));
+
+parse_test(test_enum_basic_a, accept("enum { A };"));
+parse_test(test_enum_named_a, accept("enum foo { B };"));
+parse_test(test_enum_multiple_a, accept("enum foo { B, C };"));
+parse_test(test_enum_comma_a, accept("enum foo { B, C, };"));
+parse_test(test_enum_start_a, accept("enum foo { B = 2, C };"));
+parse_test(test_enum_multistart_a, accept("enum foo { B = 2, C, D = 7, E };"));
+parse_test(test_enum_specifier_a, accept("enum foo;"));
+parse_test(test_enum_empty_r, reject("enum foo { };"));
+parse_test(test_enum_specifier_unnamed_r, reject("enum;"));
+
+parse_test(test_absdeclr_none_a, accept("int f(int);"));
+parse_test(test_absdeclr_ptr_a, accept("int f(int *);"));
+parse_test(test_absdeclr_array_a, accept("int f(int []);"));
+parse_test(test_absdeclr_ptr_array_a, accept("int f(int *[]);"));
+parse_test(test_absdeclr_array_ptr_a, accept("int f(int (*)[]);"));
+parse_test(test_absdeclr_vla_ptr_a, accept("int f(int (*)[*]);"));
+parse_test(test_absdeclr_func_ptr_a, accept("int f(int (*)(void));"));
+parse_test(test_absdeclr_func_ptr_array_a, accept("int f(int (*const [])(unsigned int, ...));"));

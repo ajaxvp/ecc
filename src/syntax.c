@@ -528,6 +528,36 @@ void free_syntax(syntax_component_t* syn)
             free_syntax(syn->sdeclr_bits_expression);
             break;
         }
+        case SC_ENUM_SPECIFIER:
+        {
+            deep_free_syntax_vector(syn->enums_enumerators, s);
+            free_syntax(syn->enums_id);
+            break;
+        }
+        case SC_ENUMERATOR:
+        {
+            free_syntax(syn->enumr_expression);
+            free_syntax(syn->enumr_constant);
+            break;
+        }
+        case SC_ABSTRACT_DECLARATOR:
+        {
+            free_syntax(syn->abdeclr_direct);
+            deep_free_syntax_vector(syn->abdeclr_pointers, s);
+            break;
+        }
+        case SC_ABSTRACT_ARRAY_DECLARATOR:
+        {
+            free_syntax(syn->abadeclr_direct);
+            free_syntax(syn->abadeclr_length_expression);
+            break;
+        }
+        case SC_ABSTRACT_FUNCTION_DECLARATOR:
+        {
+            free_syntax(syn->abfdeclr_direct);
+            deep_free_syntax_vector(syn->abfdeclr_parameter_declarations, s);
+            break;
+        }
         // nothing to free
         case SC_UNKNOWN:
         case SC_BASIC_TYPE_SPECIFIER:

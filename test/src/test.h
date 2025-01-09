@@ -20,6 +20,8 @@
 
 #define EXPORT_TEST(name) test_exit_code_t name(void)
 
+extern bool test_debug;
+
 typedef enum test_exit_code
 {
     OK = 0,
@@ -34,7 +36,7 @@ extern size_t no_tests;
 extern char* test_names[MAX_TESTS];
 
 void add_test(test_exit_code_t (*t)(void));
-void run_tests(void);
+void run_tests(int argc, char** argv);
 char* test_strdup(char* str);
 
 #endif
