@@ -57,5 +57,14 @@ ignored
 # Compiler output
 *.s
 
-build
+# VS Code
 .vscode
+
+# Build folder
+build
+
+# Build executable
+cc
+
+# Testing file
+help.c
