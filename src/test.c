@@ -28,6 +28,6 @@ int main(int argc, char** argv)
     //emit(unit, out);
     //fclose(out);
     fclose(file);
-    free_syntax(tlu);
+    free_syntax(tlu, tlu);
     return 0;
 }

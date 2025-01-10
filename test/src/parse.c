@@ -11,7 +11,7 @@ static bool tparse(char* tlu_str)
     syntax_component_t* tlu = parse(tokens);
     if (test_debug) print_syntax(tlu, printf);
     bool accepted = tlu != NULL;
-    free_syntax(tlu);
+    free_syntax(tlu, tlu);
     lex_delete(tokens);
     return accepted;
 }
@@ -77,8 +77,4 @@ parse_test(test_absdeclr_vla_ptr_a, accept("int f(int (*)[*]);"));
 parse_test(test_absdeclr_func_ptr_a, accept("int f(int (*)(void));"));
 parse_test(test_absdeclr_func_ptr_array_a, accept("int f(int (*const [])(unsigned int, ...));"));
 
-
-int f()
-{
-    
-}
+parse_test(test_fdef_simple_a, accept("int main() {  }"));

@@ -448,7 +448,7 @@ void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...))
 }
 
 // free a syntax component and EVERYTHING IT HAS UNDERNEATH IT.
-void free_syntax(syntax_component_t* syn)
+void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
 {
     if (!syn)
         return;
@@ -471,8 +471,7 @@ void free_syntax(syntax_component_t* syn)
         case SC_ENUMERATION_CONSTANT:
         {
             // remove the id from the symbol table if it defines a symbol
-            syntax_component_t* tlu = NULL;
-            if ((tlu = syntax_get_translation_unit(syn)))
+            if (tlu && syn->id)
                 symbol_delete(symbol_table_remove(tlu->tlu_st, syn));
             free(syn->id);
             break;
@@ -485,13 +484,13 @@ void free_syntax(syntax_component_t* syn)
         case SC_DECLARATOR:
         {
             deep_free_syntax_vector(syn->declr_pointers, s);
-            free_syntax(syn->declr_direct);
+            free_syntax(syn->declr_direct, tlu);
             break;
         }
         case SC_INIT_DECLARATOR:
         {
-            free_syntax(syn->ideclr_declarator);
-            free_syntax(syn->ideclr_initializer);
+            free_syntax(syn->ideclr_declarator, tlu);
+            free_syntax(syn->ideclr_initializer, tlu);
             break;
         }
         case SC_DECLARATION:
@@ -502,28 +501,28 @@ void free_syntax(syntax_component_t* syn)
         }
         case SC_ARRAY_DECLARATOR:
         {
-            free_syntax(syn->adeclr_direct);
+            free_syntax(syn->adeclr_direct, tlu);
             deep_free_syntax_vector(syn->adeclr_type_qualifiers, s);
-            free_syntax(syn->adeclr_length_expression);
+            free_syntax(syn->adeclr_length_expression, tlu);
             break;
         }
         case SC_FUNCTION_DECLARATOR:
         {
-            free_syntax(syn->fdeclr_direct);
+            free_syntax(syn->fdeclr_direct, tlu);
             deep_free_syntax_vector(syn->fdeclr_knr_identifiers, s1);
             deep_free_syntax_vector(syn->fdeclr_parameter_declarations, s2);
             break;
         }
         case SC_PARAMETER_DECLARATION:
         {
-            free_syntax(syn->pdecl_declr);
+            free_syntax(syn->pdecl_declr, tlu);
             deep_free_syntax_vector(syn->pdecl_declaration_specifiers, s);
             break;
         }
         case SC_STRUCT_UNION_SPECIFIER:
         {
             deep_free_syntax_vector(syn->sus_declarations, s);
-            free_syntax(syn->sus_id);
+            free_syntax(syn->sus_id, tlu);
             break;
         }
         case SC_STRUCT_DECLARATION:
@@ -534,38 +533,51 @@ void free_syntax(syntax_component_t* syn)
         }
         case SC_STRUCT_DECLARATOR:
         {
-            free_syntax(syn->sdeclr_declarator);
-            free_syntax(syn->sdeclr_bits_expression);
+            free_syntax(syn->sdeclr_declarator, tlu);
+            free_syntax(syn->sdeclr_bits_expression, tlu);
             break;
         }
         case SC_ENUM_SPECIFIER:
         {
             deep_free_syntax_vector(syn->enums_enumerators, s);
-            free_syntax(syn->enums_id);
+            free_syntax(syn->enums_id, tlu);
             break;
         }
         case SC_ENUMERATOR:
         {
-            free_syntax(syn->enumr_expression);
-            free_syntax(syn->enumr_constant);
+            free_syntax(syn->enumr_expression, tlu);
+            free_syntax(syn->enumr_constant, tlu);
             break;
         }
         case SC_ABSTRACT_DECLARATOR:
         {
-            free_syntax(syn->abdeclr_direct);
+            free_syntax(syn->abdeclr_direct, tlu);
             deep_free_syntax_vector(syn->abdeclr_pointers, s);
             break;
         }
         case SC_ABSTRACT_ARRAY_DECLARATOR:
         {
-            free_syntax(syn->abadeclr_direct);
-            free_syntax(syn->abadeclr_length_expression);
+            free_syntax(syn->abadeclr_direct, tlu);
+            free_syntax(syn->abadeclr_length_expression, tlu);
             break;
         }
         case SC_ABSTRACT_FUNCTION_DECLARATOR:
         {
-            free_syntax(syn->abfdeclr_direct);
+            free_syntax(syn->abfdeclr_direct, tlu);
             deep_free_syntax_vector(syn->abfdeclr_parameter_declarations, s);
+            break;
+        }
+        case SC_FUNCTION_DEFINITION:
+        {
+            free_syntax(syn->fdef_body, tlu);
+            deep_free_syntax_vector(syn->fdef_declaration_specifiers, s1);
+            free_syntax(syn->fdef_declarator, tlu);
+            deep_free_syntax_vector(syn->fdef_knr_declarations, s2);
+            break;
+        }
+        case SC_COMPOUND_STATEMENT:
+        {
+            deep_free_syntax_vector(syn->cstmt_block_items, s);
             break;
         }
         // nothing to free

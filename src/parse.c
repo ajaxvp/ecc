@@ -198,7 +198,7 @@ syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_
     {
         // ISO: 6.4.2.1 (1)
         fail_parse(token, "expected identifier");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
 
@@ -225,7 +225,7 @@ syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_reques
         if (ce_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         update_status(FOUND);
@@ -234,7 +234,7 @@ syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_reques
     if (declr_stat == NOT_FOUND)
     {
         fail_parse(token, "declarator required for struct declarator if it does not have a bitfield");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -271,7 +271,7 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
     {
         // ISO: 6.7.2.1 (1)
         fail_parse(token, "expected at least one type specifier or qualifier for struct declaration");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     syn->sdecl_declarators = vector_init();
@@ -284,7 +284,7 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
         {
             // ISO: 6.7.2.1 (1)
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         vector_add(syn->sdecl_declarators, sdeclr);
@@ -296,7 +296,7 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
     {
         // ISO: 6.7.2.1 (1)
         fail_parse(token, "expected semicolon at end of struct declaration");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -330,7 +330,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
         {
             // ISO: 6.7.2.1 (1)
             fail_parse(token, "identifier is required if no declaration list is provided");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         update_status(FOUND);
@@ -356,7 +356,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     if (!is_separator(token, '}'))
     {
         fail_parse(token, "expected right brace for end of declaration list for struct");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -364,7 +364,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     {
         // ISO: 6.7.2.1 (1)
         fail_parse(token, "struct is empty");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -381,7 +381,7 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
     if (id_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     // add to symbol table //
@@ -399,7 +399,7 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -426,7 +426,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
         {
             // ISO: 6.7.2.2 (1)
             fail_parse(token, "identifier is required if no enumerator list is provided");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         update_status(FOUND);
@@ -448,7 +448,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
         if (enumr_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         vector_add(syn->enums_enumerators, enumr);
@@ -486,7 +486,7 @@ syntax_component_t* parse_storage_class_specifier(lexer_token_t** tokens, parse_
     {
         // ISO: 6.7.1 (1)
         fail_parse(token, "expected storage class specifier");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     switch (token->keyword_id)
@@ -549,10 +549,9 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
         update_status(FOUND);
         return syn;
     }
-    free_syntax(syn);
+    free_syntax(syn, tlu);
     parse_status_code_t sus_stat = UNKNOWN_STATUS;
     syntax_component_t* sus = parse_struct_or_union_specifier(&token, OPTIONAL, &sus_stat, tlu, next_depth);
-    link_to_parent(sus);
     if (sus_stat == FOUND)
     {
         update_status(FOUND);
@@ -560,7 +559,6 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
     }
     parse_status_code_t es_stat = UNKNOWN_STATUS;
     syntax_component_t* es = parse_enum_specifier(&token, OPTIONAL, &es_stat, tlu, next_depth);
-    link_to_parent(es);
     if (es_stat == FOUND)
     {
         update_status(FOUND);
@@ -568,12 +566,11 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
     }
     parse_status_code_t td_stat = UNKNOWN_STATUS;
     syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, SC_TYPEDEF_NAME);
-    link_to_parent(td);
     if (td_stat == FOUND)
     {
         if (!symbol_table_lookup(tlu->tlu_st, td))
         {
-            free_syntax(td);
+            free_syntax(td, tlu);
             fail_parse(token, "could not find the given typedef name");
             return NULL;
         }
@@ -605,7 +602,7 @@ syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_c
     {
         // ISO: 6.7.3 (1)
         fail_parse(token, "expected type qualifier");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     switch (token->keyword_id)
@@ -637,7 +634,7 @@ syntax_component_t* parse_function_specifier(lexer_token_t** tokens, parse_reque
     {
         // ISO: 6.7.4 (1)
         fail_parse(token, "expected function specifier");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     switch (token->keyword_id)
@@ -667,7 +664,7 @@ vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_cod
                 // ISO: 6.7.1 (2)
                 fail_parse(token, "only one storage class specifier allowed in declaration");
                 VECTOR_FOR(syntax_component_t*, s, declaration_specifiers)
-                    free_syntax(s);
+                    free_syntax(s, tlu);
                 vector_delete(declaration_specifiers);
                 return NULL;
             }
@@ -773,7 +770,7 @@ syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** t
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for abstract function declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -784,7 +781,7 @@ syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** t
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for abstract function declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -802,7 +799,7 @@ syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** toke
     if (!is_operator(token, '['))
     {
         fail_parse(token, "expected left bracket for abstract array declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -819,7 +816,7 @@ syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** toke
     if (!is_operator(token, ']'))
     {
         fail_parse(token, "expected right bracket for abstract array declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -846,7 +843,7 @@ syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, par
         if (!is_separator(token, ')'))
         {
             fail_parse(token, "expected right parenthesis");
-            free_syntax(left);
+            free_syntax(left, tlu);
             return NULL;
         }
         advance_token;
@@ -905,14 +902,14 @@ syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_requ
     {
         // ISO: 6.7.6 (1)
         fail_parse(token, "expected a pointer or a declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!syn->abdeclr_pointers->size) // no pointers
     {
         syntax_component_t* direct = syn->abdeclr_direct;
         syn->abdeclr_direct = NULL;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         update_status(FOUND);
         return direct;
     }
@@ -950,7 +947,7 @@ syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t
     {
         // ISO: 6.7.6 (1)
         fail_parse(token, "expected at least one type specifier or qualifier for struct declaration");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     parse_status_code_t adeclr_stat = UNKNOWN_STATUS;
@@ -970,7 +967,7 @@ syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_re
     if (declspecs_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
@@ -1035,7 +1032,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
     if (!is_operator(token, '['))
     {
         fail_parse(token, "expected left bracket for array declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1052,7 +1049,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
         if (syn->adeclr_is_static)
         {
             fail_parse(token, "array with unspecified size must not have static in the declarator");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1060,7 +1057,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
         if (!is_operator(token, ']'))
         {
             fail_parse(token, "expected right bracket for array declarator");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1072,7 +1069,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
         if (tqlist_stat == NOT_FOUND)
         {
             fail_parse(token, "expected at least one type qualifier");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         syn->adeclr_is_static = true;
@@ -1084,13 +1081,13 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_operator(token, ']'))
     {
         fail_parse(token, "expected right bracket for array declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1107,7 +1104,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for function declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1120,7 +1117,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
         if (!is_separator(token, ')'))
         {
             fail_parse(token, "expected right parenthesis for function declarator");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1145,7 +1142,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for function declarator");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1194,7 +1191,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
         if (!is_separator(token, ')'))
         {
             fail_parse(token, "expected right parenthesis");
-            free_syntax(left);
+            free_syntax(left, tlu);
             return NULL;
         }
         advance_token;
@@ -1260,14 +1257,14 @@ syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_
     if (dir_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!syn->declr_pointers->size) // no pointers
     {
         syntax_component_t* direct = syn->declr_direct;
         syn->declr_direct = NULL;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         update_status(FOUND);
         return direct;
     }
@@ -1299,7 +1296,7 @@ syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code
     if (!is_separator(token, '}'))
     {
         fail_parse(token, "expected right brace for initializer list");
-        free_syntax(inlist);
+        free_syntax(inlist, tlu);
         return NULL;
     }
     advance_token;
@@ -1320,7 +1317,7 @@ syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_
     {
         // ISO: 6.7 (1)
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (is_operator(token, '='))
@@ -1333,7 +1330,7 @@ syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_
         {
             // ISO: 6.7 (1)
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
     }
@@ -1354,7 +1351,7 @@ syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code
     {
         // ISO: 6.7 (1)
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     syn->decl_init_declarators = vector_init();
@@ -1383,7 +1380,7 @@ syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code
     {
         // ISO: 6.7 (1)
         fail_parse(token, "expected semicolon at the end of a declaration");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1415,6 +1412,7 @@ syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_reques
     }
     init_syn(SC_FLOATING_CONSTANT);
     syn->floc = strtold(token->string_value, NULL); // temporary solution
+    advance_token;
     update_status(FOUND);
     return syn;
 }
@@ -1439,6 +1437,7 @@ syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request
     }
     init_syn(SC_INTEGER_CONSTANT);
     syn->intc = strtoll(token->string_value, NULL, 0); // temporary solution
+    advance_token;
     update_status(FOUND);
     return syn;
 }
@@ -1458,6 +1457,7 @@ syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_c
     }
     init_syn(SC_STRING_LITERAL);
     syn->strl = strdup(token->string_value);
+    advance_token;
     update_status(FOUND);
     return syn;
 }
@@ -1486,7 +1486,7 @@ syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_reque
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis to end nested expression");
-        free_syntax(expr);
+        free_syntax(expr, tlu);
         return NULL;
     }
     advance_token;
@@ -1510,14 +1510,14 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
             if (cexpr_stat == ABORT)
             {
                 fail_status;
-                free_syntax(syn);
+                free_syntax(syn, tlu);
                 return NULL;
             }
             vector_add(syn->desig_designators, cexpr);
             if (!is_operator(token, ']'))
             {
                 fail_parse(token, "expected right bracket for end of designator");
-                free_syntax(syn);
+                free_syntax(syn, tlu);
                 return NULL;
             }
             advance_token;
@@ -1532,7 +1532,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
             if (id_stat == ABORT)
             {
                 fail_status;
-                free_syntax(syn);
+                free_syntax(syn, tlu);
                 return NULL;
             }
             vector_add(syn->desig_designators, id);
@@ -1543,7 +1543,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
     if (!is_operator(token, '='))
     {
         fail_parse(token, "expected assignment operator after designator list");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1569,7 +1569,7 @@ syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request
         if (init_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         vector_add(syn->inlist_initializers, init);
@@ -1598,7 +1598,7 @@ syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, p
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_operator(token, ']'))
@@ -1634,7 +1634,7 @@ syntax_component_t* parse_partial_function_call_expression(lexer_token_t** token
         if (!is_separator(token, ','))
         {
             fail_parse(token, "expected a comma between arguments to a function call");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1642,7 +1642,7 @@ syntax_component_t* parse_partial_function_call_expression(lexer_token_t** token
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for function call expression");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1667,7 +1667,7 @@ syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, pars
     if (id_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -1714,14 +1714,14 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
         if (!is_separator(token, ')'))
         {
             fail_parse(token, "expected right parenthesis for compound literal type");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
         if (!is_separator(token, '{'))
         {
             fail_parse(token, "expected left brace for compound literal initializer list");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1740,7 +1740,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
         if (!is_separator(token, '}'))
         {
             fail_parse(token, "expected right brace for compound literal initializer list");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1824,7 +1824,7 @@ syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_re
     if (s_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -1887,7 +1887,7 @@ syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_reques
     if (s_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -1916,7 +1916,7 @@ syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_r
     if (tn_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
@@ -1961,7 +1961,7 @@ syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for cast");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1971,13 +1971,13 @@ syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_
     if (tn_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for cast");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1987,7 +1987,7 @@ syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_
     if (cexpr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2034,7 +2034,7 @@ logical-or-expression' :=
             if (rhs_stat == ABORT) \
             { \
                 fail_status; \
-                free_syntax(lhs); \
+                free_syntax(lhs, tlu); \
                 return NULL; \
             } \
             syntax_component_type_t otype = SC_UNKNOWN; \
@@ -2125,7 +2125,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
     if (loexpr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (is_operator(token, '?'))
@@ -2137,13 +2137,13 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
         if (if_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         if (!is_operator(token, ':'))
         {
             fail_parse(token, "expected colon for separating resulting expressions in conditional");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -2153,7 +2153,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
         if (else_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
     }
@@ -2161,7 +2161,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
     {
         syntax_component_t* loexpr = syn->cexpr_condition;
         syn->cexpr_condition = NULL;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         syn = loexpr;
     }
     update_status(FOUND);
@@ -2176,7 +2176,8 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
     syntax_component_t* cexpr = parse_conditional_expression(&token, OPTIONAL, &cexpr_stat, tlu, next_depth, SC_CONDITIONAL_EXPRESSION);
     if (cexpr_stat == FOUND)
     {
-        free_syntax(syn);
+        free_syntax(syn, tlu);
+        update_status(FOUND);
         return cexpr;
     }
     parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
@@ -2185,13 +2186,13 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
     if (uexpr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!token || token->type != LEXER_TOKEN_OPERATOR)
     {
         fail_parse(token, "expected an assignment operator for assignment expression");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     switch (token->operator_id)
@@ -2210,7 +2211,7 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
         default:
         {
             fail_parse(token, "expected an assignment operator for assignment expression");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
     }
@@ -2221,7 +2222,7 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
     if (aexpr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2241,7 +2242,7 @@ syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_
         if (aexpr_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         vector_add(syn->expr_expressions, aexpr);
@@ -2274,7 +2275,7 @@ syntax_component_t* parse_expression_statement(lexer_token_t** tokens, parse_req
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for expression statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2289,7 +2290,7 @@ syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_c
     if (!is_keyword(token, KEYWORD_GOTO))
     {
         fail_parse(token, "expected 'goto' for goto statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2299,13 +2300,13 @@ syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_c
     if (id_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for goto statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2320,14 +2321,14 @@ syntax_component_t* parse_continue_statement(lexer_token_t** tokens, parse_reque
     if (!is_keyword(token, KEYWORD_CONTINUE))
     {
         fail_parse(token, "expected 'continue' for continue statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for continue statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2342,14 +2343,14 @@ syntax_component_t* parse_break_statement(lexer_token_t** tokens, parse_request_
     if (!is_keyword(token, KEYWORD_BREAK))
     {
         fail_parse(token, "expected 'break' for break statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for break statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2364,7 +2365,7 @@ syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request
     if (!is_keyword(token, KEYWORD_RETURN))
     {
         fail_parse(token, "expected 'return' for return statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2374,7 +2375,7 @@ syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for return statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2400,14 +2401,14 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     if (!is_keyword(token, KEYWORD_FOR))
     {
         fail_parse(token, "expected 'for' for for statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for for statement header");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2422,7 +2423,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
         if (!is_separator(token, ';'))
         {
             fail_parse(token, "expected semicolon after initializing clause in for statement");
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -2433,7 +2434,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon after condition expression in for statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2443,7 +2444,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for for statement header");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2453,7 +2454,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     if (body_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2467,7 +2468,7 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     if (!is_keyword(token, KEYWORD_DO))
     {
         fail_parse(token, "expected 'do' for do-while statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2477,20 +2478,20 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     if (body_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_keyword(token, KEYWORD_WHILE))
     {
         fail_parse(token, "expected 'while' for do-while statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for do-while statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2500,20 +2501,20 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for do-while statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for do-while statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2528,14 +2529,14 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     if (!is_keyword(token, KEYWORD_WHILE))
     {
         fail_parse(token, "expected 'while' for while statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for while statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2545,13 +2546,13 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for while statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2561,7 +2562,7 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     if (body_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2585,14 +2586,14 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     if (!is_keyword(token, KEYWORD_IF))
     {
         fail_parse(token, "expected 'if' for if statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for if statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2602,13 +2603,13 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for if statement condition");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2618,7 +2619,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     if (body_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (is_keyword(token, KEYWORD_ELSE))
@@ -2630,7 +2631,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
         if (else_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
     }
@@ -2645,14 +2646,14 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     if (!is_keyword(token, KEYWORD_SWITCH))
     {
         fail_parse(token, "expected 'switch' for switch statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
     if (!is_separator(token, '('))
     {
         fail_parse(token, "expected left parenthesis for switch statement expression");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2662,13 +2663,13 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     if (expr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for switch statement expression");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2678,7 +2679,7 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     if (body_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2707,7 +2708,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
         if (cexpr_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
     }
@@ -2723,7 +2724,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
         if (id_stat == ABORT)
         {
             fail_status;
-            free_syntax(syn);
+            free_syntax(syn, tlu);
             return NULL;
         }
         // add to symbol table //
@@ -2733,7 +2734,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     if (!is_operator(token, ':'))
     {
         fail_parse(token, "expected colon after label statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2743,7 +2744,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     if (stmt_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2772,7 +2773,7 @@ syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_reque
     if (!is_separator(token, '{'))
     {
         fail_parse(token, "expected left brace for compound statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2800,7 +2801,7 @@ syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_reque
     if (!is_separator(token, '}'))
     {
         fail_parse(token, "expected right brace for compound statement");
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -2822,7 +2823,7 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     if (declspecs_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
@@ -2831,7 +2832,7 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     if (declr_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     syn->fdef_knr_declarations = vector_init();
@@ -2850,7 +2851,7 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     if (cstmt_stat == ABORT)
     {
         fail_status;
-        free_syntax(syn);
+        free_syntax(syn, tlu);
         return NULL;
     }
     update_status(FOUND);
@@ -2888,7 +2889,7 @@ syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request
             {
                 // ISO: 6.9 (2)
                 fail_parse(decl, "declaration in global scope may not include storage-class specifiers 'auto' or 'register'");
-                free_syntax(decl);
+                free_syntax(decl, tlu);
                 return syn;
             }
             vector_add(syn->tlu_external_declarations, decl);
@@ -2919,7 +2920,7 @@ syntax_component_t* parse(lexer_token_t* tokens)
         {
             parse_errorf(err->row, err->col, err->err_message);
         }
-        free_syntax(tlu);
+        free_syntax(tlu, tlu);
         tlu = NULL;
     }
     return tlu;

@@ -10,7 +10,7 @@
 #define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
 
 #define VECTOR_FOR(type, var, vec) type var = vector_get((vec), 0); for (unsigned i = 0; i < vec->size; ++i, var = vector_get((vec), i))
-#define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var); vector_delete((vec)); }
+#define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var, tlu); vector_delete((vec)); }
 
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
@@ -753,7 +753,7 @@ syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type);
-void free_syntax(syntax_component_t* syn);
+void free_syntax(syntax_component_t* syn, syntax_component_t* tlu);
 
 /* util.c */
 char* strdup(char* str);
