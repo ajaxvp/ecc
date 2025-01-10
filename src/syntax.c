@@ -140,6 +140,12 @@ syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr)
     return declr;
 }
 
+syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
+{
+    for (; syn && syn->type != SC_TRANSLATION_UNIT; syn = syn->parent);
+    return syn;
+}
+
 // ps - print structure
 // pf - print field
 #define ps(fmt, ...) { for (unsigned i = 0; i < indent; ++i) printer("  "); printer(fmt, ##__VA_ARGS__); }
@@ -464,6 +470,10 @@ void free_syntax(syntax_component_t* syn)
         case SC_TYPEDEF_NAME:
         case SC_ENUMERATION_CONSTANT:
         {
+            // remove the id from the symbol table if it defines a symbol
+            syntax_component_t* tlu = NULL;
+            if ((tlu = syntax_get_translation_unit(syn)))
+                symbol_delete(symbol_table_remove(tlu->tlu_st, syn));
             free(syn->id);
             break;
         }

@@ -70,6 +70,15 @@ EXPECTED:
     syn->type = (t); \
     if (token) syn->row = token->row, syn->col = token->col;
 
+#define try_parse(type, name, ...) \
+    parse_status_code_t name##_stat = UNKNOWN_STATUS; \
+    syntax_component_t* name = parse_##type(&token, OPTIONAL, &name##_stat, tlu, next_depth, ## __VA_ARGS__); \
+    if (name##_stat == FOUND) \
+    { \
+        update_status(FOUND); \
+        return name; \
+    }
+
 // updates status with fail for the given request and prepares error for printing if needed
 // does NOT free anything. you should do this!
 #define fail_parse(token, fmt, ...) \
@@ -123,11 +132,21 @@ typedef enum parse_request_code
     EXPECTED
 } parse_request_code_t;
 
+typedef syntax_component_t* (*parse_function_t)(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+
 syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, bool* ellipsis);
 syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type);
+syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
 
 bool is_keyword(lexer_token_t* token, unsigned keyword_id)
 {
@@ -164,17 +183,6 @@ syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req,
     return NULL;
 }
 
-syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
-{
-    //init_syn(type);
-    return parse_stub(tokens, req, stat, tlu, depth);
-}
-
-syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
-{
-    return parse_stub(tokens, req, stat, tlu, depth);
-}
-
 // 6.4.2.1
 syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
 {
@@ -199,12 +207,6 @@ syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_
     advance_token;
     update_status(FOUND);
     return syn;
-}
-
-// reminder: define body earlier so that symbols defined in the parameter list are in scope for the function
-syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
-{
-    return parse_stub(tokens, req, stat, tlu, depth);
 }
 
 syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
@@ -918,6 +920,46 @@ syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_requ
     return syn;
 }
 
+// 6.7.6
+syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_TYPE_NAME);
+    syn->tn_specifier_qualifier_list = vector_init();
+    for (;;)
+    {
+        parse_status_code_t tq_stat = UNKNOWN_STATUS;
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
+        link_to_parent(tq);
+        if (tq_stat == FOUND)
+        {
+            vector_add(syn->sdecl_specifier_qualifier_list, tq);
+            continue;
+        }
+        parse_status_code_t ts_stat = UNKNOWN_STATUS;
+        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth);
+        link_to_parent(ts);
+        if (ts_stat == FOUND)
+        {
+            vector_add(syn->sdecl_specifier_qualifier_list, ts);
+            continue;
+        }
+        break;
+    }
+    if (!syn->tn_specifier_qualifier_list->size)
+    {
+        // ISO: 6.7.6 (1)
+        fail_parse(token, "expected at least one type specifier or qualifier for struct declaration");
+        free_syntax(syn);
+        return NULL;
+    }
+    parse_status_code_t adeclr_stat = UNKNOWN_STATUS;
+    syn->tn_declarator = parse_abstract_declarator(&token, OPTIONAL, &adeclr_stat, tlu, next_depth);
+    link_to_parent(syn->tn_declarator);
+    update_status(FOUND);
+    return syn;
+}
+
 syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
     init_parse;
@@ -1235,7 +1277,34 @@ syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_
 
 syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
 {
-    return parse_stub(tokens, req, stat, tlu, depth);
+    init_parse;
+    try_parse(assignment_expression, aexpr)
+    if (!is_separator(token, '{'))
+    {
+        fail_parse(token, "expected left brace for initializer list");
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t inlist_stat = UNKNOWN_STATUS;
+    syntax_component_t* inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth);
+    if (inlist_stat == ABORT)
+    {
+        fail_status;
+        return NULL;
+    }
+    if (is_separator(token, ','))
+    {
+        advance_token;
+    }
+    if (!is_separator(token, '}'))
+    {
+        fail_parse(token, "expected right brace for initializer list");
+        free_syntax(inlist);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return inlist;
 }
 
 // 6.7
@@ -1318,6 +1387,1472 @@ syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code
         return NULL;
     }
     advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+#define try_expression(type, name) \
+    parse_status_code_t name##_stat = UNKNOWN_STATUS; \
+    syntax_component_t* name = parse_##type##_expression(&token, OPTIONAL, &name##_stat, tlu, next_depth); \
+    if (name##_stat == FOUND) \
+    { \
+        update_status(FOUND); \
+        return name; \
+    }
+
+syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!token)
+    {
+        fail_parse(token, "expected floating constant, got EOF");
+        return NULL;
+    }
+    if (token->type != LEXER_TOKEN_FLOATING_CONSTANT)
+    {
+        fail_parse(token, "expected floating constant");
+        return NULL;
+    }
+    init_syn(SC_FLOATING_CONSTANT);
+    syn->floc = strtold(token->string_value, NULL); // temporary solution
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_character_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_stub(tokens, req, stat, tlu, depth);
+}
+
+syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!token)
+    {
+        fail_parse(token, "expected integer constant, got EOF");
+        return NULL;
+    }
+    if (token->type != LEXER_TOKEN_INTEGER_CONSTANT)
+    {
+        fail_parse(token, "expected integer constant");
+        return NULL;
+    }
+    init_syn(SC_INTEGER_CONSTANT);
+    syn->intc = strtoll(token->string_value, NULL, 0); // temporary solution
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!token)
+    {
+        fail_parse(token, "expected string literal, got EOF");
+        return NULL;
+    }
+    if (token->type != LEXER_TOKEN_STRING_CONSTANT)
+    {
+        fail_parse(token, "expected string literal");
+        return NULL;
+    }
+    init_syn(SC_STRING_LITERAL);
+    syn->strl = strdup(token->string_value);
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_parse(identifier, id, SC_IDENTIFIER)
+    try_parse(floating_constant, fcon)
+    try_parse(character_constant, ccon)
+    try_parse(integer_constant, icon)
+    try_parse(string_literal, strl)
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected primary expression");
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syntax_component_t* expr = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis to end nested expression");
+        free_syntax(expr);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return expr;
+}
+
+syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_DESIGNATION);
+    syn->desig_designators = vector_init();
+    for (;;)
+    {
+        if (is_operator(token, '['))
+        {
+            advance_token;
+            parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
+            syntax_component_t* cexpr = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
+            link_to_parent(cexpr);
+            if (cexpr_stat == ABORT)
+            {
+                fail_status;
+                free_syntax(syn);
+                return NULL;
+            }
+            vector_add(syn->desig_designators, cexpr);
+            if (!is_operator(token, ']'))
+            {
+                fail_parse(token, "expected right bracket for end of designator");
+                free_syntax(syn);
+                return NULL;
+            }
+            advance_token;
+            continue;
+        }
+        if (is_operator(token, '.'))
+        {
+            advance_token;
+            parse_status_code_t id_stat = UNKNOWN_STATUS;
+            syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+            link_to_parent(id);
+            if (id_stat == ABORT)
+            {
+                fail_status;
+                free_syntax(syn);
+                return NULL;
+            }
+            vector_add(syn->desig_designators, id);
+            continue;
+        }
+        break;
+    }
+    if (!is_operator(token, '='))
+    {
+        fail_parse(token, "expected assignment operator after designator list");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_INITIALIZER_LIST);
+    syn->inlist_designations = vector_init();
+    syn->inlist_initializers = vector_init();
+    for (;;)
+    {
+        parse_status_code_t desig_stat = UNKNOWN_STATUS;
+        syntax_component_t* desig = parse_designation(&token, OPTIONAL, &desig_stat, tlu, next_depth);
+        link_to_parent(desig);
+        vector_add(syn->inlist_designations, desig);
+        parse_status_code_t init_stat = UNKNOWN_STATUS;
+        syntax_component_t* init = parse_initializer(&token, EXPECTED, &init_stat, tlu, next_depth);
+        link_to_parent(init);
+        if (init_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        vector_add(syn->inlist_initializers, init);
+        if (!is_separator(token, ','))
+            break;
+        advance_token;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse the postfix expression
+syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!is_operator(token, '['))
+    {
+        fail_parse(token, "expected left bracket for subscript expression");
+        return NULL;
+    }
+    advance_token;
+    init_syn(SC_SUBSCRIPT_EXPRESSION);
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->subsexpr_index_expression = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->subsexpr_index_expression);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_operator(token, ']'))
+    {
+        fail_parse(token, "expected right bracket for subscript expression");
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse the postfix expression
+syntax_component_t* parse_partial_function_call_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for function call expression");
+        return NULL;
+    }
+    advance_token;
+    init_syn(SC_FUNCTION_CALL_EXPRESSION);
+    syn->fcallexpr_args = vector_init();
+    for (;;)
+    {
+        parse_status_code_t expr_stat = UNKNOWN_STATUS;
+        syntax_component_t* expr = parse_assignment_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
+        link_to_parent(expr);
+        if (expr_stat == NOT_FOUND)
+            break;
+        vector_add(syn->fcallexpr_args, expr);
+        if (!is_separator(token, ','))
+        {
+            fail_parse(token, "expected a comma between arguments to a function call");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for function call expression");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse the postfix expression
+syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid)
+{
+    init_parse;
+    if (!is_operator(token, oid))
+    {
+        fail_parse(token, "expected member access operator");
+        return NULL;
+    }
+    advance_token;
+    init_syn(type);
+    parse_status_code_t id_stat = UNKNOWN_STATUS;
+    syn->memexpr_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+    link_to_parent(syn->memexpr_id);
+    if (id_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse the postfix expression
+syntax_component_t* parse_partial_postfix_incdec_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid)
+{
+    init_parse;
+    if (!is_operator(token, oid))
+    {
+        fail_parse(token, "expected increment/decrement operator");
+        return NULL;
+    }
+    init_syn(type);
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    parse_status_code_t pe_stat = UNKNOWN_STATUS;
+    syntax_component_t* left = parse_primary_expression(&token, OPTIONAL, &pe_stat, tlu, next_depth);
+    if (pe_stat == NOT_FOUND)
+    {
+        init_syn(SC_INITIALIZER_LIST_EXPRESSION);
+        if (!is_separator(token, '('))
+        {
+            fail_parse(token, "expected left parenthesis for compound literal type");
+            return NULL;
+        }
+        advance_token;
+        parse_status_code_t tn_stat = UNKNOWN_STATUS;
+        syn->inlexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
+        link_to_parent(syn->inlexpr_type_name);
+        if (tn_stat == ABORT)
+        {
+            fail_status;
+            return NULL;
+        }
+        if (!is_separator(token, ')'))
+        {
+            fail_parse(token, "expected right parenthesis for compound literal type");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+        if (!is_separator(token, '{'))
+        {
+            fail_parse(token, "expected left brace for compound literal initializer list");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+        parse_status_code_t inlist_stat = UNKNOWN_STATUS;
+        syn->inlexpr_inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth);
+        link_to_parent(syn->inlexpr_inlist);
+        if (inlist_stat == ABORT)
+        {
+            fail_status;
+            return NULL;
+        }
+        if (is_separator(token, ','))
+        {
+            advance_token;
+        }
+        if (!is_separator(token, '}'))
+        {
+            fail_parse(token, "expected right brace for compound literal initializer list");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+        left = syn;
+    }
+    for (;;)
+    {
+        parse_status_code_t subsexpr_stat = UNKNOWN_STATUS;
+        syntax_component_t* subsexpr = parse_partial_subscript_expression(&token, OPTIONAL, &subsexpr_stat, tlu, next_depth);
+        if (subsexpr_stat == FOUND)
+        {
+            link_to_specific_parent(left, subsexpr);
+            subsexpr->subsexpr_expression = left;
+            left = subsexpr;
+            continue;
+        }
+        parse_status_code_t fcall_stat = UNKNOWN_STATUS;
+        syntax_component_t* fcall = parse_partial_function_call_expression(&token, OPTIONAL, &fcall_stat, tlu, next_depth);
+        if (fcall_stat == FOUND)
+        {
+            link_to_specific_parent(left, fcall);
+            fcall->fcallexpr_expression = left;
+            left = fcall;
+            continue;
+        }
+        parse_status_code_t mem_stat = UNKNOWN_STATUS;
+        syntax_component_t* mem = parse_partial_member_expression(&token, OPTIONAL, &mem_stat, tlu, next_depth, SC_MEMBER_EXPRESSION, '.');
+        if (mem_stat == FOUND)
+        {
+            link_to_specific_parent(left, mem);
+            mem->memexpr_expression = left;
+            left = mem;
+            continue;
+        }
+        parse_status_code_t dmem_stat = UNKNOWN_STATUS;
+        syntax_component_t* dmem = parse_partial_member_expression(&token, OPTIONAL, &dmem_stat, tlu, next_depth, SC_DEREFERENCE_MEMBER_EXPRESSION, '-' * '>');
+        if (dmem_stat == FOUND)
+        {
+            link_to_specific_parent(left, dmem);
+            dmem->memexpr_expression = left;
+            left = dmem;
+            continue;
+        }
+        parse_status_code_t inc_stat = UNKNOWN_STATUS;
+        syntax_component_t* inc = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &inc_stat, tlu, next_depth, SC_POSTFIX_INCREMENT_EXPRESSION, '+' * '+');
+        if (inc_stat == FOUND)
+        {
+            link_to_specific_parent(left, inc);
+            inc->uexpr_operand = left;
+            left = inc;
+            continue;
+        }
+        parse_status_code_t dec_stat = UNKNOWN_STATUS;
+        syntax_component_t* dec = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &dec_stat, tlu, next_depth, SC_POSTFIX_DECREMENT_EXPRESSION, '-' * '-');
+        if (dec_stat == FOUND)
+        {
+            link_to_specific_parent(left, dec);
+            dec->uexpr_operand = left;
+            left = dec;
+            continue;
+        }
+        break;
+    }
+    update_status(FOUND);
+    return left;
+}
+
+syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid, parse_function_t subparser)
+{
+    init_parse;
+    if (!is_operator(token, oid))
+    {
+        fail_parse(token, "expected operator for unary expression");
+        return NULL;
+    }
+    init_syn(type);
+    advance_token;
+    parse_status_code_t s_stat = UNKNOWN_STATUS;
+    syn->uexpr_operand = subparser(&token, EXPECTED, &s_stat, tlu, next_depth);
+    link_to_parent(syn->uexpr_operand);
+    if (s_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_prefix_increment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PREFIX_INCREMENT_EXPRESSION, '+' * '+', parse_unary_expression);
+}
+
+syntax_component_t* parse_prefix_decrement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PREFIX_DECREMENT_EXPRESSION, '-' * '-', parse_unary_expression);
+}
+
+syntax_component_t* parse_reference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_REFERENCE_EXPRESSION, '&', parse_cast_expression);
+}
+
+syntax_component_t* parse_dereference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_DEREFERENCE_EXPRESSION, '*', parse_cast_expression);
+}
+
+syntax_component_t* parse_plus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PLUS_EXPRESSION, '+', parse_cast_expression);
+}
+
+syntax_component_t* parse_minus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_MINUS_EXPRESSION, '-', parse_cast_expression);
+}
+
+syntax_component_t* parse_complement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_COMPLEMENT_EXPRESSION, '~', parse_cast_expression);
+}
+
+syntax_component_t* parse_not_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_NOT_EXPRESSION, '!', parse_cast_expression);
+}
+
+syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!is_keyword(token, KEYWORD_SIZEOF))
+    {
+        fail_parse(token, "expected sizeof operator in sizeof expression");
+        return NULL;
+    }
+    init_syn(SC_SIZEOF_EXPRESSION);
+    advance_token;
+    parse_status_code_t s_stat = UNKNOWN_STATUS;
+    syn->uexpr_operand = parse_unary_expression(&token, EXPECTED, &s_stat, tlu, next_depth);
+    link_to_parent(syn->uexpr_operand);
+    if (s_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    if (!is_keyword(token, KEYWORD_SIZEOF))
+    {
+        fail_parse(token, "expected sizeof operator in sizeof expression");
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for sizeof operator");
+        return NULL;
+    }
+    advance_token;
+    init_syn(SC_SIZEOF_TYPE_EXPRESSION);
+    parse_status_code_t tn_stat = UNKNOWN_STATUS;
+    syn->uexpr_operand = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
+    link_to_parent(syn->uexpr_operand);
+    if (tn_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for sizeof operator");
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_expression(postfix, pfexpr)
+    try_expression(prefix_increment, piexpr)
+    try_expression(prefix_decrement, pdexpr)
+    try_expression(reference, drexpr)
+    try_expression(dereference, rexpr)
+    try_expression(plus, pexpr)
+    try_expression(minus, mexpr)
+    try_expression(complement, cexpr)
+    try_expression(not, nexpr)
+    try_expression(sizeof, soexpr)
+    try_expression(sizeof_type, sotexpr)
+    fail_parse(token, "expected unary expression");
+    return NULL;
+}
+
+syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
+    syntax_component_t* uexpr = parse_unary_expression(&token, OPTIONAL, &uexpr_stat, tlu, next_depth);
+    if (uexpr_stat == FOUND)
+    {
+        update_status(FOUND);
+        return uexpr;
+    }
+    init_syn(SC_CAST_EXPRESSION);
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for cast");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t tn_stat = UNKNOWN_STATUS;
+    syn->caexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
+    link_to_parent(syn->caexpr_type_name);
+    if (tn_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for cast");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
+    syn->caexpr_operand = parse_cast_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth);
+    link_to_parent(syn->caexpr_operand);
+    if (cexpr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+/*
+
+logical-or-expression :=
+    logical-and-expression logical-or-expression'
+
+logical-or-expression' :=
+    || logical-and-expression logical-or-expression'
+    e
+
+*/
+
+// operator_name: the operator(s) to define a parse function for
+// suboperator_name: the type of operator which has expression which composes these expressions
+// otype1-4: the syntax element types corresponding to the operators to handle here
+// op1-4: the operators corresponding to otype1-4
+#define define_basic_parse_expression(operator_name, suboperator_name, otype1, otype2, otype3, otype4, op1, op2, op3, op4) \
+    syntax_component_t* parse_##operator_name##_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth) \
+    { \
+        init_parse; \
+        parse_status_code_t lhs_stat = UNKNOWN_STATUS; \
+        syntax_component_t* lhs = parse_##suboperator_name##_expression(&token, EXPECTED, &lhs_stat, tlu, next_depth); \
+        if (lhs_stat == ABORT) \
+        { \
+            fail_status; \
+            return NULL; \
+        } \
+        for (;;) \
+        { \
+            if (!is_operator(token, (op1)) && \
+                !is_operator(token, (op2)) && \
+                !is_operator(token, (op3)) && \
+                !is_operator(token, (op4))) \
+                break; \
+            unsigned int op = token->operator_id; \
+            advance_token; \
+            parse_status_code_t rhs_stat = UNKNOWN_STATUS; \
+            syntax_component_t* rhs = parse_##suboperator_name##_expression(&token, EXPECTED, &rhs_stat, tlu, next_depth); \
+            if (rhs_stat == ABORT) \
+            { \
+                fail_status; \
+                free_syntax(lhs); \
+                return NULL; \
+            } \
+            syntax_component_type_t otype = SC_UNKNOWN; \
+            if (op == (op1)) otype = (otype1); \
+            if (op == (op2)) otype = (otype2); \
+            if (op == (op3)) otype = (otype3); \
+            if (op == (op4)) otype = (otype4); \
+            init_syn(otype); \
+            syn->bexpr_lhs = lhs; \
+            link_to_parent(syn->bexpr_lhs); \
+            syn->bexpr_rhs = rhs; \
+            link_to_parent(syn->bexpr_rhs); \
+            lhs = syn; \
+        } \
+        update_status(FOUND); \
+        return lhs; \
+    }
+
+define_basic_parse_expression(
+    multiplicative,
+    cast,
+    SC_MULTIPLICATION_EXPRESSION, SC_DIVISION_EXPRESSION, SC_MODULAR_EXPRESSION, SC_UNKNOWN,
+    '*', '/', '%', 0
+)
+define_basic_parse_expression(
+    additive,
+    multiplicative,
+    SC_ADDITION_EXPRESSION, SC_SUBTRACTION_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN,
+    '+', '-', 0, 0
+)
+define_basic_parse_expression(
+    shift,
+    additive,
+    SC_BITWISE_LEFT_EXPRESSION, SC_BITWISE_RIGHT_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN,
+    '<' * '<', '>' * '>', 0, 0
+)
+define_basic_parse_expression(
+    relational,
+    shift,
+    SC_LESS_EXPRESSION, SC_GREATER_EXPRESSION, SC_LESS_EQUAL_EXPRESSION, SC_GREATER_EQUAL_EXPRESSION,
+    '<', '>', '<' * '=', '>' * '='
+)
+define_basic_parse_expression(
+    equality,
+    relational,
+    SC_EQUALITY_EXPRESSION, SC_INEQUALITY_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN,
+    '=' * '=', '!' * '=', 0, 0
+);
+define_basic_parse_expression(
+    bitwise_and,
+    equality,
+    SC_BITWISE_AND_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN, SC_UNKNOWN,
+    '&', 0, 0, 0
+)
+define_basic_parse_expression(
+    bitwise_xor,
+    bitwise_and,
+    SC_BITWISE_XOR_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN, SC_UNKNOWN,
+    '^', 0, 0, 0
+)
+define_basic_parse_expression(
+    bitwise_or,
+    bitwise_xor, 
+    SC_BITWISE_OR_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN, SC_UNKNOWN,
+    '|', 0, 0, 0
+)
+define_basic_parse_expression(
+    logical_and,
+    bitwise_or,
+    SC_LOGICAL_AND_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN, SC_UNKNOWN,
+    '&' * '&', 0, 0, 0
+)
+define_basic_parse_expression(
+    logical_or,
+    logical_and,
+    SC_LOGICAL_OR_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN, SC_UNKNOWN,
+    '|' * '|', 0, 0, 0
+)
+
+syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
+{
+    init_parse;
+    init_syn(type);
+
+    parse_status_code_t loexpr_stat = UNKNOWN_STATUS;
+    syn->cexpr_condition = parse_logical_or_expression(&token, EXPECTED, &loexpr_stat, tlu, next_depth);
+    link_to_parent(syn->cexpr_condition);
+    if (loexpr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (is_operator(token, '?'))
+    {
+        advance_token;
+        parse_status_code_t if_stat = UNKNOWN_STATUS;
+        syn->cexpr_if = parse_expression(&token, EXPECTED, &if_stat, tlu, next_depth);
+        link_to_parent(syn->cexpr_if);
+        if (if_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        if (!is_operator(token, ':'))
+        {
+            fail_parse(token, "expected colon for separating resulting expressions in conditional");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+        parse_status_code_t else_stat = UNKNOWN_STATUS;
+        syn->cexpr_else = parse_conditional_expression(&token, EXPECTED, &else_stat, tlu, next_depth, SC_CONDITIONAL_EXPRESSION);
+        link_to_parent(syn->cexpr_else);
+        if (else_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+    }
+    else
+    {
+        syntax_component_t* loexpr = syn->cexpr_condition;
+        syn->cexpr_condition = NULL;
+        free_syntax(syn);
+        syn = loexpr;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_UNKNOWN);
+    parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
+    syntax_component_t* cexpr = parse_conditional_expression(&token, OPTIONAL, &cexpr_stat, tlu, next_depth, SC_CONDITIONAL_EXPRESSION);
+    if (cexpr_stat == FOUND)
+    {
+        free_syntax(syn);
+        return cexpr;
+    }
+    parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
+    syn->bexpr_lhs = parse_unary_expression(&token, EXPECTED, &uexpr_stat, tlu, next_depth);
+    link_to_parent(syn->bexpr_lhs);
+    if (uexpr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!token || token->type != LEXER_TOKEN_OPERATOR)
+    {
+        fail_parse(token, "expected an assignment operator for assignment expression");
+        free_syntax(syn);
+        return NULL;
+    }
+    switch (token->operator_id)
+    {
+        case '=': syn->type = SC_ASSIGNMENT_EXPRESSION; break;
+        case '*' * '=': syn->type = SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION; break;
+        case '/' * '=': syn->type = SC_DIVISION_ASSIGNMENT_EXPRESSION; break;
+        case '%' * '=': syn->type = SC_MODULAR_ASSIGNMENT_EXPRESSION; break;
+        case '+' * '=': syn->type = SC_ADDITION_ASSIGNMENT_EXPRESSION; break;
+        case '-' * '=': syn->type = SC_SUBTRACTION_ASSIGNMENT_EXPRESSION; break;
+        case '<' * '<' * '=': syn->type = SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION; break;
+        case '>' * '>' * '=': syn->type = SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION; break;
+        case '&' * '=': syn->type = SC_BITWISE_AND_ASSIGNMENT_EXPRESSION; break;
+        case '^' * '=': syn->type = SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION; break;
+        case '|' * '=': syn->type = SC_BITWISE_OR_ASSIGNMENT_EXPRESSION; break;
+        default:
+        {
+            fail_parse(token, "expected an assignment operator for assignment expression");
+            free_syntax(syn);
+            return NULL;
+        }
+    }
+    advance_token;
+    parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
+    syn->bexpr_rhs = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth);
+    link_to_parent(syn->bexpr_rhs);
+    if (aexpr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_EXPRESSION);
+    syn->expr_expressions = vector_init();
+    for (;;)
+    {
+        parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
+        syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth);
+        link_to_parent(aexpr);
+        if (aexpr_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        vector_add(syn->expr_expressions, aexpr);
+        if (!is_separator(token, ','))
+            break;
+        advance_token;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+#undef try_expression
+
+#define try_statement(type, name) \
+    parse_status_code_t name##_stat = UNKNOWN_STATUS; \
+    syntax_component_t* name = parse_##type##_statement(&token, OPTIONAL, &name##_stat, tlu, next_depth); \
+    if (name##_stat == FOUND) \
+    { \
+        update_status(FOUND); \
+        return name; \
+    }
+
+syntax_component_t* parse_expression_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_EXPRESSION_STATEMENT);
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->estmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->estmt_expression);
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for expression statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_GOTO_STATEMENT);
+    if (!is_keyword(token, KEYWORD_GOTO))
+    {
+        fail_parse(token, "expected 'goto' for goto statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t id_stat = UNKNOWN_STATUS;
+    syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+    link_to_parent(id);
+    if (id_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for goto statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_continue_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_CONTINUE_STATEMENT);
+    if (!is_keyword(token, KEYWORD_CONTINUE))
+    {
+        fail_parse(token, "expected 'continue' for continue statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for continue statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_break_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_BREAK_STATEMENT);
+    if (!is_keyword(token, KEYWORD_BREAK))
+    {
+        fail_parse(token, "expected 'break' for break statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for break statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_RETURN_STATEMENT);
+    if (!is_keyword(token, KEYWORD_RETURN))
+    {
+        fail_parse(token, "expected 'return' for return statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->retstmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->retstmt_expression);
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for return statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_jump_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_statement(goto, gstmt)
+    try_statement(continue, cstmt)
+    try_statement(break, bstmt)
+    try_statement(return, rstmt)
+    fail_parse(token, "expected jump statement");
+    return NULL;
+}
+
+syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_FOR_STATEMENT);
+    if (!is_keyword(token, KEYWORD_FOR))
+    {
+        fail_parse(token, "expected 'for' for for statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for for statement header");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t init_stat = UNKNOWN_STATUS;
+    syn->forstmt_init = parse_declaration(&token, OPTIONAL, &init_stat, tlu, next_depth);
+    link_to_parent(syn->forstmt_init);
+    if (init_stat == NOT_FOUND)
+    {
+        init_stat = UNKNOWN_STATUS;
+        syn->forstmt_init = parse_expression(&token, OPTIONAL, &init_stat, tlu, next_depth);
+        link_to_parent(syn->forstmt_init);
+        if (!is_separator(token, ';'))
+        {
+            fail_parse(token, "expected semicolon after initializing clause in for statement");
+            free_syntax(syn);
+            return NULL;
+        }
+        advance_token;
+    }
+    parse_status_code_t cond_stat = UNKNOWN_STATUS;
+    syn->forstmt_condition = parse_expression(&token, OPTIONAL, &cond_stat, tlu, next_depth);
+    link_to_parent(syn->forstmt_condition);
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon after condition expression in for statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t post_stat = UNKNOWN_STATUS;
+    syn->forstmt_post = parse_expression(&token, OPTIONAL, &post_stat, tlu, next_depth);
+    link_to_parent(syn->forstmt_post);
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for for statement header");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t body_stat = UNKNOWN_STATUS;
+    syn->forstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
+    link_to_parent(syn->forstmt_body);
+    if (body_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_DO_STATEMENT);
+    if (!is_keyword(token, KEYWORD_DO))
+    {
+        fail_parse(token, "expected 'do' for do-while statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t body_stat = UNKNOWN_STATUS;
+    syn->dostmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
+    link_to_parent(syn->dostmt_body);
+    if (body_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_keyword(token, KEYWORD_WHILE))
+    {
+        fail_parse(token, "expected 'while' for do-while statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for do-while statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->dostmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->dostmt_condition);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for do-while statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, ';'))
+    {
+        fail_parse(token, "expected semicolon for do-while statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_WHILE_STATEMENT);
+    if (!is_keyword(token, KEYWORD_WHILE))
+    {
+        fail_parse(token, "expected 'while' for while statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for while statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->whstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->whstmt_condition);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for while statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t body_stat = UNKNOWN_STATUS;
+    syn->whstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
+    link_to_parent(syn->whstmt_body);
+    if (body_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_iteration_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_statement(for, fstmt)
+    try_statement(do, dstmt)
+    try_statement(while, wstmt)
+    fail_parse(token, "expected iteration statement");
+    return NULL;
+}
+
+syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_IF_STATEMENT);
+    if (!is_keyword(token, KEYWORD_IF))
+    {
+        fail_parse(token, "expected 'if' for if statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for if statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->ifstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->ifstmt_condition);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for if statement condition");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t body_stat = UNKNOWN_STATUS;
+    syn->ifstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
+    link_to_parent(syn->ifstmt_body);
+    if (body_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (is_keyword(token, KEYWORD_ELSE))
+    {
+        advance_token;
+        parse_status_code_t else_stat = UNKNOWN_STATUS;
+        syn->ifstmt_else = parse_statement(&token, EXPECTED, &else_stat, tlu, next_depth);
+        link_to_parent(syn->ifstmt_else);
+        if (else_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_SWITCH_STATEMENT);
+    if (!is_keyword(token, KEYWORD_SWITCH))
+    {
+        fail_parse(token, "expected 'switch' for switch statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    if (!is_separator(token, '('))
+    {
+        fail_parse(token, "expected left parenthesis for switch statement expression");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t expr_stat = UNKNOWN_STATUS;
+    syn->swstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    link_to_parent(syn->swstmt_condition);
+    if (expr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    if (!is_separator(token, ')'))
+    {
+        fail_parse(token, "expected right parenthesis for switch statement expression");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t body_stat = UNKNOWN_STATUS;
+    syn->swstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
+    link_to_parent(syn->swstmt_body);
+    if (body_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_selection_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_statement(if, istmt);
+    try_statement(switch, stmt);
+    fail_parse(token, "expected selection statement");
+    return NULL;
+}
+
+syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_LABELED_STATEMENT);
+    if (is_keyword(token, KEYWORD_CASE))
+    {
+        advance_token;
+        parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
+        syn->lstmt_case_expression = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
+        link_to_parent(syn->lstmt_case_expression);
+        if (cexpr_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+    }
+    else if (is_keyword(token, KEYWORD_DEFAULT))
+    {
+        advance_token;
+    }
+    else
+    {
+        parse_status_code_t id_stat = UNKNOWN_STATUS;
+        syn->lstmt_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+        link_to_parent(syn->lstmt_id);
+        if (id_stat == ABORT)
+        {
+            fail_status;
+            free_syntax(syn);
+            return NULL;
+        }
+        // add to symbol table //
+        symbol_t* sy = symbol_init(syn->lstmt_id);
+        symbol_table_add(tlu->tlu_st, syn->lstmt_id->id, sy);
+    }
+    if (!is_operator(token, ':'))
+    {
+        fail_parse(token, "expected colon after label statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    parse_status_code_t stmt_stat = UNKNOWN_STATUS;
+    syn->lstmt_stmt = parse_statement(&token, EXPECTED, &stmt_stat, tlu, next_depth);
+    link_to_parent(syn->lstmt_stmt);
+    if (stmt_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    update_status(FOUND);
+    return syn;
+}
+
+syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    try_statement(labeled, lstmt)
+    try_statement(compound, cstmt)
+    try_statement(expression, exstmt)
+    try_statement(selection, sstmt)
+    try_statement(iteration, istmt)
+    try_statement(jump, jstmt)
+    fail_parse(token, "expected statement");
+    return NULL;
+}
+
+#undef try_statement
+
+syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_COMPOUND_STATEMENT);
+    if (!is_separator(token, '{'))
+    {
+        fail_parse(token, "expected left brace for compound statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    syn->cstmt_block_items = vector_init();
+    for (;;)
+    {
+        parse_status_code_t decl_stat = UNKNOWN_STATUS;
+        syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth);
+        link_to_parent(decl);
+        if (decl_stat == FOUND)
+        {
+            vector_add(syn->cstmt_block_items, decl);
+            continue;
+        }
+        parse_status_code_t stmt_stat = UNKNOWN_STATUS;
+        syntax_component_t* stmt = parse_statement(&token, OPTIONAL, &stmt_stat, tlu, next_depth);
+        link_to_parent(stmt);
+        if (stmt_stat == FOUND)
+        {
+            vector_add(syn->cstmt_block_items, stmt);
+            continue;
+        }
+        break;
+    }
+    if (!is_separator(token, '}'))
+    {
+        fail_parse(token, "expected right brace for compound statement");
+        free_syntax(syn);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+// reminder: define body earlier so that symbols defined in the parameter list are in scope for the function
+// update: i don't think this matters ^
+
+// 6.9.1
+syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+{
+    init_parse;
+    init_syn(SC_FUNCTION_DEFINITION);
+    parse_status_code_t declspecs_stat = UNKNOWN_STATUS;
+    syn->fdef_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspecs_stat, tlu, next_depth);
+    link_vector_to_parent(syn->fdef_declaration_specifiers);
+    if (declspecs_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    parse_status_code_t declr_stat = UNKNOWN_STATUS;
+    syn->fdef_declarator = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth);
+    link_to_parent(syn->fdef_declarator);
+    if (declr_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
+    syn->fdef_knr_declarations = vector_init();
+    for (;;)
+    {
+        parse_status_code_t decl_stat = UNKNOWN_STATUS;
+        syntax_component_t* knr_decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth);
+        link_to_parent(knr_decl);
+        if (decl_stat == NOT_FOUND)
+            break;
+        vector_add(syn->fdef_knr_declarations, knr_decl);
+    }
+    parse_status_code_t cstmt_stat = UNKNOWN_STATUS;
+    syn->fdef_body = parse_compound_statement(&token, EXPECTED, &cstmt_stat, tlu, next_depth);
+    link_to_parent(syn->fdef_body);
+    if (cstmt_stat == ABORT)
+    {
+        fail_status;
+        free_syntax(syn);
+        return NULL;
+    }
     update_status(FOUND);
     return syn;
 }

@@ -220,7 +220,17 @@ typedef enum syntax_component_type_t
     SC_STRING_LITERAL,
     SC_STRUCT_DECLARATION,
     SC_STRUCT_DECLARATOR,
-    SC_CONSTANT_EXPRESSION
+    SC_CONSTANT_EXPRESSION,
+    SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION,
+    SC_DIVISION_ASSIGNMENT_EXPRESSION,
+    SC_MODULAR_ASSIGNMENT_EXPRESSION,
+    SC_ADDITION_ASSIGNMENT_EXPRESSION,
+    SC_SUBTRACTION_ASSIGNMENT_EXPRESSION,
+    SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION,
+    SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION,
+    SC_BITWISE_AND_ASSIGNMENT_EXPRESSION,
+    SC_BITWISE_OR_ASSIGNMENT_EXPRESSION,
+    SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION
 } syntax_component_type_t;
 
 // SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
@@ -526,8 +536,6 @@ typedef struct syntax_component_t
         // SC_SIZEOF_TYPE_EXPRESSION
         // SC_POSTFIX_INCREMENT_EXPRESSION
         // SC_POSTFIX_DECREMENT_EXPRESSION
-        // SC_DEREFERENCE_MEMBER_EXPRESSION
-        // SC_MEMBER_EXPRESSION
         struct syntax_component_t* uexpr_operand;
 
         // SC_INITIALIZER_LIST_EXPRESSION - inlexpr
@@ -555,7 +563,16 @@ typedef struct syntax_component_t
         struct
         {
             vector_t* tn_specifier_qualifier_list; // <syntax_component_t> (SC_TYPE_SPECIFIER | SC_TYPE_QUALIFIER)
-            vector_t* tn_declarator; // <syntax_component_t> (SC_ABSTRACT_DECLARATOR)
+            struct syntax_component_t* tn_declarator; // SC_ABSTRACT_DECLARATOR
+        };
+
+        // memexpr (general member access expression)
+        // SC_DEREFERENCE_MEMBER_EXPRESSION
+        // SC_MEMBER_EXPRESSION
+        struct
+        {
+            struct syntax_component_t* memexpr_expression; // SC_POSTFIX_EXPRESSION
+            struct syntax_component_t* memexpr_id; // SC_IDENTIFIER
         };
 
         // SC_ERROR - err
@@ -720,6 +737,7 @@ symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id);
 symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id);
+symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
 

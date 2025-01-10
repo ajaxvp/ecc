@@ -76,3 +76,9 @@ parse_test(test_absdeclr_array_ptr_a, accept("int f(int (*)[]);"));
 parse_test(test_absdeclr_vla_ptr_a, accept("int f(int (*)[*]);"));
 parse_test(test_absdeclr_func_ptr_a, accept("int f(int (*)(void));"));
 parse_test(test_absdeclr_func_ptr_array_a, accept("int f(int (*const [])(unsigned int, ...));"));
+
+
+int f()
+{
+    
+}

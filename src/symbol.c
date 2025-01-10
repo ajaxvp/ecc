@@ -114,6 +114,7 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
 
 void symbol_delete(symbol_t* sy)
 {
+    if (!sy) return;
     free(sy);
 }
 
@@ -221,26 +222,45 @@ symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id)
     return NULL;
 }
 
-// removes a symbol from the table, replaces it with its shaded symbol if necessary
-// symbol_t* symbol_table_remove(symbol_table_t* t, char* k)
-// {
-//     unsigned long index = hash(k) % t->capacity;
-//     for (unsigned long i = index;;)
-//     {
-//         if (t->key[index] != NULL && !strcmp(t->key[index], k))
-//         {
-//             symbol_t* sy = t->value[index];
-//             t->key[index] = NULL;
-//             t->value[index] = NULL;
-//             --(t->size);
-//             return sy;
-//         }
-//         i = (i + 1) % t->capacity;
-//         if (i == index)
-//             break;
-//     }
-//     return NULL;
-// }
+// removes a symbol from the table
+symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id)
+{
+    char* k = id->id;
+    unsigned long index = hash(k) % t->capacity;
+    for (unsigned long i = index;;)
+    {
+        if (t->key[index] != NULL && !strcmp(t->key[index], k))
+        {
+            symbol_t* prev = NULL;
+            symbol_t* sy = t->value[index];
+            symbol_t* sylist = sy;
+            for (; sylist; prev = sylist, sylist = sylist->next)
+            {
+                if (sylist->declarer == id)
+                {
+                    if (prev)
+                        prev->next = sylist->next;
+                    else
+                        sy = sylist->next;
+                    break;
+                }
+            }
+            if (!sylist)
+                return NULL;
+            if (!sy)
+            {
+                t->key[index] = NULL;
+                --(t->size);
+            }
+            t->value[index] = sy;
+            return sylist;
+        }
+        i = (i + 1) % t->capacity;
+        if (i == index)
+            break;
+    }
+    return NULL;
+}
 
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...))
 {
