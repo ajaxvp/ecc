@@ -41,10 +41,11 @@ int f(int a, int (*b)(void));
 // SC_SELECTION_STATEMENT = SC_IF_STATEMENT | SC_SWITCH_STATEMENT
 // SC_ITERATION_STATEMENT = SC_DO_STATEMENT | SC_WHILE_STATEMENT | SC_FOR_STATEMENT
 // SC_JUMP_STATEMENT = SC_GOTO_STATEMENT | SC_CONTINUE_STATEMENT | SC_BREAK_STATEMENT | SC_RETURN_STATEMENT
+// SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
 syntax_component_t* symbol_get_scope(symbol_t* sy)
 {
     if (!sy) return NULL;
-    // first, check if it's a label. if so, it's in function scope
+    // first, check if it's in a label. if so, it's in function scope
     syntax_component_t* syn = sy->declarer->parent;
     if (!syn) return NULL;
     // ISO: 6.2.1 (3)
@@ -54,9 +55,9 @@ syntax_component_t* symbol_get_scope(symbol_t* sy)
         return syn;
     }
     // if not a label, determine whether it is declared in a type specifier or a declarator.
-    // if in a declarator, get outside of the full declarator before proceeding with the search
+    // if in a declarator (or a declarator itself), get outside of the full declarator before proceeding with the search
     // if in a type specifier, exit the struct, union, or enum before proceeding
-    if (syntax_is_declarator_type(syn->type))
+    if (syntax_is_declarator_type(sy->declarer->type) || syntax_is_declarator_type(syn->type))
     {
         syn = syntax_get_full_declarator(syn = sy->declarer);
         if (!syn) return NULL;
@@ -65,8 +66,6 @@ syntax_component_t* symbol_get_scope(symbol_t* sy)
     else if (syn->type == SC_ENUM_SPECIFIER ||
         syn->type == SC_STRUCT_UNION_SPECIFIER)
         syn = syn->parent;
-    else
-        return NULL;
     for (; syn; syn = syn->parent)
     {
         if (syn->type == SC_TRANSLATION_UNIT)

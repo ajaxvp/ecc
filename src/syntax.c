@@ -419,6 +419,193 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SC_COMPOUND_STATEMENT:
+        {
+            ps(sty("compound statement") "\n");
+            pf("block items:\n");
+            print_vector_indented(s->cstmt_block_items, next_indent, printer);
+            break;
+        }
+
+        case SC_RETURN_STATEMENT:
+        {
+            ps(sty("return statement") "\n");
+            pf("expression:\n");
+            print_syntax_indented(s->retstmt_expression, next_indent, printer);
+            break;
+        }
+
+        case SC_EXPRESSION:
+        {
+            ps(sty("expression") "\n");
+            pf("subexpressions:\n")
+            print_vector_indented(s->expr_expressions, next_indent, printer);
+            break;
+        }
+
+        case SC_INTEGER_CONSTANT:
+        {
+            ps("integer constant: %lld\n", s->intc);
+            break;
+        }
+
+        case SC_IF_STATEMENT:
+        {
+            ps(sty("if statement") "\n");
+            pf("condition:\n");
+            print_syntax_indented(s->ifstmt_condition, next_indent, printer);
+            pf("body:\n");
+            print_syntax_indented(s->ifstmt_body, next_indent, printer);
+            pf("else:\n");
+            print_syntax_indented(s->ifstmt_else, next_indent, printer);
+            break;
+        }
+
+        case SC_SWITCH_STATEMENT:
+        {
+            ps(sty("switch statement") "\n");
+            pf("condition:\n");
+            print_syntax_indented(s->swstmt_condition, next_indent, printer);
+            pf("body:\n");
+            print_syntax_indented(s->swstmt_body, next_indent, printer);
+            break;
+        }
+
+        case SC_LABELED_STATEMENT:
+        {
+            ps(sty("labeled statement") "\n");
+            pf("case expression:\n");
+            print_syntax_indented(s->lstmt_case_expression, next_indent, printer);
+            pf("identifier:\n");
+            print_syntax_indented(s->lstmt_id, next_indent, printer);
+            pf("statement:\n");
+            print_syntax_indented(s->lstmt_stmt, next_indent, printer);
+            break;
+        }
+
+        case SC_BREAK_STATEMENT:
+            ps(sty("break statement") "\n");
+            break;
+
+        case SC_CONTINUE_STATEMENT:
+            ps(sty("continue statement") "\n");
+            break;
+        
+        case SC_EXPRESSION_STATEMENT:
+        {
+            ps(sty("expression statement") "\n");
+            pf("expression:\n");
+            print_syntax_indented(s->estmt_expression, next_indent, printer);
+            break;
+        }
+
+        case SC_DESIGNATION:
+        {
+            ps(sty("designation") "\n");
+            pf("designators:\n");
+            print_vector_indented(s->desig_designators, next_indent, printer);
+            break;
+        }
+
+        case SC_INITIALIZER_LIST:
+        {
+            ps(sty("initializer list") "\n");
+            pf("designations:\n");
+            print_vector_indented(s->inlist_designations, next_indent, printer);
+            pf("initializers:\n");
+            print_vector_indented(s->inlist_initializers, next_indent, printer);
+            break;
+        }
+
+        case SC_STRUCT_DECLARATION:
+        {
+            ps(sty("struct declaration") "\n");
+            pf("specifiers & qualifiers:\n");
+            print_vector_indented(s->sdecl_specifier_qualifier_list, next_indent, printer);
+            pf("declarators:\n");
+            print_vector_indented(s->sdecl_declarators, next_indent, printer);
+            break;
+        }
+
+        case SC_STRUCT_DECLARATOR:
+        {
+            ps(sty("struct declarator") "\n");
+            pf("declarator:\n");
+            print_syntax_indented(s->sdeclr_declarator, next_indent, printer);
+            pf("bits expression:\n");
+            print_syntax_indented(s->sdeclr_bits_expression, next_indent, printer);
+            break;
+        }
+
+        case SC_ASSIGNMENT_EXPRESSION:
+        case SC_LOGICAL_OR_EXPRESSION:
+        case SC_LOGICAL_AND_EXPRESSION:
+        case SC_BITWISE_OR_EXPRESSION:
+        case SC_BITWISE_XOR_EXPRESSION:
+        case SC_BITWISE_AND_EXPRESSION:
+        case SC_EQUALITY_EXPRESSION:
+        case SC_INEQUALITY_EXPRESSION:
+        case SC_GREATER_EQUAL_EXPRESSION:
+        case SC_LESS_EQUAL_EXPRESSION:
+        case SC_GREATER_EXPRESSION:
+        case SC_LESS_EXPRESSION:
+        case SC_BITWISE_RIGHT_EXPRESSION:
+        case SC_BITWISE_LEFT_EXPRESSION:
+        case SC_SUBTRACTION_EXPRESSION:
+        case SC_ADDITION_EXPRESSION:
+        case SC_MODULAR_EXPRESSION:
+        case SC_DIVISION_EXPRESSION:
+        case SC_MULTIPLICATION_EXPRESSION:
+        {
+            ps(sty("binary expression") "\n");
+            pf("type name: %s\n", SYNTAX_COMPONENT_NAMES[s->type]);
+            pf("lhs:\n");
+            print_syntax_indented(s->bexpr_lhs, next_indent, printer);
+            pf("rhs:\n");
+            print_syntax_indented(s->bexpr_rhs, next_indent, printer);
+            break;
+        }
+
+        case SC_PREFIX_INCREMENT_EXPRESSION:
+        case SC_PREFIX_DECREMENT_EXPRESSION:
+        case SC_REFERENCE_EXPRESSION:
+        case SC_DEREFERENCE_EXPRESSION:
+        case SC_PLUS_EXPRESSION:
+        case SC_MINUS_EXPRESSION:
+        case SC_COMPLEMENT_EXPRESSION:
+        case SC_NOT_EXPRESSION:
+        case SC_SIZEOF_EXPRESSION:
+        case SC_SIZEOF_TYPE_EXPRESSION:
+        case SC_POSTFIX_INCREMENT_EXPRESSION:
+        case SC_POSTFIX_DECREMENT_EXPRESSION:
+        {
+            ps(sty("unary expression") "\n");
+            pf("type name: %s\n", SYNTAX_COMPONENT_NAMES[s->type]);
+            pf("operand:\n");
+            print_syntax_indented(s->uexpr_operand, next_indent, printer);
+            break;
+        }
+
+        case SC_CAST_EXPRESSION:
+        {
+            ps(sty("cast expression") "\n");
+            pf("type name:\n");
+            print_syntax_indented(s->caexpr_type_name, next_indent, printer);
+            pf("operand:\n");
+            print_syntax_indented(s->caexpr_operand, next_indent, printer);
+            break;
+        }
+
+        case SC_TYPE_NAME:
+        {
+            ps(sty("type name") "\n");
+            pf("specifiers & qualifiers:\n");
+            print_vector_indented(s->tn_specifier_qualifier_list, next_indent, printer);
+            pf("declarator:\n");
+            print_syntax_indented(s->tn_declarator, next_indent, printer);
+            break;
+        }
+
         default:
             ps(sty("unknown/unprintable syntax") "\n");
             pf("type name: %s\n", SYNTAX_COMPONENT_NAMES[s->type]);
@@ -580,12 +767,177 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             deep_free_syntax_vector(syn->cstmt_block_items, s);
             break;
         }
+        case SC_RETURN_STATEMENT:
+        {
+            free_syntax(syn->retstmt_expression, tlu);
+            break;
+        }
+        case SC_GOTO_STATEMENT:
+        {
+            free_syntax(syn->gtstmt_label_id, tlu);
+            break;
+        }
+        case SC_EXPRESSION:
+        {
+            deep_free_syntax_vector(syn->expr_expressions, s);
+            break;
+        }
+        case SC_WHILE_STATEMENT:
+        {
+            free_syntax(syn->whstmt_body, tlu);
+            free_syntax(syn->whstmt_condition, tlu);
+            break;
+        }
+        case SC_DO_STATEMENT:
+        {
+            free_syntax(syn->dostmt_body, tlu);
+            free_syntax(syn->dostmt_condition, tlu);
+            break;
+        }
+        case SC_CAST_EXPRESSION:
+        {
+            free_syntax(syn->caexpr_type_name, tlu);
+            free_syntax(syn->caexpr_operand, tlu);
+            break;
+        }
+        case SC_CONDITIONAL_EXPRESSION:
+        case SC_CONSTANT_EXPRESSION:
+        {
+            free_syntax(syn->cexpr_condition, tlu);
+            free_syntax(syn->cexpr_if, tlu);
+            free_syntax(syn->cexpr_else, tlu);
+            break;
+        }
+        case SC_PREFIX_INCREMENT_EXPRESSION:
+        case SC_PREFIX_DECREMENT_EXPRESSION:
+        case SC_REFERENCE_EXPRESSION:
+        case SC_DEREFERENCE_EXPRESSION:
+        case SC_PLUS_EXPRESSION:
+        case SC_MINUS_EXPRESSION:
+        case SC_COMPLEMENT_EXPRESSION:
+        case SC_NOT_EXPRESSION:
+        case SC_SIZEOF_EXPRESSION:
+        case SC_SIZEOF_TYPE_EXPRESSION:
+        case SC_POSTFIX_INCREMENT_EXPRESSION:
+        case SC_POSTFIX_DECREMENT_EXPRESSION:
+        {
+            free_syntax(syn->uexpr_operand, tlu);
+            break;
+        }
+        case SC_ASSIGNMENT_EXPRESSION:
+        case SC_LOGICAL_OR_EXPRESSION:
+        case SC_LOGICAL_AND_EXPRESSION:
+        case SC_BITWISE_OR_EXPRESSION:
+        case SC_BITWISE_XOR_EXPRESSION:
+        case SC_BITWISE_AND_EXPRESSION:
+        case SC_EQUALITY_EXPRESSION:
+        case SC_INEQUALITY_EXPRESSION:
+        case SC_GREATER_EQUAL_EXPRESSION:
+        case SC_LESS_EQUAL_EXPRESSION:
+        case SC_GREATER_EXPRESSION:
+        case SC_LESS_EXPRESSION:
+        case SC_BITWISE_RIGHT_EXPRESSION:
+        case SC_BITWISE_LEFT_EXPRESSION:
+        case SC_SUBTRACTION_EXPRESSION:
+        case SC_ADDITION_EXPRESSION:
+        case SC_MODULAR_EXPRESSION:
+        case SC_DIVISION_EXPRESSION:
+        case SC_MULTIPLICATION_EXPRESSION:
+        {
+            free_syntax(syn->bexpr_lhs, tlu);
+            free_syntax(syn->bexpr_rhs, tlu);
+            break;
+        }
+        case SC_STRING_LITERAL:
+        {
+            free(syn->strl);
+            break;
+        }
+        case SC_IF_STATEMENT:
+        {
+            free_syntax(syn->ifstmt_body, tlu);
+            free_syntax(syn->ifstmt_condition, tlu);
+            free_syntax(syn->ifstmt_else, tlu);
+            break;
+        }
+        case SC_LABELED_STATEMENT:
+        {
+            free_syntax(syn->lstmt_case_expression, tlu);
+            free_syntax(syn->lstmt_id, tlu);
+            free_syntax(syn->lstmt_stmt, tlu);
+            break;
+        }
+        case SC_EXPRESSION_STATEMENT:
+        {
+            free_syntax(syn->estmt_expression, tlu);
+            break;
+        }
+        case SC_SWITCH_STATEMENT:
+        {
+            free_syntax(syn->swstmt_body, tlu);
+            free_syntax(syn->swstmt_condition, tlu);
+            break;
+        }
+        case SC_FOR_STATEMENT:
+        {
+            free_syntax(syn->forstmt_body, tlu);
+            free_syntax(syn->forstmt_condition, tlu);
+            free_syntax(syn->forstmt_post, tlu);
+            free_syntax(syn->forstmt_init, tlu);
+            break;
+        }
+        case SC_DESIGNATION:
+        {
+            deep_free_syntax_vector(syn->desig_designators, s);
+            break;
+        }
+        case SC_INITIALIZER_LIST:
+        {
+            deep_free_syntax_vector(syn->inlist_designations, s1);
+            deep_free_syntax_vector(syn->inlist_initializers, s2);
+            break;
+        }
+        case SC_TYPE_NAME:
+        {
+            free_syntax(syn->tn_declarator, tlu);
+            deep_free_syntax_vector(syn->tn_specifier_qualifier_list, s);
+            break;
+        }
+        case SC_INITIALIZER_LIST_EXPRESSION:
+        {
+            free_syntax(syn->inlexpr_inlist, tlu);
+            free_syntax(syn->inlexpr_type_name, tlu);
+            break;
+        }
+        case SC_MEMBER_EXPRESSION:
+        case SC_DEREFERENCE_MEMBER_EXPRESSION:
+        {
+            free_syntax(syn->memexpr_expression, tlu);
+            free_syntax(syn->memexpr_id, tlu);
+            break;
+        }
+        case SC_FUNCTION_CALL_EXPRESSION:
+        {
+            free_syntax(syn->fcallexpr_expression, tlu);
+            deep_free_syntax_vector(syn->fcallexpr_args, s);
+            break;
+        }
+        case SC_SUBSCRIPT_EXPRESSION:
+        {
+            free_syntax(syn->subsexpr_expression, tlu);
+            free_syntax(syn->subsexpr_index_expression, tlu);
+            break;
+        }
         // nothing to free
         case SC_UNKNOWN:
         case SC_BASIC_TYPE_SPECIFIER:
         case SC_TYPE_QUALIFIER:
         case SC_FUNCTION_SPECIFIER:
         case SC_STORAGE_CLASS_SPECIFIER:
+        case SC_BREAK_STATEMENT:
+        case SC_CONTINUE_STATEMENT:
+        case SC_INTEGER_CONSTANT:
+        case SC_FLOATING_CONSTANT:
             break;
         default:
         {

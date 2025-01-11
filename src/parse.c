@@ -54,6 +54,11 @@ EXPECTED:
         NOT FOUND will never occur
         ABORT if it is not found, and an error will be printed
 
+RULES TO FOLLOW:
+    - a parent calling to parse a child MUST have itself linked to its parent before proceeding
+    - if a parse function is called with CHECK, it should do the least possible work in order
+      to determine whether an object is present or not.
+
 */
 
 // updates the status code, bringing tokens up to speed with token if necessary
@@ -68,11 +73,12 @@ EXPECTED:
 #define init_syn(t) \
     syntax_component_t* syn = calloc(1, sizeof *syn); \
     syn->type = (t); \
-    if (token) syn->row = token->row, syn->col = token->col;
+    if (token) syn->row = token->row, syn->col = token->col; \
+    syn->parent = parent;
 
 #define try_parse(type, name, ...) \
     parse_status_code_t name##_stat = UNKNOWN_STATUS; \
-    syntax_component_t* name = parse_##type(&token, OPTIONAL, &name##_stat, tlu, next_depth, ## __VA_ARGS__); \
+    syntax_component_t* name = parse_##type(&token, OPTIONAL, &name##_stat, tlu, next_depth, parent, ## __VA_ARGS__); \
     if (name##_stat == FOUND) \
     { \
         update_status(FOUND); \
@@ -132,21 +138,21 @@ typedef enum parse_request_code
     EXPECTED
 } parse_request_code_t;
 
-typedef syntax_component_t* (*parse_function_t)(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+typedef syntax_component_t* (*parse_function_t)(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
 
-syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, bool* ellipsis);
-syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type);
-syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
-syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth);
+syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, bool* ellipsis);
+syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type);
+syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent);
+syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, bool permit_trailing_comma);
 
 bool is_keyword(lexer_token_t* token, unsigned keyword_id)
 {
@@ -176,7 +182,7 @@ bool has_identifier(lexer_token_t* token, char* id)
     return token->type == LEXER_TOKEN_IDENTIFIER && !strcmp(token->string_value, id);
 }
 
-syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     fail_parse(token, "this syntax element cannot be parsed yet");
@@ -184,7 +190,7 @@ syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req,
 }
 
 // 6.4.2.1
-syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
+syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type)
 {
     init_parse;
     if (!token)
@@ -209,19 +215,17 @@ syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_
     return syn;
 }
 
-syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_STRUCT_DECLARATOR);
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
-    syn->sdeclr_declarator = parse_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth);
-    link_to_parent(syn->sdeclr_declarator);
+    syn->sdeclr_declarator = parse_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth, syn);
     if (is_operator(token, ':'))
     {
         advance_token;
         parse_status_code_t ce_stat = UNKNOWN_STATUS;
-        syn->sdeclr_bits_expression = parse_conditional_expression(&token, EXPECTED, &ce_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
-        link_to_parent(syn->sdeclr_bits_expression);
+        syn->sdeclr_bits_expression = parse_conditional_expression(&token, EXPECTED, &ce_stat, tlu, next_depth, syn, SC_CONSTANT_EXPRESSION);
         if (ce_stat == ABORT)
         {
             fail_status;
@@ -242,7 +246,7 @@ syntax_component_t* parse_struct_declarator(lexer_token_t** tokens, parse_reques
 }
 
 // 6.7.2.1
-syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_STRUCT_DECLARATION);
@@ -250,16 +254,14 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
     for (;;)
     {
         parse_status_code_t tq_stat = UNKNOWN_STATUS;
-        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
-        link_to_parent(tq);
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth, syn);
         if (tq_stat == FOUND)
         {
             vector_add(syn->sdecl_specifier_qualifier_list, tq);
             continue;
         }
         parse_status_code_t ts_stat = UNKNOWN_STATUS;
-        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth);
-        link_to_parent(ts);
+        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth, syn);
         if (ts_stat == FOUND)
         {
             vector_add(syn->sdecl_specifier_qualifier_list, ts);
@@ -278,8 +280,7 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
     for (;;)
     {
         parse_status_code_t sdeclr_stat = UNKNOWN_STATUS;
-        syntax_component_t* sdeclr = parse_struct_declarator(&token, EXPECTED, &sdeclr_stat, tlu, next_depth);
-        link_to_parent(sdeclr);
+        syntax_component_t* sdeclr = parse_struct_declarator(&token, EXPECTED, &sdeclr_stat, tlu, next_depth, syn);
         if (sdeclr_stat == ABORT)
         {
             // ISO: 6.7.2.1 (1)
@@ -305,7 +306,7 @@ syntax_component_t* parse_struct_declaration(lexer_token_t** tokens, parse_reque
 }
 
 // 6.7.2.1
-syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_keyword(token, KEYWORD_STRUCT) && !is_keyword(token, KEYWORD_UNION))
@@ -322,8 +323,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     }
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-    link_to_parent(syn->sus_id);
+    syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
     if (!is_separator(token, '{'))
     {
         if (id_stat == NOT_FOUND)
@@ -347,8 +347,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     for (;;)
     {
         parse_status_code_t sdecl_stat = UNKNOWN_STATUS;
-        syntax_component_t* sdecl = parse_struct_declaration(&token, OPTIONAL, &sdecl_stat, tlu, next_depth);
-        link_to_parent(sdecl);
+        syntax_component_t* sdecl = parse_struct_declaration(&token, OPTIONAL, &sdecl_stat, tlu, next_depth, syn);
         if (sdecl_stat == NOT_FOUND)
             break;
         vector_add(syn->sus_declarations, sdecl);
@@ -371,13 +370,12 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     return syn;
 }
 
-syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_ENUMERATOR);
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->enumr_constant = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_ENUMERATION_CONSTANT);
-    link_to_parent(syn->enumr_constant);
+    syn->enumr_constant = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_ENUMERATION_CONSTANT);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -394,8 +392,7 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->enumr_expression = parse_conditional_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
-    link_to_parent(syn->enumr_expression);
+    syn->enumr_expression = parse_conditional_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn, SC_CONSTANT_EXPRESSION);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -406,7 +403,7 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
     return syn;
 }
 
-syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_keyword(token, KEYWORD_ENUM))
@@ -418,8 +415,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
     init_syn(SC_ENUM_SPECIFIER);
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->enums_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-    link_to_parent(syn->enums_id);
+    syn->enums_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
     if (!is_separator(token, '{'))
     {
         if (id_stat == NOT_FOUND)
@@ -443,8 +439,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
     for (;;)
     {
         parse_status_code_t enumr_stat = UNKNOWN_STATUS;
-        syntax_component_t* enumr = parse_enumerator(&token, EXPECTED, &enumr_stat, tlu, next_depth);
-        link_to_parent(enumr);
+        syntax_component_t* enumr = parse_enumerator(&token, EXPECTED, &enumr_stat, tlu, next_depth, syn);
         if (enumr_stat == ABORT)
         {
             fail_status;
@@ -466,7 +461,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
 
 // 6.7.1
 // to be resolved: none in this function
-syntax_component_t* parse_storage_class_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_storage_class_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -504,7 +499,7 @@ syntax_component_t* parse_storage_class_specifier(lexer_token_t** tokens, parse_
 
 // 6.7.2
 // to be resolved: 6.7.2 (2), 6.7.2 (3), 6.7.2 (4), 6.7.2 (5)
-syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -545,27 +540,28 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
             case KEYWORD_COMPLEX: syn->bts = BTS_COMPLEX; break;
             case KEYWORD_IMAGINARY: syn->bts = BTS_IMAGINARY; break;
         }
+        link_to_specific_parent(syn, parent);
         advance_token;
         update_status(FOUND);
         return syn;
     }
     free_syntax(syn, tlu);
     parse_status_code_t sus_stat = UNKNOWN_STATUS;
-    syntax_component_t* sus = parse_struct_or_union_specifier(&token, OPTIONAL, &sus_stat, tlu, next_depth);
+    syntax_component_t* sus = parse_struct_or_union_specifier(&token, OPTIONAL, &sus_stat, tlu, next_depth, parent);
     if (sus_stat == FOUND)
     {
         update_status(FOUND);
         return sus;
     }
     parse_status_code_t es_stat = UNKNOWN_STATUS;
-    syntax_component_t* es = parse_enum_specifier(&token, OPTIONAL, &es_stat, tlu, next_depth);
+    syntax_component_t* es = parse_enum_specifier(&token, OPTIONAL, &es_stat, tlu, next_depth, parent);
     if (es_stat == FOUND)
     {
         update_status(FOUND);
         return es;
     }
     parse_status_code_t td_stat = UNKNOWN_STATUS;
-    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, SC_TYPEDEF_NAME);
+    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, parent, SC_TYPEDEF_NAME);
     if (td_stat == FOUND)
     {
         if (!symbol_table_lookup(tlu->tlu_st, td))
@@ -584,7 +580,7 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
 
 // 6.7.3
 // to be resolved: 6.7.3 (2), 6.7.3 (3), 6.7.3 (4), 6.7.3 (5), 6.7.3 (6), 6.7.3 (7), 6.7.3 (8), 6.7.3 (9)
-syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -618,7 +614,7 @@ syntax_component_t* parse_type_qualifier(lexer_token_t** tokens, parse_request_c
 
 // 6.7.4
 // to be resolved: 6.7.4 (2), 6.7.4 (3), 6.7.4 (4), 6.7.4 (5), 6.7.4 (6)
-syntax_component_t* parse_function_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_function_specifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -648,7 +644,7 @@ syntax_component_t* parse_function_specifier(lexer_token_t** tokens, parse_reque
 
 // 6.7
 // to be resolved: 
-vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     vector_t* declaration_specifiers = vector_init();
@@ -656,7 +652,7 @@ vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_cod
     for (;;)
     {
         parse_status_code_t scs_stat = UNKNOWN_STATUS;
-        syntax_component_t* scs = parse_storage_class_specifier(&token, OPTIONAL, &scs_stat, tlu, next_depth);
+        syntax_component_t* scs = parse_storage_class_specifier(&token, OPTIONAL, &scs_stat, tlu, next_depth, parent);
         if (scs_stat == FOUND)
         {
             if (has_scs)
@@ -673,21 +669,21 @@ vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_cod
             continue;
         }
         parse_status_code_t ts_stat = UNKNOWN_STATUS;
-        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth);
+        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth, parent);
         if (ts_stat == FOUND)
         {
             vector_add(declaration_specifiers, ts);
             continue;
         }
         parse_status_code_t tq_stat = UNKNOWN_STATUS;
-        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth, parent);
         if (tq_stat == FOUND)
         {
             vector_add(declaration_specifiers, tq);
             continue;
         }
         parse_status_code_t fs_stat = UNKNOWN_STATUS;
-        syntax_component_t* fs = parse_function_specifier(&token, OPTIONAL, &fs_stat, tlu, next_depth);
+        syntax_component_t* fs = parse_function_specifier(&token, OPTIONAL, &fs_stat, tlu, next_depth, parent);
         if (fs_stat == FOUND)
         {
             vector_add(declaration_specifiers, fs);
@@ -706,14 +702,14 @@ vector_t* parse_declaration_specifiers(lexer_token_t** tokens, parse_request_cod
     return declaration_specifiers;
 }
 
-vector_t* parse_type_qualifier_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+vector_t* parse_type_qualifier_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     vector_t* tqlist = vector_init();
     for (;;)
     {
         parse_status_code_t tq_stat = UNKNOWN_STATUS;
-        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth, parent);
         if (tq_stat == NOT_FOUND)
             break;
         vector_add(tqlist, tq);
@@ -730,7 +726,7 @@ vector_t* parse_type_qualifier_list(lexer_token_t** tokens, parse_request_code_t
 
 // 6.7.5
 // to be resolved: 
-syntax_component_t* parse_pointer(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_pointer(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -751,8 +747,7 @@ syntax_component_t* parse_pointer(lexer_token_t** tokens, parse_request_code_t r
     for (;;)
     {
         parse_status_code_t tq_stat = UNKNOWN_STATUS;
-        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
-        link_to_parent(tq);
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth, syn);
         if (tq_stat == NOT_FOUND)
             break;
         vector_add(syn->ptr_type_qualifiers, tq);
@@ -762,7 +757,7 @@ syntax_component_t* parse_pointer(lexer_token_t** tokens, parse_request_code_t r
 }
 
 // does not parse optional direct abstract declarator
-syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_ABSTRACT_FUNCTION_DECLARATOR);
@@ -776,8 +771,7 @@ syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** t
     advance_token;
 
     parse_status_code_t ptlist_stat = UNKNOWN_STATUS;
-    syn->abfdeclr_parameter_declarations = parse_parameter_type_list(&token, OPTIONAL, &ptlist_stat, tlu, next_depth, &syn->abfdeclr_ellipsis);
-    link_vector_to_parent(syn->abfdeclr_parameter_declarations);
+    syn->abfdeclr_parameter_declarations = parse_parameter_type_list(&token, OPTIONAL, &ptlist_stat, tlu, next_depth, syn, &syn->abfdeclr_ellipsis);
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for abstract function declarator");
@@ -791,7 +785,7 @@ syntax_component_t* parse_partial_abstract_function_declarator(lexer_token_t** t
 }
 
 // does not parse optional direct abstract declarator
-syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_ABSTRACT_ARRAY_DECLARATOR);
@@ -809,10 +803,7 @@ syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** toke
         advance_token;
     }
     else
-    {
-        syn->abadeclr_length_expression = parse_assignment_expression(&token, OPTIONAL, NULL, tlu, next_depth);
-        link_to_parent(syn->abadeclr_length_expression);
-    }
+        syn->abadeclr_length_expression = parse_assignment_expression(&token, OPTIONAL, NULL, tlu, next_depth, syn);
     if (!is_operator(token, ']'))
     {
         fail_parse(token, "expected right bracket for abstract array declarator");
@@ -825,7 +816,7 @@ syntax_component_t* parse_partial_abstract_array_declarator(lexer_token_t** toke
 }
 
 // 6.7.6
-syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     // nested declarator
@@ -834,7 +825,7 @@ syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, par
     {
         advance_token;
         parse_status_code_t abdeclr_stat = UNKNOWN_STATUS;
-        left = parse_abstract_declarator(&token, EXPECTED, &abdeclr_stat, tlu, next_depth);
+        left = parse_abstract_declarator(&token, EXPECTED, &abdeclr_stat, tlu, next_depth, parent);
         if (abdeclr_stat == ABORT)
         {
             fail_parse(token, "expected abstract declarator");
@@ -851,7 +842,7 @@ syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, par
     for (;;)
     {
         parse_status_code_t abfdeclr_stat = UNKNOWN_STATUS;
-        syntax_component_t* abfdeclr = parse_partial_abstract_function_declarator(&token, OPTIONAL, &abfdeclr_stat, tlu, next_depth);
+        syntax_component_t* abfdeclr = parse_partial_abstract_function_declarator(&token, OPTIONAL, &abfdeclr_stat, tlu, next_depth, parent);
         if (abfdeclr_stat == FOUND)
         {
             if (left)
@@ -863,7 +854,7 @@ syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, par
             continue;
         }
         parse_status_code_t abadeclr_stat = UNKNOWN_STATUS;
-        syntax_component_t* abadeclr = parse_partial_abstract_array_declarator(&token, OPTIONAL, &abadeclr_stat, tlu, next_depth);
+        syntax_component_t* abadeclr = parse_partial_abstract_array_declarator(&token, OPTIONAL, &abadeclr_stat, tlu, next_depth, parent);
         if (abadeclr_stat == FOUND)
         {
             if (left)
@@ -881,7 +872,7 @@ syntax_component_t* parse_direct_abstract_declarator(lexer_token_t** tokens, par
 }
 
 // 6.7.6
-syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_ABSTRACT_DECLARATOR);
@@ -889,15 +880,13 @@ syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_requ
     for (;;)
     {
         parse_status_code_t ptr_stat = UNKNOWN_STATUS;
-        syntax_component_t* ptr = parse_pointer(&token, OPTIONAL, &ptr_stat, tlu, next_depth);
-        link_to_parent(ptr);
+        syntax_component_t* ptr = parse_pointer(&token, OPTIONAL, &ptr_stat, tlu, next_depth, syn);
         if (ptr_stat == NOT_FOUND)
             break;
         vector_add(syn->abdeclr_pointers, ptr);
     }
     parse_status_code_t dabdeclr_stat = UNKNOWN_STATUS;
-    syn->abdeclr_direct = parse_direct_abstract_declarator(&token, OPTIONAL, &dabdeclr_stat, tlu, next_depth);
-    link_to_parent(syn->abdeclr_direct);
+    syn->abdeclr_direct = parse_direct_abstract_declarator(&token, OPTIONAL, &dabdeclr_stat, tlu, next_depth, syn);
     if (!syn->abdeclr_pointers->size && dabdeclr_stat == NOT_FOUND)
     {
         // ISO: 6.7.6 (1)
@@ -918,7 +907,7 @@ syntax_component_t* parse_abstract_declarator(lexer_token_t** tokens, parse_requ
 }
 
 // 6.7.6
-syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_TYPE_NAME);
@@ -926,16 +915,14 @@ syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t
     for (;;)
     {
         parse_status_code_t tq_stat = UNKNOWN_STATUS;
-        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth);
-        link_to_parent(tq);
+        syntax_component_t* tq = parse_type_qualifier(&token, OPTIONAL, &tq_stat, tlu, next_depth, syn);
         if (tq_stat == FOUND)
         {
             vector_add(syn->sdecl_specifier_qualifier_list, tq);
             continue;
         }
         parse_status_code_t ts_stat = UNKNOWN_STATUS;
-        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth);
-        link_to_parent(ts);
+        syntax_component_t* ts = parse_type_specifier(&token, OPTIONAL, &ts_stat, tlu, next_depth, syn);
         if (ts_stat == FOUND)
         {
             vector_add(syn->sdecl_specifier_qualifier_list, ts);
@@ -951,19 +938,17 @@ syntax_component_t* parse_type_name(lexer_token_t** tokens, parse_request_code_t
         return NULL;
     }
     parse_status_code_t adeclr_stat = UNKNOWN_STATUS;
-    syn->tn_declarator = parse_abstract_declarator(&token, OPTIONAL, &adeclr_stat, tlu, next_depth);
-    link_to_parent(syn->tn_declarator);
+    syn->tn_declarator = parse_abstract_declarator(&token, OPTIONAL, &adeclr_stat, tlu, next_depth, syn);
     update_status(FOUND);
     return syn;
 }
 
-syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_PARAMETER_DECLARATION);
     parse_status_code_t declspecs_stat = UNKNOWN_STATUS;
-    syn->pdecl_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspecs_stat, tlu, next_depth);
-    link_vector_to_parent(syn->pdecl_declaration_specifiers);
+    syn->pdecl_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspecs_stat, tlu, next_depth, syn);
     if (declspecs_stat == ABORT)
     {
         fail_status;
@@ -971,23 +956,21 @@ syntax_component_t* parse_parameter_declaration(lexer_token_t** tokens, parse_re
         return NULL;
     }
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
-    syn->pdecl_declr = parse_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth);
-    link_to_parent(syn->pdecl_declr);
+    syn->pdecl_declr = parse_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth, syn);
     if (declr_stat == FOUND)
     {
         update_status(FOUND);
         return syn;
     }
     declr_stat = UNKNOWN_STATUS;
-    syn->pdecl_declr = parse_abstract_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth);
-    link_to_parent(syn->pdecl_declr);
+    syn->pdecl_declr = parse_abstract_declarator(&token, OPTIONAL, &declr_stat, tlu, next_depth, syn);
     if (declr_stat == NOT_FOUND)
         syn->pdecl_declr = NULL;
     update_status(FOUND);
     return syn;
 }
 
-vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, bool* ellipsis)
+vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, bool* ellipsis)
 {
     init_parse;
     vector_t* ptlist = vector_init();
@@ -995,7 +978,7 @@ vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t
     for (;;)
     {
         parse_status_code_t pdecl_stat = UNKNOWN_STATUS;
-        syntax_component_t* pdecl = parse_parameter_declaration(&token, EXPECTED, &pdecl_stat, tlu, next_depth);
+        syntax_component_t* pdecl = parse_parameter_declaration(&token, EXPECTED, &pdecl_stat, tlu, next_depth, parent);
         if (pdecl_stat == ABORT)
         {
             fail_status;
@@ -1024,7 +1007,7 @@ vector_t* parse_parameter_type_list(lexer_token_t** tokens, parse_request_code_t
 //     '[' [type-qualifier-list] '*' ']'
 
 // doesn't parse the direct declarator
-syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_ARRAY_DECLARATOR);
@@ -1042,8 +1025,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
         advance_token;
     }
     parse_status_code_t tqlist_stat = UNKNOWN_STATUS;
-    syn->adeclr_type_qualifiers = parse_type_qualifier_list(&token, OPTIONAL, &tqlist_stat, tlu, next_depth);
-    link_vector_to_parent(syn->adeclr_type_qualifiers);
+    syn->adeclr_type_qualifiers = parse_type_qualifier_list(&token, OPTIONAL, &tqlist_stat, tlu, next_depth, syn);
     if (is_operator(token, '*'))
     {
         if (syn->adeclr_is_static)
@@ -1076,8 +1058,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
         advance_token;
     }
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->adeclr_length_expression = parse_assignment_expression(&token, syn->adeclr_is_static ? EXPECTED : OPTIONAL, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->adeclr_length_expression);
+    syn->adeclr_length_expression = parse_assignment_expression(&token, syn->adeclr_is_static ? EXPECTED : OPTIONAL, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -1096,7 +1077,7 @@ syntax_component_t* parse_partial_array_declarator(lexer_token_t** tokens, parse
 }
 
 // doesn't parse the direct declarator
-syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_FUNCTION_DECLARATOR);
@@ -1110,8 +1091,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     advance_token;
 
     parse_status_code_t ptlist_stat = UNKNOWN_STATUS;
-    syn->fdeclr_parameter_declarations = parse_parameter_type_list(&token, OPTIONAL, &ptlist_stat, tlu, next_depth, &syn->fdeclr_ellipsis);
-    link_vector_to_parent(syn->fdeclr_parameter_declarations);
+    syn->fdeclr_parameter_declarations = parse_parameter_type_list(&token, OPTIONAL, &ptlist_stat, tlu, next_depth, syn, &syn->fdeclr_ellipsis);
     if (ptlist_stat == FOUND)
     {
         if (!is_separator(token, ')'))
@@ -1128,9 +1108,8 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     for (;;)
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
         // TODO: consider adding to symbol table?
-        link_to_parent(id);
         if (id_stat == NOT_FOUND)
             break;
         vector_add(syn->fdeclr_knr_identifiers, id);
@@ -1173,7 +1152,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
 // SC_DIRECT_DECLARATOR = SC_IDENTIFIER | SC_DECLARATOR | SC_ARRAY_DECLARATOR | SC_FUNCTION_DECLARATOR
 // 6.7.5
 // to be resolved: 
-syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     // nested declarator
@@ -1182,7 +1161,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
     {
         advance_token;
         parse_status_code_t declr_stat = UNKNOWN_STATUS;
-        left = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth);
+        left = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth, parent);
         if (declr_stat == ABORT)
         {
             fail_parse(token, "expected declarator");
@@ -1199,7 +1178,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
     else
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
+        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, parent, SC_IDENTIFIER);
         if (id_stat == ABORT)
         {
             fail_parse(token, "expected identifier");
@@ -1212,7 +1191,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
     for (;;)
     {
         parse_status_code_t fdeclr_stat = UNKNOWN_STATUS;
-        syntax_component_t* fdeclr = parse_partial_function_declarator(&token, OPTIONAL, &fdeclr_stat, tlu, next_depth);
+        syntax_component_t* fdeclr = parse_partial_function_declarator(&token, OPTIONAL, &fdeclr_stat, tlu, next_depth, parent);
         if (fdeclr_stat == FOUND)
         {
             link_to_specific_parent(left, fdeclr);
@@ -1221,7 +1200,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
             continue;
         }
         parse_status_code_t adeclr_stat = UNKNOWN_STATUS;
-        syntax_component_t* adeclr = parse_partial_array_declarator(&token, OPTIONAL, &adeclr_stat, tlu, next_depth);
+        syntax_component_t* adeclr = parse_partial_array_declarator(&token, OPTIONAL, &adeclr_stat, tlu, next_depth, parent);
         if (adeclr_stat == FOUND)
         {
             link_to_specific_parent(left, adeclr);
@@ -1237,7 +1216,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
 
 // 6.7.5
 // to be resolved: 
-syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_DECLARATOR);
@@ -1245,15 +1224,13 @@ syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_
     for (;;)
     {
         parse_status_code_t ptr_stat = UNKNOWN_STATUS;
-        syntax_component_t* ptr = parse_pointer(&token, OPTIONAL, &ptr_stat, tlu, next_depth);
-        link_to_parent(ptr);
+        syntax_component_t* ptr = parse_pointer(&token, OPTIONAL, &ptr_stat, tlu, next_depth, syn);
         if (ptr_stat == NOT_FOUND)
             break;
         vector_add(syn->declr_pointers, ptr);
     }
     parse_status_code_t dir_stat = UNKNOWN_STATUS;
-    syn->declr_direct = parse_direct_declarator(&token, EXPECTED, &dir_stat, tlu, next_depth);
-    link_to_parent(syn->declr_direct);
+    syn->declr_direct = parse_direct_declarator(&token, EXPECTED, &dir_stat, tlu, next_depth, syn);
     if (dir_stat == ABORT)
     {
         fail_status;
@@ -1263,6 +1240,7 @@ syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_
     if (!syn->declr_pointers->size) // no pointers
     {
         syntax_component_t* direct = syn->declr_direct;
+        link_to_specific_parent(direct, parent);
         syn->declr_direct = NULL;
         free_syntax(syn, tlu);
         update_status(FOUND);
@@ -1272,7 +1250,7 @@ syntax_component_t* parse_declarator(lexer_token_t** tokens, parse_request_code_
     return syn;
 }
 
-syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_parse(assignment_expression, aexpr)
@@ -1283,15 +1261,11 @@ syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code
     }
     advance_token;
     parse_status_code_t inlist_stat = UNKNOWN_STATUS;
-    syntax_component_t* inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth);
+    syntax_component_t* inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth, parent, true);
     if (inlist_stat == ABORT)
     {
         fail_status;
         return NULL;
-    }
-    if (is_separator(token, ','))
-    {
-        advance_token;
     }
     if (!is_separator(token, '}'))
     {
@@ -1306,13 +1280,12 @@ syntax_component_t* parse_initializer(lexer_token_t** tokens, parse_request_code
 
 // 6.7
 // to be resolved: 
-syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_INIT_DECLARATOR);
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
-    syn->ideclr_declarator = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth);
-    link_to_parent(syn->ideclr_declarator);
+    syn->ideclr_declarator = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth, syn);
     if (declr_stat == ABORT)
     {
         // ISO: 6.7 (1)
@@ -1324,8 +1297,7 @@ syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_
     {
         advance_token;
         parse_status_code_t init_stat = UNKNOWN_STATUS;
-        syn->ideclr_initializer = parse_initializer(&token, EXPECTED, &init_stat, tlu, next_depth);
-        link_to_parent(syn->ideclr_initializer);
+        syn->ideclr_initializer = parse_initializer(&token, EXPECTED, &init_stat, tlu, next_depth, syn);
         if (init_stat == ABORT)
         {
             // ISO: 6.7 (1)
@@ -1340,12 +1312,12 @@ syntax_component_t* parse_init_declarator(lexer_token_t** tokens, parse_request_
 
 // 6.7
 // to be resolved: 6.7.1 (5), 6.7.1 (6)
-syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_DECLARATION);
     parse_status_code_t declspec_stat = UNKNOWN_STATUS;
-    syn->decl_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspec_stat, tlu, next_depth);
+    syn->decl_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspec_stat, tlu, next_depth, syn);
     link_vector_to_parent(syn->decl_declaration_specifiers);
     if (declspec_stat == ABORT)
     {
@@ -1364,8 +1336,7 @@ syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code
     for (;;)
     {
         parse_status_code_t initdecl_stat = UNKNOWN_STATUS;
-        syntax_component_t* initdecl = parse_init_declarator(&token, OPTIONAL, &initdecl_stat, tlu, next_depth);
-        link_to_parent(initdecl);
+        syntax_component_t* initdecl = parse_init_declarator(&token, OPTIONAL, &initdecl_stat, tlu, next_depth, syn);
         if (initdecl_stat == NOT_FOUND)
             break;
         vector_add(syn->decl_init_declarators, initdecl);
@@ -1390,14 +1361,14 @@ syntax_component_t* parse_declaration(lexer_token_t** tokens, parse_request_code
 
 #define try_expression(type, name) \
     parse_status_code_t name##_stat = UNKNOWN_STATUS; \
-    syntax_component_t* name = parse_##type##_expression(&token, OPTIONAL, &name##_stat, tlu, next_depth); \
+    syntax_component_t* name = parse_##type##_expression(&token, OPTIONAL, &name##_stat, tlu, next_depth, parent); \
     if (name##_stat == FOUND) \
     { \
         update_status(FOUND); \
         return name; \
     }
 
-syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -1417,12 +1388,12 @@ syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_reques
     return syn;
 }
 
-syntax_component_t* parse_character_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_character_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_stub(tokens, req, stat, tlu, depth);
+    return parse_stub(tokens, req, stat, tlu, depth, parent);
 }
 
-syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -1442,7 +1413,7 @@ syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request
     return syn;
 }
 
-syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -1462,7 +1433,7 @@ syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_c
     return syn;
 }
 
-syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_parse(identifier, id, SC_IDENTIFIER)
@@ -1477,7 +1448,7 @@ syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_reque
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syntax_component_t* expr = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
+    syntax_component_t* expr = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, parent);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -1494,7 +1465,7 @@ syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_reque
     return expr;
 }
 
-syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_DESIGNATION);
@@ -1505,8 +1476,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
         {
             advance_token;
             parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
-            syntax_component_t* cexpr = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
-            link_to_parent(cexpr);
+            syntax_component_t* cexpr = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, syn, SC_CONSTANT_EXPRESSION);
             if (cexpr_stat == ABORT)
             {
                 fail_status;
@@ -1527,8 +1497,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
         {
             advance_token;
             parse_status_code_t id_stat = UNKNOWN_STATUS;
-            syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-            link_to_parent(id);
+            syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
             if (id_stat == ABORT)
             {
                 fail_status;
@@ -1551,7 +1520,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
     return syn;
 }
 
-syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, bool permit_trailing_comma)
 {
     init_parse;
     init_syn(SC_INITIALIZER_LIST);
@@ -1560,18 +1529,21 @@ syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request
     for (;;)
     {
         parse_status_code_t desig_stat = UNKNOWN_STATUS;
-        syntax_component_t* desig = parse_designation(&token, OPTIONAL, &desig_stat, tlu, next_depth);
-        link_to_parent(desig);
-        vector_add(syn->inlist_designations, desig);
+        syntax_component_t* desig = parse_designation(&token, OPTIONAL, &desig_stat, tlu, next_depth, syn);
         parse_status_code_t init_stat = UNKNOWN_STATUS;
-        syntax_component_t* init = parse_initializer(&token, EXPECTED, &init_stat, tlu, next_depth);
-        link_to_parent(init);
+        syntax_component_t* init = parse_initializer(&token, EXPECTED, &init_stat, tlu, next_depth, syn);
         if (init_stat == ABORT)
         {
+            if (permit_trailing_comma && syn->inlist_initializers)
+            {
+                update_status(FOUND);
+                return syn;
+            }
             fail_status;
             free_syntax(syn, tlu);
             return NULL;
         }
+        vector_add(syn->inlist_designations, desig);
         vector_add(syn->inlist_initializers, init);
         if (!is_separator(token, ','))
             break;
@@ -1582,7 +1554,7 @@ syntax_component_t* parse_initializer_list(lexer_token_t** tokens, parse_request
 }
 
 // does not parse the postfix expression
-syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_operator(token, '['))
@@ -1593,8 +1565,7 @@ syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, p
     advance_token;
     init_syn(SC_SUBSCRIPT_EXPRESSION);
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->subsexpr_index_expression = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->subsexpr_index_expression);
+    syn->subsexpr_index_expression = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -1612,7 +1583,7 @@ syntax_component_t* parse_partial_subscript_expression(lexer_token_t** tokens, p
 }
 
 // does not parse the postfix expression
-syntax_component_t* parse_partial_function_call_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_partial_function_call_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_separator(token, '('))
@@ -1626,17 +1597,12 @@ syntax_component_t* parse_partial_function_call_expression(lexer_token_t** token
     for (;;)
     {
         parse_status_code_t expr_stat = UNKNOWN_STATUS;
-        syntax_component_t* expr = parse_assignment_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
-        link_to_parent(expr);
+        syntax_component_t* expr = parse_assignment_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth, syn);
         if (expr_stat == NOT_FOUND)
             break;
         vector_add(syn->fcallexpr_args, expr);
         if (!is_separator(token, ','))
-        {
-            fail_parse(token, "expected a comma between arguments to a function call");
-            free_syntax(syn, tlu);
-            return NULL;
-        }
+            break;
         advance_token;
     }
     if (!is_separator(token, ')'))
@@ -1651,7 +1617,7 @@ syntax_component_t* parse_partial_function_call_expression(lexer_token_t** token
 }
 
 // does not parse the postfix expression
-syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid)
+syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type, unsigned oid)
 {
     init_parse;
     if (!is_operator(token, oid))
@@ -1662,8 +1628,7 @@ syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, pars
     advance_token;
     init_syn(type);
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->memexpr_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-    link_to_parent(syn->memexpr_id);
+    syn->memexpr_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -1675,7 +1640,7 @@ syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, pars
 }
 
 // does not parse the postfix expression
-syntax_component_t* parse_partial_postfix_incdec_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid)
+syntax_component_t* parse_partial_postfix_incdec_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type, unsigned oid)
 {
     init_parse;
     if (!is_operator(token, oid))
@@ -1689,11 +1654,11 @@ syntax_component_t* parse_partial_postfix_incdec_expression(lexer_token_t** toke
     return syn;
 }
 
-syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     parse_status_code_t pe_stat = UNKNOWN_STATUS;
-    syntax_component_t* left = parse_primary_expression(&token, OPTIONAL, &pe_stat, tlu, next_depth);
+    syntax_component_t* left = parse_primary_expression(&token, OPTIONAL, &pe_stat, tlu, next_depth, parent);
     if (pe_stat == NOT_FOUND)
     {
         init_syn(SC_INITIALIZER_LIST_EXPRESSION);
@@ -1704,8 +1669,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
         }
         advance_token;
         parse_status_code_t tn_stat = UNKNOWN_STATUS;
-        syn->inlexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
-        link_to_parent(syn->inlexpr_type_name);
+        syn->inlexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth, parent);
         if (tn_stat == ABORT)
         {
             fail_status;
@@ -1726,16 +1690,11 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
         }
         advance_token;
         parse_status_code_t inlist_stat = UNKNOWN_STATUS;
-        syn->inlexpr_inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth);
-        link_to_parent(syn->inlexpr_inlist);
+        syn->inlexpr_inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth, parent, true);
         if (inlist_stat == ABORT)
         {
             fail_status;
             return NULL;
-        }
-        if (is_separator(token, ','))
-        {
-            advance_token;
         }
         if (!is_separator(token, '}'))
         {
@@ -1749,7 +1708,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
     for (;;)
     {
         parse_status_code_t subsexpr_stat = UNKNOWN_STATUS;
-        syntax_component_t* subsexpr = parse_partial_subscript_expression(&token, OPTIONAL, &subsexpr_stat, tlu, next_depth);
+        syntax_component_t* subsexpr = parse_partial_subscript_expression(&token, OPTIONAL, &subsexpr_stat, tlu, next_depth, parent);
         if (subsexpr_stat == FOUND)
         {
             link_to_specific_parent(left, subsexpr);
@@ -1758,7 +1717,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
             continue;
         }
         parse_status_code_t fcall_stat = UNKNOWN_STATUS;
-        syntax_component_t* fcall = parse_partial_function_call_expression(&token, OPTIONAL, &fcall_stat, tlu, next_depth);
+        syntax_component_t* fcall = parse_partial_function_call_expression(&token, OPTIONAL, &fcall_stat, tlu, next_depth, parent);
         if (fcall_stat == FOUND)
         {
             link_to_specific_parent(left, fcall);
@@ -1767,7 +1726,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
             continue;
         }
         parse_status_code_t mem_stat = UNKNOWN_STATUS;
-        syntax_component_t* mem = parse_partial_member_expression(&token, OPTIONAL, &mem_stat, tlu, next_depth, SC_MEMBER_EXPRESSION, '.');
+        syntax_component_t* mem = parse_partial_member_expression(&token, OPTIONAL, &mem_stat, tlu, next_depth, parent, SC_MEMBER_EXPRESSION, '.');
         if (mem_stat == FOUND)
         {
             link_to_specific_parent(left, mem);
@@ -1776,7 +1735,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
             continue;
         }
         parse_status_code_t dmem_stat = UNKNOWN_STATUS;
-        syntax_component_t* dmem = parse_partial_member_expression(&token, OPTIONAL, &dmem_stat, tlu, next_depth, SC_DEREFERENCE_MEMBER_EXPRESSION, '-' * '>');
+        syntax_component_t* dmem = parse_partial_member_expression(&token, OPTIONAL, &dmem_stat, tlu, next_depth, parent, SC_DEREFERENCE_MEMBER_EXPRESSION, '-' * '>');
         if (dmem_stat == FOUND)
         {
             link_to_specific_parent(left, dmem);
@@ -1785,7 +1744,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
             continue;
         }
         parse_status_code_t inc_stat = UNKNOWN_STATUS;
-        syntax_component_t* inc = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &inc_stat, tlu, next_depth, SC_POSTFIX_INCREMENT_EXPRESSION, '+' * '+');
+        syntax_component_t* inc = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &inc_stat, tlu, next_depth, parent, SC_POSTFIX_INCREMENT_EXPRESSION, '+' * '+');
         if (inc_stat == FOUND)
         {
             link_to_specific_parent(left, inc);
@@ -1794,7 +1753,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
             continue;
         }
         parse_status_code_t dec_stat = UNKNOWN_STATUS;
-        syntax_component_t* dec = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &dec_stat, tlu, next_depth, SC_POSTFIX_DECREMENT_EXPRESSION, '-' * '-');
+        syntax_component_t* dec = parse_partial_postfix_incdec_expression(&token, OPTIONAL, &dec_stat, tlu, next_depth, parent, SC_POSTFIX_DECREMENT_EXPRESSION, '-' * '-');
         if (dec_stat == FOUND)
         {
             link_to_specific_parent(left, dec);
@@ -1808,7 +1767,7 @@ syntax_component_t* parse_postfix_expression(lexer_token_t** tokens, parse_reque
     return left;
 }
 
-syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type, unsigned oid, parse_function_t subparser)
+syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type, unsigned oid, parse_function_t subparser)
 {
     init_parse;
     if (!is_operator(token, oid))
@@ -1819,8 +1778,7 @@ syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_re
     init_syn(type);
     advance_token;
     parse_status_code_t s_stat = UNKNOWN_STATUS;
-    syn->uexpr_operand = subparser(&token, EXPECTED, &s_stat, tlu, next_depth);
-    link_to_parent(syn->uexpr_operand);
+    syn->uexpr_operand = subparser(&token, EXPECTED, &s_stat, tlu, next_depth, syn);
     if (s_stat == ABORT)
     {
         fail_status;
@@ -1831,47 +1789,47 @@ syntax_component_t* parse_left_unary_expression(lexer_token_t** tokens, parse_re
     return syn;
 }
 
-syntax_component_t* parse_prefix_increment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_prefix_increment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PREFIX_INCREMENT_EXPRESSION, '+' * '+', parse_unary_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_PREFIX_INCREMENT_EXPRESSION, '+' * '+', parse_unary_expression);
 }
 
-syntax_component_t* parse_prefix_decrement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_prefix_decrement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PREFIX_DECREMENT_EXPRESSION, '-' * '-', parse_unary_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_PREFIX_DECREMENT_EXPRESSION, '-' * '-', parse_unary_expression);
 }
 
-syntax_component_t* parse_reference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_reference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_REFERENCE_EXPRESSION, '&', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_REFERENCE_EXPRESSION, '&', parse_cast_expression);
 }
 
-syntax_component_t* parse_dereference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_dereference_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_DEREFERENCE_EXPRESSION, '*', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_DEREFERENCE_EXPRESSION, '*', parse_cast_expression);
 }
 
-syntax_component_t* parse_plus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_plus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_PLUS_EXPRESSION, '+', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_PLUS_EXPRESSION, '+', parse_cast_expression);
 }
 
-syntax_component_t* parse_minus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_minus_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_MINUS_EXPRESSION, '-', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_MINUS_EXPRESSION, '-', parse_cast_expression);
 }
 
-syntax_component_t* parse_complement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_complement_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_COMPLEMENT_EXPRESSION, '~', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_COMPLEMENT_EXPRESSION, '~', parse_cast_expression);
 }
 
-syntax_component_t* parse_not_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_not_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_left_unary_expression(tokens, req, stat, tlu, depth, SC_NOT_EXPRESSION, '!', parse_cast_expression);
+    return parse_left_unary_expression(tokens, req, stat, tlu, depth, parent, SC_NOT_EXPRESSION, '!', parse_cast_expression);
 }
 
-syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_keyword(token, KEYWORD_SIZEOF))
@@ -1882,8 +1840,7 @@ syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_reques
     init_syn(SC_SIZEOF_EXPRESSION);
     advance_token;
     parse_status_code_t s_stat = UNKNOWN_STATUS;
-    syn->uexpr_operand = parse_unary_expression(&token, EXPECTED, &s_stat, tlu, next_depth);
-    link_to_parent(syn->uexpr_operand);
+    syn->uexpr_operand = parse_unary_expression(&token, EXPECTED, &s_stat, tlu, next_depth, syn);
     if (s_stat == ABORT)
     {
         fail_status;
@@ -1894,7 +1851,7 @@ syntax_component_t* parse_sizeof_expression(lexer_token_t** tokens, parse_reques
     return syn;
 }
 
-syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!is_keyword(token, KEYWORD_SIZEOF))
@@ -1911,8 +1868,7 @@ syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_r
     advance_token;
     init_syn(SC_SIZEOF_TYPE_EXPRESSION);
     parse_status_code_t tn_stat = UNKNOWN_STATUS;
-    syn->uexpr_operand = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
-    link_to_parent(syn->uexpr_operand);
+    syn->uexpr_operand = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth, syn);
     if (tn_stat == ABORT)
     {
         fail_status;
@@ -1929,7 +1885,7 @@ syntax_component_t* parse_sizeof_type_expression(lexer_token_t** tokens, parse_r
     return syn;
 }
 
-syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_expression(postfix, pfexpr)
@@ -1947,11 +1903,11 @@ syntax_component_t* parse_unary_expression(lexer_token_t** tokens, parse_request
     return NULL;
 }
 
-syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
-    syntax_component_t* uexpr = parse_unary_expression(&token, OPTIONAL, &uexpr_stat, tlu, next_depth);
+    syntax_component_t* uexpr = parse_unary_expression(&token, OPTIONAL, &uexpr_stat, tlu, next_depth, parent);
     if (uexpr_stat == FOUND)
     {
         update_status(FOUND);
@@ -1966,8 +1922,7 @@ syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_
     }
     advance_token;
     parse_status_code_t tn_stat = UNKNOWN_STATUS;
-    syn->caexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth);
-    link_to_parent(syn->caexpr_type_name);
+    syn->caexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth, syn);
     if (tn_stat == ABORT)
     {
         fail_status;
@@ -1982,8 +1937,7 @@ syntax_component_t* parse_cast_expression(lexer_token_t** tokens, parse_request_
     }
     advance_token;
     parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
-    syn->caexpr_operand = parse_cast_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth);
-    link_to_parent(syn->caexpr_operand);
+    syn->caexpr_operand = parse_cast_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, syn);
     if (cexpr_stat == ABORT)
     {
         fail_status;
@@ -2010,11 +1964,11 @@ logical-or-expression' :=
 // otype1-4: the syntax element types corresponding to the operators to handle here
 // op1-4: the operators corresponding to otype1-4
 #define define_basic_parse_expression(operator_name, suboperator_name, otype1, otype2, otype3, otype4, op1, op2, op3, op4) \
-    syntax_component_t* parse_##operator_name##_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth) \
+    syntax_component_t* parse_##operator_name##_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent) \
     { \
         init_parse; \
         parse_status_code_t lhs_stat = UNKNOWN_STATUS; \
-        syntax_component_t* lhs = parse_##suboperator_name##_expression(&token, EXPECTED, &lhs_stat, tlu, next_depth); \
+        syntax_component_t* lhs = parse_##suboperator_name##_expression(&token, EXPECTED, &lhs_stat, tlu, next_depth, parent); \
         if (lhs_stat == ABORT) \
         { \
             fail_status; \
@@ -2030,7 +1984,7 @@ logical-or-expression' :=
             unsigned int op = token->operator_id; \
             advance_token; \
             parse_status_code_t rhs_stat = UNKNOWN_STATUS; \
-            syntax_component_t* rhs = parse_##suboperator_name##_expression(&token, EXPECTED, &rhs_stat, tlu, next_depth); \
+            syntax_component_t* rhs = parse_##suboperator_name##_expression(&token, EXPECTED, &rhs_stat, tlu, next_depth, parent); \
             if (rhs_stat == ABORT) \
             { \
                 fail_status; \
@@ -2044,9 +1998,9 @@ logical-or-expression' :=
             if (op == (op4)) otype = (otype4); \
             init_syn(otype); \
             syn->bexpr_lhs = lhs; \
-            link_to_parent(syn->bexpr_lhs); \
+            link_to_specific_parent(syn->bexpr_lhs, syn); \
             syn->bexpr_rhs = rhs; \
-            link_to_parent(syn->bexpr_rhs); \
+            link_to_specific_parent(syn->bexpr_rhs, syn); \
             lhs = syn; \
         } \
         update_status(FOUND); \
@@ -2114,14 +2068,13 @@ define_basic_parse_expression(
     '|' * '|', 0, 0, 0
 )
 
-syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_type_t type)
+syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type)
 {
     init_parse;
     init_syn(type);
 
     parse_status_code_t loexpr_stat = UNKNOWN_STATUS;
-    syn->cexpr_condition = parse_logical_or_expression(&token, EXPECTED, &loexpr_stat, tlu, next_depth);
-    link_to_parent(syn->cexpr_condition);
+    syn->cexpr_condition = parse_logical_or_expression(&token, EXPECTED, &loexpr_stat, tlu, next_depth, syn);
     if (loexpr_stat == ABORT)
     {
         fail_status;
@@ -2132,8 +2085,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
     {
         advance_token;
         parse_status_code_t if_stat = UNKNOWN_STATUS;
-        syn->cexpr_if = parse_expression(&token, EXPECTED, &if_stat, tlu, next_depth);
-        link_to_parent(syn->cexpr_if);
+        syn->cexpr_if = parse_expression(&token, EXPECTED, &if_stat, tlu, next_depth, syn);
         if (if_stat == ABORT)
         {
             fail_status;
@@ -2148,8 +2100,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
         }
         advance_token;
         parse_status_code_t else_stat = UNKNOWN_STATUS;
-        syn->cexpr_else = parse_conditional_expression(&token, EXPECTED, &else_stat, tlu, next_depth, SC_CONDITIONAL_EXPRESSION);
-        link_to_parent(syn->cexpr_else);
+        syn->cexpr_else = parse_conditional_expression(&token, EXPECTED, &else_stat, tlu, next_depth, syn, SC_CONDITIONAL_EXPRESSION);
         if (else_stat == ABORT)
         {
             fail_status;
@@ -2160,6 +2111,7 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
     else
     {
         syntax_component_t* loexpr = syn->cexpr_condition;
+        link_to_specific_parent(loexpr, parent);
         syn->cexpr_condition = NULL;
         free_syntax(syn, tlu);
         syn = loexpr;
@@ -2168,21 +2120,12 @@ syntax_component_t* parse_conditional_expression(lexer_token_t** tokens, parse_r
     return syn;
 }
 
-syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_actual_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_UNKNOWN);
-    parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
-    syntax_component_t* cexpr = parse_conditional_expression(&token, OPTIONAL, &cexpr_stat, tlu, next_depth, SC_CONDITIONAL_EXPRESSION);
-    if (cexpr_stat == FOUND)
-    {
-        free_syntax(syn, tlu);
-        update_status(FOUND);
-        return cexpr;
-    }
     parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
-    syn->bexpr_lhs = parse_unary_expression(&token, EXPECTED, &uexpr_stat, tlu, next_depth);
-    link_to_parent(syn->bexpr_lhs);
+    syn->bexpr_lhs = parse_unary_expression(&token, EXPECTED, &uexpr_stat, tlu, next_depth, parent);
     if (uexpr_stat == ABORT)
     {
         fail_status;
@@ -2217,8 +2160,7 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
     }
     advance_token;
     parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
-    syn->bexpr_rhs = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth);
-    link_to_parent(syn->bexpr_rhs);
+    syn->bexpr_rhs = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth, syn);
     if (aexpr_stat == ABORT)
     {
         fail_status;
@@ -2229,7 +2171,16 @@ syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_re
     return syn;
 }
 
-syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_assignment_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
+{
+    init_parse;
+    try_expression(actual_assignment, aexo);
+    try_parse(conditional_expression, cexpr, SC_CONDITIONAL_EXPRESSION);
+    fail_parse(token, "expected expression");
+    return NULL;
+}
+
+syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_EXPRESSION);
@@ -2237,8 +2188,7 @@ syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_
     for (;;)
     {
         parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
-        syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth);
-        link_to_parent(aexpr);
+        syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth, syn);
         if (aexpr_stat == ABORT)
         {
             fail_status;
@@ -2258,20 +2208,19 @@ syntax_component_t* parse_expression(lexer_token_t** tokens, parse_request_code_
 
 #define try_statement(type, name) \
     parse_status_code_t name##_stat = UNKNOWN_STATUS; \
-    syntax_component_t* name = parse_##type##_statement(&token, OPTIONAL, &name##_stat, tlu, next_depth); \
+    syntax_component_t* name = parse_##type##_statement(&token, OPTIONAL, &name##_stat, tlu, next_depth, parent); \
     if (name##_stat == FOUND) \
     { \
         update_status(FOUND); \
         return name; \
     }
 
-syntax_component_t* parse_expression_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_expression_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_EXPRESSION_STATEMENT);
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->estmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->estmt_expression);
+    syn->estmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth, syn);
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for expression statement");
@@ -2283,7 +2232,7 @@ syntax_component_t* parse_expression_statement(lexer_token_t** tokens, parse_req
     return syn;
 }
 
-syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_GOTO_STATEMENT);
@@ -2295,8 +2244,7 @@ syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_c
     }
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-    link_to_parent(id);
+    syn->gtstmt_label_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -2314,7 +2262,7 @@ syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_c
     return syn;
 }
 
-syntax_component_t* parse_continue_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_continue_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_CONTINUE_STATEMENT);
@@ -2336,7 +2284,7 @@ syntax_component_t* parse_continue_statement(lexer_token_t** tokens, parse_reque
     return syn;
 }
 
-syntax_component_t* parse_break_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_break_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_BREAK_STATEMENT);
@@ -2358,7 +2306,7 @@ syntax_component_t* parse_break_statement(lexer_token_t** tokens, parse_request_
     return syn;
 }
 
-syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_RETURN_STATEMENT);
@@ -2370,8 +2318,7 @@ syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->retstmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->retstmt_expression);
+    syn->retstmt_expression = parse_expression(&token, OPTIONAL, &expr_stat, tlu, next_depth, syn);
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon for return statement");
@@ -2383,7 +2330,7 @@ syntax_component_t* parse_return_statement(lexer_token_t** tokens, parse_request
     return syn;
 }
 
-syntax_component_t* parse_jump_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_jump_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_statement(goto, gstmt)
@@ -2394,7 +2341,7 @@ syntax_component_t* parse_jump_statement(lexer_token_t** tokens, parse_request_c
     return NULL;
 }
 
-syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_FOR_STATEMENT);
@@ -2413,13 +2360,11 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     }
     advance_token;
     parse_status_code_t init_stat = UNKNOWN_STATUS;
-    syn->forstmt_init = parse_declaration(&token, OPTIONAL, &init_stat, tlu, next_depth);
-    link_to_parent(syn->forstmt_init);
+    syn->forstmt_init = parse_declaration(&token, OPTIONAL, &init_stat, tlu, next_depth, syn);
     if (init_stat == NOT_FOUND)
     {
         init_stat = UNKNOWN_STATUS;
-        syn->forstmt_init = parse_expression(&token, OPTIONAL, &init_stat, tlu, next_depth);
-        link_to_parent(syn->forstmt_init);
+        syn->forstmt_init = parse_expression(&token, OPTIONAL, &init_stat, tlu, next_depth, syn);
         if (!is_separator(token, ';'))
         {
             fail_parse(token, "expected semicolon after initializing clause in for statement");
@@ -2429,8 +2374,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
         advance_token;
     }
     parse_status_code_t cond_stat = UNKNOWN_STATUS;
-    syn->forstmt_condition = parse_expression(&token, OPTIONAL, &cond_stat, tlu, next_depth);
-    link_to_parent(syn->forstmt_condition);
+    syn->forstmt_condition = parse_expression(&token, OPTIONAL, &cond_stat, tlu, next_depth, syn);
     if (!is_separator(token, ';'))
     {
         fail_parse(token, "expected semicolon after condition expression in for statement");
@@ -2439,8 +2383,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     }
     advance_token;
     parse_status_code_t post_stat = UNKNOWN_STATUS;
-    syn->forstmt_post = parse_expression(&token, OPTIONAL, &post_stat, tlu, next_depth);
-    link_to_parent(syn->forstmt_post);
+    syn->forstmt_post = parse_expression(&token, OPTIONAL, &post_stat, tlu, next_depth, syn);
     if (!is_separator(token, ')'))
     {
         fail_parse(token, "expected right parenthesis for for statement header");
@@ -2449,8 +2392,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     }
     advance_token;
     parse_status_code_t body_stat = UNKNOWN_STATUS;
-    syn->forstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
-    link_to_parent(syn->forstmt_body);
+    syn->forstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth, syn);
     if (body_stat == ABORT)
     {
         fail_status;
@@ -2461,7 +2403,7 @@ syntax_component_t* parse_for_statement(lexer_token_t** tokens, parse_request_co
     return syn;
 }
 
-syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_DO_STATEMENT);
@@ -2473,8 +2415,7 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     }
     advance_token;
     parse_status_code_t body_stat = UNKNOWN_STATUS;
-    syn->dostmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
-    link_to_parent(syn->dostmt_body);
+    syn->dostmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth, syn);
     if (body_stat == ABORT)
     {
         fail_status;
@@ -2496,8 +2437,7 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->dostmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->dostmt_condition);
+    syn->dostmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -2522,7 +2462,7 @@ syntax_component_t* parse_do_statement(lexer_token_t** tokens, parse_request_cod
     return syn;
 }
 
-syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_WHILE_STATEMENT);
@@ -2541,8 +2481,7 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->whstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->whstmt_condition);
+    syn->whstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -2557,8 +2496,7 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     }
     advance_token;
     parse_status_code_t body_stat = UNKNOWN_STATUS;
-    syn->whstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
-    link_to_parent(syn->whstmt_body);
+    syn->whstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth, syn);
     if (body_stat == ABORT)
     {
         fail_status;
@@ -2569,7 +2507,7 @@ syntax_component_t* parse_while_statement(lexer_token_t** tokens, parse_request_
     return syn;
 }
 
-syntax_component_t* parse_iteration_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_iteration_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_statement(for, fstmt)
@@ -2579,7 +2517,7 @@ syntax_component_t* parse_iteration_statement(lexer_token_t** tokens, parse_requ
     return NULL;
 }
 
-syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_IF_STATEMENT);
@@ -2598,8 +2536,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->ifstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->ifstmt_condition);
+    syn->ifstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -2614,8 +2551,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     }
     advance_token;
     parse_status_code_t body_stat = UNKNOWN_STATUS;
-    syn->ifstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
-    link_to_parent(syn->ifstmt_body);
+    syn->ifstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth, syn);
     if (body_stat == ABORT)
     {
         fail_status;
@@ -2626,8 +2562,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     {
         advance_token;
         parse_status_code_t else_stat = UNKNOWN_STATUS;
-        syn->ifstmt_else = parse_statement(&token, EXPECTED, &else_stat, tlu, next_depth);
-        link_to_parent(syn->ifstmt_else);
+        syn->ifstmt_else = parse_statement(&token, EXPECTED, &else_stat, tlu, next_depth, syn);
         if (else_stat == ABORT)
         {
             fail_status;
@@ -2639,7 +2574,7 @@ syntax_component_t* parse_if_statement(lexer_token_t** tokens, parse_request_cod
     return syn;
 }
 
-syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_SWITCH_STATEMENT);
@@ -2658,8 +2593,7 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     }
     advance_token;
     parse_status_code_t expr_stat = UNKNOWN_STATUS;
-    syn->swstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth);
-    link_to_parent(syn->swstmt_condition);
+    syn->swstmt_condition = parse_expression(&token, EXPECTED, &expr_stat, tlu, next_depth, syn);
     if (expr_stat == ABORT)
     {
         fail_status;
@@ -2674,8 +2608,7 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     }
     advance_token;
     parse_status_code_t body_stat = UNKNOWN_STATUS;
-    syn->swstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth);
-    link_to_parent(syn->swstmt_body);
+    syn->swstmt_body = parse_statement(&token, EXPECTED, &body_stat, tlu, next_depth, syn);
     if (body_stat == ABORT)
     {
         fail_status;
@@ -2686,7 +2619,7 @@ syntax_component_t* parse_switch_statement(lexer_token_t** tokens, parse_request
     return syn;
 }
 
-syntax_component_t* parse_selection_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_selection_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_statement(if, istmt);
@@ -2695,7 +2628,7 @@ syntax_component_t* parse_selection_statement(lexer_token_t** tokens, parse_requ
     return NULL;
 }
 
-syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_LABELED_STATEMENT);
@@ -2703,8 +2636,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     {
         advance_token;
         parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
-        syn->lstmt_case_expression = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, SC_CONSTANT_EXPRESSION);
-        link_to_parent(syn->lstmt_case_expression);
+        syn->lstmt_case_expression = parse_conditional_expression(&token, EXPECTED, &cexpr_stat, tlu, next_depth, syn, SC_CONSTANT_EXPRESSION);
         if (cexpr_stat == ABORT)
         {
             fail_status;
@@ -2719,8 +2651,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     else
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        syn->lstmt_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, SC_IDENTIFIER);
-        link_to_parent(syn->lstmt_id);
+        syn->lstmt_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
         if (id_stat == ABORT)
         {
             fail_status;
@@ -2739,8 +2670,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     }
     advance_token;
     parse_status_code_t stmt_stat = UNKNOWN_STATUS;
-    syn->lstmt_stmt = parse_statement(&token, EXPECTED, &stmt_stat, tlu, next_depth);
-    link_to_parent(syn->lstmt_stmt);
+    syn->lstmt_stmt = parse_statement(&token, EXPECTED, &stmt_stat, tlu, next_depth, syn);
     if (stmt_stat == ABORT)
     {
         fail_status;
@@ -2751,12 +2681,12 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     return syn;
 }
 
-syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     try_statement(labeled, lstmt)
-    try_statement(compound, cstmt)
     try_statement(expression, exstmt)
+    try_statement(compound, cstmt)
     try_statement(selection, sstmt)
     try_statement(iteration, istmt)
     try_statement(jump, jstmt)
@@ -2766,7 +2696,7 @@ syntax_component_t* parse_statement(lexer_token_t** tokens, parse_request_code_t
 
 #undef try_statement
 
-syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_COMPOUND_STATEMENT);
@@ -2781,16 +2711,14 @@ syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_reque
     for (;;)
     {
         parse_status_code_t decl_stat = UNKNOWN_STATUS;
-        syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth);
-        link_to_parent(decl);
+        syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth, syn);
         if (decl_stat == FOUND)
         {
             vector_add(syn->cstmt_block_items, decl);
             continue;
         }
         parse_status_code_t stmt_stat = UNKNOWN_STATUS;
-        syntax_component_t* stmt = parse_statement(&token, OPTIONAL, &stmt_stat, tlu, next_depth);
-        link_to_parent(stmt);
+        syntax_component_t* stmt = parse_statement(&token, OPTIONAL, &stmt_stat, tlu, next_depth, syn);
         if (stmt_stat == FOUND)
         {
             vector_add(syn->cstmt_block_items, stmt);
@@ -2813,12 +2741,12 @@ syntax_component_t* parse_compound_statement(lexer_token_t** tokens, parse_reque
 // update: i don't think this matters ^
 
 // 6.9.1
-syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_FUNCTION_DEFINITION);
     parse_status_code_t declspecs_stat = UNKNOWN_STATUS;
-    syn->fdef_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspecs_stat, tlu, next_depth);
+    syn->fdef_declaration_specifiers = parse_declaration_specifiers(&token, EXPECTED, &declspecs_stat, tlu, next_depth, syn);
     link_vector_to_parent(syn->fdef_declaration_specifiers);
     if (declspecs_stat == ABORT)
     {
@@ -2827,8 +2755,7 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
         return NULL;
     }
     parse_status_code_t declr_stat = UNKNOWN_STATUS;
-    syn->fdef_declarator = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth);
-    link_to_parent(syn->fdef_declarator);
+    syn->fdef_declarator = parse_declarator(&token, EXPECTED, &declr_stat, tlu, next_depth, syn);
     if (declr_stat == ABORT)
     {
         fail_status;
@@ -2839,15 +2766,13 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
     for (;;)
     {
         parse_status_code_t decl_stat = UNKNOWN_STATUS;
-        syntax_component_t* knr_decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth);
-        link_to_parent(knr_decl);
+        syntax_component_t* knr_decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth, syn);
         if (decl_stat == NOT_FOUND)
             break;
         vector_add(syn->fdef_knr_declarations, knr_decl);
     }
     parse_status_code_t cstmt_stat = UNKNOWN_STATUS;
-    syn->fdef_body = parse_compound_statement(&token, EXPECTED, &cstmt_stat, tlu, next_depth);
-    link_to_parent(syn->fdef_body);
+    syn->fdef_body = parse_compound_statement(&token, EXPECTED, &cstmt_stat, tlu, next_depth, syn);
     if (cstmt_stat == ABORT)
     {
         fail_status;
@@ -2861,7 +2786,7 @@ syntax_component_t* parse_function_definition(lexer_token_t** tokens, parse_requ
 // 6.9
 // to be resolved: 6.9 (3), 6.9 (4), 6.9 (5)
 // exception: returns translation unit object even on fail
-syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth)
+syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     init_syn(SC_TRANSLATION_UNIT);
@@ -2872,16 +2797,14 @@ syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request
     while (token)
     {
         parse_status_code_t funcdef_stat = UNKNOWN_STATUS;
-        syntax_component_t* funcdef = parse_function_definition(&token, OPTIONAL, &funcdef_stat, tlu, next_depth);
-        link_to_parent(funcdef);
+        syntax_component_t* funcdef = parse_function_definition(&token, OPTIONAL, &funcdef_stat, tlu, next_depth, syn);
         if (funcdef_stat == FOUND)
         {
             vector_add(syn->tlu_external_declarations, funcdef);
             continue;
         }
         parse_status_code_t decl_stat = UNKNOWN_STATUS;
-        syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth);
-        link_to_parent(decl);
+        syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth, syn);
         if (decl_stat == FOUND)
         {
             if (syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_AUTO) ||
@@ -2908,7 +2831,7 @@ syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request
 syntax_component_t* parse(lexer_token_t* tokens)
 {
     parse_status_code_t tlu_stat = UNKNOWN_STATUS;
-    syntax_component_t* tlu = parse_translation_unit(&tokens, EXPECTED, &tlu_stat, NULL, 1);
+    syntax_component_t* tlu = parse_translation_unit(&tokens, EXPECTED, &tlu_stat, NULL, 1, NULL);
     // if it failed, find the deepest error (i.e., the one to give the best description of what went wrong) and print it
     if (tlu_stat == ABORT)
     {

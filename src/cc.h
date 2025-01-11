@@ -691,7 +691,7 @@ void set_print(set_t* s, void (*printer)(void*));
 
 /* const.c */
 extern const char* KEYWORDS[37];
-extern const char* SYNTAX_COMPONENT_NAMES[16];
+extern const char* SYNTAX_COMPONENT_NAMES[95];
 extern const char* SPECIFIER_QUALIFIER_NAMES[9];
 extern const char* ARITHMETIC_TYPE_NAMES[21];
 extern unsigned ARITHMETIC_TYPE_SIZES[21];
