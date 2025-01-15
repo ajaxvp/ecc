@@ -136,6 +136,38 @@ const char* SYNTAX_COMPONENT_NAMES[95] = {
     "SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION"
 };
 
+const char* C_TYPE_CLASS_NAMES[29] = {
+    "_Bool",
+    "char",
+    "signed char",
+    "short int",
+    "int",
+    "long int",
+    "long long int",
+    "unsigned char",
+    "unsigned short int",
+    "unsigned int",
+    "unsigned long int",
+    "unsigned long long int",
+    "float",
+    "double",
+    "long double",
+    "float _Complex",
+    "double _Complex",
+    "long double _Complex",
+    "float _Imaginary",
+    "double _Imaginary",
+    "long double _Imaginary",
+    "enum",
+    "void",
+    "array",
+    "struct",
+    "union",
+    "function",
+    "pointer",
+    "error"
+};
+
 const char* SPECIFIER_QUALIFIER_NAMES[9] = {
     "VOID",
     "ARITHMETIC_TYPE",

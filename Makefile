@@ -1,5 +1,5 @@
 EXE=cc
-OBJS=util.o buffer.o const.o emit.o lex.o log.o parse.o set.o symbol.o syntax.o test.o vector.o
+OBJS=util.o type.o buffer.o const.o lex.o log.o traverse.o analyze.o parse.o set.o symbol.o syntax.o test.o vector.o
 BUILD=$(addprefix build/, $(OBJS))
 
 default: buildfolder $(EXE)

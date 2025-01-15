@@ -40,14 +40,51 @@ void* vector_get(vector_t* v, unsigned index)
     ];
 }
 
-bool vector_contains(vector_t* v, void* el, int (*c)(void*, void*))
+int vector_contains(vector_t* v, void* el, int (*c)(void*, void*))
 {
     for (unsigned i = 0; i < v->size; ++i)
     {
         if (!c(v->data[i], el))
-            return true;
+            return i;
     }
-    return false;
+    return -1;
+}
+
+vector_t* vector_deep_copy(vector_t* v, void* (*copy_member)(void*))
+{
+    if (!v) return NULL;
+    vector_t* nv = calloc(1, sizeof *nv);
+    nv->size = v->size;
+    nv->capacity = v->capacity;
+    nv->data = calloc(v->capacity, sizeof(void*));
+    for (unsigned i = 0; i < v->size; ++i)
+        nv->data[i] = copy_member(v->data[i]);
+    return nv;
+}
+
+vector_t* vector_copy(vector_t* v)
+{
+    if (!v) return NULL;
+    vector_t* nv = calloc(1, sizeof *nv);
+    nv->size = v->size;
+    nv->capacity = v->capacity;
+    nv->data = calloc(v->capacity, sizeof(void*));
+    memcpy(nv->data, v->data, v->capacity * sizeof(void*));
+    return nv;
+}
+
+bool vector_equals(vector_t* v1, vector_t* v2, bool (*equals)(void*, void*))
+{
+    if (!v1 && !v2)
+        return true;
+    if (!v1 || !v2)
+        return false;
+    if (v1->size != v2->size)
+        return false;
+    for (unsigned i = 0; i < v1->size; ++i)
+        if (!equals(v1->data[i], v2->data[i]))
+            return false;
+    return true;
 }
 
 void vector_delete(vector_t* v)
@@ -55,4 +92,13 @@ void vector_delete(vector_t* v)
     if (!v) return;
     free(v->data);
     free(v);
+}
+
+void vector_deep_delete(vector_t* v, void (*deleter)(void*))
+{
+    if (!v) return;
+    for (unsigned i = 0; i < v->size; ++i)
+        if (v->data[i])
+            deleter(v->data[i]);
+    vector_delete(v);
 }

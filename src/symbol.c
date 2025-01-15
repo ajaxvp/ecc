@@ -107,13 +107,48 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
         printer("null");
         return;
     }
-    printer("symbol { ");
+    printer("symbol { type: ");
+    if (sy->type)
+        type_humanized_print(sy->type, printer);
+    else
+        printer("(untyped)");
+    printer(", scope: ");
+    syntax_component_t* scope = symbol_get_scope(sy);
+    if (scope)
+    {
+        switch (scope->type)
+        {
+            case SC_TRANSLATION_UNIT:
+                printer("file");
+                break;
+            case SC_FUNCTION_DEFINITION:
+                printer("function");
+                break;
+            case SC_COMPOUND_STATEMENT:
+            case SC_IF_STATEMENT:
+            case SC_WHILE_STATEMENT:
+            case SC_FOR_STATEMENT:
+            case SC_DO_STATEMENT:
+            case SC_SWITCH_STATEMENT:
+                printer("block");
+                break;
+            case SC_FUNCTION_DECLARATOR:
+                printer("function prototype");
+                break;
+            default:
+                printer("(bad)");
+                break;
+        }
+    }
+    else
+        printer("(unknown)");
     printer(" }");
 }
 
 void symbol_delete(symbol_t* sy)
 {
     if (!sy) return;
+    type_delete(sy->type);
     free(sy);
 }
 
@@ -210,13 +245,22 @@ symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id)
 }
 
 // given a contextualized id (syntax element id), find the symbol, NULL if cannot find
-symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id)
+// functions just as symbol_table_get_syn_id for declaring identifiers
+// also takes a namespace 'ns' as an argument for searching only in a given namespace, NULL will ignore namespaces entirely
+symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns)
 {
     symbol_t* sylist = symbol_table_get_all(t, id->id);
     for (; sylist; sylist = sylist->next)
     {
-        if (symbol_in_scope(sylist, id))
+        if (sylist->declarer == id)
             return sylist;
+        c_namespace_t* sns = syntax_get_namespace(sylist->declarer);
+        if (symbol_in_scope(sylist, id) && (!ns || (ns->class == sns->class && type_is_compatible(ns->struct_union_type, sns->struct_union_type))))
+        {
+            free(sns);
+            return sylist;
+        }
+        free(sns);
     }
     return NULL;
 }
@@ -274,7 +318,7 @@ void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...))
             {
                 if (sy != t->value[i])
                     printer(", ");
-                symbol_print(t->value[i], printer);
+                symbol_print(sy, printer);
             }
             printer("]\n");
         }

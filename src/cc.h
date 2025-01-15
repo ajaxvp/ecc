@@ -9,8 +9,22 @@
 #define terminate(fmt, ...) { errorf(fmt, ## __VA_ARGS__); exit(1); }
 #define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
 
+// these macros are used in circumstances where an error was produced by something that wasn't expected to error.
+// for instance, if there was a mistake with an earlier stage like parsing, this might get thrown.
+#define report_return { printf("bad (%d)\n", __LINE__); return; }
+#define report_continue { printf("bad (%d)\n", __LINE__); continue; }
+#define report_return_value(x) { printf("bad (%d)\n", __LINE__); return (x); }
+
 #define VECTOR_FOR(type, var, vec) type var = vector_get((vec), 0); for (unsigned i = 0; i < vec->size; ++i, var = vector_get((vec), i))
 #define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var, tlu); vector_delete((vec)); }
+#define SYMBOL_TABLE_FOR_ENTRIES_START(KEY_VAR, VALUE_VAR, CONTAINER) \
+    for (unsigned i = 0; i < (CONTAINER)->capacity; ++i) \
+    { \
+        if (!(CONTAINER)->key[i]) continue; \
+        char* KEY_VAR = (CONTAINER)->key[i]; \
+        symbol_t* VALUE_VAR = (CONTAINER)->value[i]; \
+
+#define SYMBOL_TABLE_FOR_ENTRIES_END }
 
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
@@ -61,6 +75,9 @@
 #define KEYWORD_IMAGINARY 36
 
 typedef struct symbol_table_t symbol_table_t;
+typedef struct syntax_traverser syntax_traverser_t;
+typedef struct analysis_error analysis_error_t;
+typedef struct syntax_component_t syntax_component_t;
 
 typedef struct lexer_token_t
 {
@@ -90,6 +107,128 @@ typedef struct vector_t
     unsigned size;
 } vector_t;
 
+typedef enum constant_expression_type
+{
+    CE_ANY,
+    CE_INTEGER,
+    CE_ARITHMETIC,
+    CE_ADDRESS
+} constant_expression_type_t;
+
+typedef enum c_type_class
+{
+    CTC_BOOL,
+    CTC_CHAR,
+    CTC_SIGNED_CHAR,
+    CTC_SHORT_INT,
+    CTC_INT,
+    CTC_LONG_INT,
+    CTC_LONG_LONG_INT,
+    CTC_UNSIGNED_CHAR,
+    CTC_UNSIGNED_SHORT_INT,
+    CTC_UNSIGNED_INT,
+    CTC_UNSIGNED_LONG_INT,
+    CTC_UNSIGNED_LONG_LONG_INT,
+    CTC_FLOAT,
+    CTC_DOUBLE,
+    CTC_LONG_DOUBLE,
+    CTC_FLOAT_COMPLEX,
+    CTC_DOUBLE_COMPLEX,
+    CTC_LONG_DOUBLE_COMPLEX,
+    CTC_FLOAT_IMAGINARY,
+    CTC_DOUBLE_IMAGINARY,
+    CTC_LONG_DOUBLE_IMAGINARY,
+    CTC_ENUMERATED,
+    CTC_VOID,
+    CTC_ARRAY,
+    CTC_STRUCTURE,
+    CTC_UNION,
+    CTC_FUNCTION,
+    CTC_POINTER,
+    CTC_ERROR
+} c_type_class_t;
+
+#define BOOL_MAX (unsigned char) 0xff
+#define CHAR_MAX (signed char) 0x7f
+#define SIGNED_CHAR_MAX (signed char) 0x7f
+#define UNSIGNED_CHAR_MAX (unsigned char) 0xff
+#define SHORT_INT_MAX (short) 0x7fff
+#define UNSIGNED_SHORT_INT_MAX (unsigned short) 0xffff
+#define INT_MAX 0x7fffffff
+#define UNSIGNED_INT_MAX 0xffffffffU
+#define LONG_INT_MAX 0x7fffffffffffffffL
+#define UNSIGNED_LONG_INT_MAX 0xffffffffffffffffUL
+#define LONG_LONG_INT_MAX 0x7fffffffffffffffLL
+#define UNSIGNED_LONG_LONG_INT_MAX 0xffffffffffffffffULL
+
+#define C_TYPE_SIZE_T CTC_UNSIGNED_LONG_INT
+#define C_TYPE_PTRSIZE_T CTC_LONG_INT
+
+typedef struct c_type c_type_t;
+
+typedef struct c_type
+{
+    c_type_class_t class;
+    unsigned char qualifiers;
+    c_type_t* derived_from;
+    union
+    {
+        struct
+        {
+            syntax_component_t* length_expression;
+            bool unspecified_size;
+        } array;
+        struct
+        {
+            char* name;
+            vector_t* member_types; // <c_type_t*>
+            vector_t* member_names; // <char*>
+            vector_t* member_bitfields; // <syntax_component_t*>
+        } struct_union;
+        struct
+        {
+            vector_t* param_types; // <c_type_t*>
+            bool variadic;
+        } function;
+        struct
+        {
+            char* name;
+            vector_t* constant_names; // <char*>
+            vector_t* constant_expressions; // <syntax_component_t*>
+        } enumerated;
+    };
+} c_type_t;
+
+typedef enum storage_duration
+{
+    AUTOMATIC,
+    STATIC,
+    ALLOCATED
+} storage_duration_t;
+
+typedef struct c_object
+{
+    c_type_t* effective_type;
+    symbol_t* sy;
+} c_object_t;
+
+typedef enum c_namespace_class
+{
+    NSC_LABEL,
+    NSC_STRUCT,
+    NSC_UNION,
+    NSC_ENUM,
+    NSC_STRUCT_MEMBER,
+    NSC_UNION_MEMBER,
+    NSC_ORDINARY
+} c_namespace_class_t;
+
+typedef struct c_namespace
+{
+    c_namespace_class_t class;
+    c_type_t* struct_union_type;
+} c_namespace_t;
+
 typedef enum storage_class_specifier
 {
     SCS_TYPEDEF = 0,
@@ -112,7 +251,9 @@ typedef enum basic_type_specifier
     BTS_UNSIGNED,
     BTS_BOOL,
     BTS_COMPLEX,
-    BTS_IMAGINARY
+    BTS_IMAGINARY,
+
+    BTS_NO_ELEMENTS
 } basic_type_specifier_t;
 
 typedef enum type_qualifier
@@ -121,6 +262,10 @@ typedef enum type_qualifier
     TQ_RESTRICT,
     TQ_VOLATILE
 } type_qualifier_t;
+
+#define TQ_B_CONST (1 << TQ_CONST)
+#define TQ_B_RESTRICT (1 << TQ_RESTRICT)
+#define TQ_B_VOLATILE (1 << TQ_VOLATILE)
 
 typedef enum function_specifier
 {
@@ -230,7 +375,9 @@ typedef enum syntax_component_type_t
     SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION,
     SC_BITWISE_AND_ASSIGNMENT_EXPRESSION,
     SC_BITWISE_OR_ASSIGNMENT_EXPRESSION,
-    SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION
+    SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION,
+
+    SC_NO_ELEMENTS
 } syntax_component_type_t;
 
 // SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
@@ -251,6 +398,7 @@ typedef enum syntax_component_type_t
 typedef struct syntax_component_t
 {
     syntax_component_type_t type;
+    c_type_t* ctype;
     unsigned row, col;
     struct syntax_component_t* parent;
     union
@@ -340,17 +488,12 @@ typedef struct syntax_component_t
         // SC_TYPEDEF_NAME
         char* id;
 
-        // SC_FLOATING_CONSTANT - floc
-        long double floc;
-
-        // SC_INTEGER_CONSTANT - intc
-        long long intc;
-
-        // SC_CHARACTER_CONSTANT - chrc
-        int chrc;
-
-        // SC_STRING_LITERAL - strl
-        char* strl;
+        // con (general constant)
+        // SC_STRING_LITERAL
+        // SC_FLOATING_CONSTANT
+        // SC_INTEGER_CONSTANT
+        // SC_CHARACTER_CONSTANT
+        char* con;
 
         // SC_DECLARATOR - declr
         struct
@@ -628,6 +771,7 @@ tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
 typedef struct symbol_t
 {
     syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
+    c_type_t* type;
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
 } symbol_t;
 
@@ -639,12 +783,26 @@ typedef struct symbol_table_t
     unsigned capacity;
 } symbol_table_t;
 
-typedef struct emission_details_t
+typedef struct analysis_error
 {
-    FILE* out;
-    syntax_component_t* unit;
-    symbol_table_t* symbols;
-} emission_details_t;
+    unsigned row, col;
+    char* message;
+    bool warning;
+    analysis_error_t* next;
+} analysis_error_t;
+
+typedef void (*traversal_function)(syntax_traverser_t* trav, syntax_component_t* syn);
+
+typedef struct syntax_traverser
+{
+    syntax_component_t* tlu;
+
+    traversal_function default_before;
+    traversal_function default_after;
+
+    traversal_function before[SC_NO_ELEMENTS];
+    traversal_function after[SC_NO_ELEMENTS];
+} syntax_traverser_t;
 
 typedef struct binary_node_t
 {
@@ -679,8 +837,12 @@ char* buffer_export(buffer_t* b);
 vector_t* vector_init(void);
 vector_t* vector_add(vector_t* v, void* el);
 void* vector_get(vector_t* v, unsigned index);
-bool vector_contains(vector_t* v, void* el, int (*c)(void*, void*));
+int vector_contains(vector_t* v, void* el, int (*c)(void*, void*));
+vector_t* vector_copy(vector_t* v);
+vector_t* vector_deep_copy(vector_t* v, void* (*copy_member)(void*));
+bool vector_equals(vector_t* v1, vector_t* v2, bool (*equals)(void*, void*));
 void vector_delete(vector_t* v);
+void vector_deep_delete(vector_t* v, void (*deleter)(void*));
 
 /* set.c */
 set_t* set_init(int (*comparator)(void*, void*));
@@ -713,6 +875,7 @@ extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];
+extern const char* C_TYPE_CLASS_NAMES[28];
 
 /* lex.c */
 lexer_token_t* lex(FILE* file);
@@ -723,6 +886,20 @@ bool is_unary_operator_token(lexer_token_t* tok);
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);
+
+/* traverse.c */
+syntax_traverser_t* traverse_init(syntax_component_t* tlu, size_t size);
+void traverse_delete(syntax_traverser_t* trav);
+void traverse(syntax_traverser_t* trav);
+
+/* analyze.c */
+analysis_error_t* analyze(syntax_component_t* tlu);
+analysis_error_t* error_init(syntax_component_t* syn, bool warning, char* fmt, ...);
+analysis_error_t* error_list_add(analysis_error_t* errors, analysis_error_t* err);
+void error_delete(analysis_error_t* err);
+void error_delete_all(analysis_error_t* errors);
+size_t error_list_size(analysis_error_t* errors, bool include_warnings);
+void dump_errors(analysis_error_t* errors);
 
 /* emit.c */
 bool emit(syntax_component_t* unit, FILE* out);
@@ -736,7 +913,7 @@ symbol_table_t* symbol_table_init(void);
 symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id);
-symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id);
+symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns);
 symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
@@ -746,17 +923,71 @@ syntax_component_t* find_declarator_identifier(syntax_component_t* declarator);
 unsigned count_specifiers(syntax_component_t* declaration, unsigned type);
 unsigned get_declaration_size(syntax_component_t* s);
 bool syntax_is_declarator_type(syntax_component_type_t type);
+bool syntax_is_expression_type(syntax_component_type_t type);
+bool syntax_is_abstract_declarator_type(syntax_component_type_t type);
+bool syntax_is_typedef_name(syntax_component_t* id);
+bool syntax_is_lvalue(syntax_component_t* syn);
+bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type);
+bool syntax_is_vla(syntax_component_t* declr);
+bool syntax_is_known_size_array(syntax_component_t* declr);
+bool syntax_is_modifiable_lvalue(syntax_component_t* syn);
 syntax_component_t* syntax_get_declarator_identifier(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_function_definition(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_declaration(syntax_component_t* declr);
 syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr);
+syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn);
+c_namespace_t* syntax_get_namespace(syntax_component_t* id);
+c_namespace_t get_basic_namespace(c_namespace_class_t nsc);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type);
 void free_syntax(syntax_component_t* syn, syntax_component_t* tlu);
+unsigned long long process_integer_constant(syntax_component_t* syn, c_type_class_t* class);
+unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constant_expression_type_t cexpr_type);
+unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
+
+/* type.c */
+c_type_t* make_basic_type(c_type_class_t class);
+c_type_t* integer_promotions(c_type_t* ct);
+void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
+c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
+void type_delete(c_type_t* ct);
+c_type_t* type_compose(c_type_t* t1, c_type_t* t2);
+bool type_is_compatible(c_type_t* t1, c_type_t* t2);
+bool type_is_compatible_ignore_qualifiers(c_type_t* t1, c_type_t* t2);
+bool type_is_complete(c_type_t* ct);
+bool type_is_object_type(c_type_t* ct);
+unsigned char qualifiers_to_bitfield(vector_t* quals);
+bool type_is_signed_integer_type(c_type_class_t class);
+bool type_is_signed_integer(c_type_t* ct);
+bool type_is_unsigned_integer_type(c_type_class_t class);
+bool type_is_unsigned_integer(c_type_t* ct);
+bool type_is_integer_type(c_type_class_t class);
+bool type_is_integer(c_type_t* ct);
+int get_integer_type_conversion_rank(c_type_class_t class);
+int get_integer_conversion_rank(c_type_t* ct);
+bool type_is_object_type(c_type_t* ct);
+bool type_is_real_floating_type(c_type_class_t class);
+bool type_is_real_floating(c_type_t* ct);
+bool type_is_real_type(c_type_class_t class);
+bool type_is_real(c_type_t* ct);
+bool type_is_complex_type(c_type_class_t class);
+bool type_is_complex(c_type_t* ct);
+bool type_is_floating_type(c_type_class_t class);
+bool type_is_floating(c_type_t* ct);
+bool type_is_arithmetic_type(c_type_class_t class);
+bool type_is_arithmetic(c_type_t* ct);
+bool type_is_scalar_type(c_type_class_t class);
+bool type_is_scalar(c_type_t* ct);
+analysis_error_t* type(syntax_component_t* tlu);
+void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));
+c_type_t* type_copy(c_type_t* ct);
+#define type_is_qualified(ct) (ct ? ((ct)->qualifiers != 0) : false)
 
 /* util.c */
 char* strdup(char* str);
+bool contains_substr(char* str, char* substr);
+bool streq(char* s1, char* s2);
 
 /* from somewhere */
 bool in_debug(void);

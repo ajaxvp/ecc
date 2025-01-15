@@ -192,7 +192,7 @@ parse_test(test_expr_subscript_a, accept("int f(void) { int a[5]; a[0]; }"));
 parse_test(test_expr_function_call_a, accept("int g(int x, int y); int f(void) { g(5, 3); }"));
 parse_test(test_expr_compound_literal_a, accept("int f(void) { struct point { int x; int y; }; (struct point) { .x = 5, .y = 3 }; }"));
 parse_test(test_expr_compound_literal_comma_a, accept("int f(void) { struct point { int x; int y; }; (struct point) { .x = 0, }; }"));
-parse_test(test_expr_id_a, accept("int f(void) { int a; a; }"));
+parse_test(test_expr_id_a, accept("int f(void) { int a; int b = a; }"));
 parse_test(test_expr_integer_constant_a, accept("int f(void) { 5; }"));
 parse_test(test_expr_floating_constant_a, accept("int f(void) { 5.3; }"));
 parse_test(test_expr_character_constant_a, accept("int f(void) { 'a'; }"));

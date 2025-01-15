@@ -1,6 +1,8 @@
 #include "test.h"
 
 #include "parse.h"
+#include "analyze.h"
+#include "type.h"
 
 int main(int argc, char** argv)
 {
@@ -166,6 +168,38 @@ int main(int argc, char** argv)
     add_test(test_type_name_ptr_a);
     add_test(test_type_name_fspec_r);
     add_test(test_type_name_storage_class_r);
+
+    add_test(test_multi_error_r);
+    add_test(test_tlu_d_register_r);
+    add_test(test_tlu_f_auto_r);
+    add_test(test_tlu_d_auto_r);
+    add_test(test_tlu_f_register_r);
+    add_test(test_typespec_void_a);
+    add_test(test_typespec_invalid1_r);
+    add_test(test_decl_empty_r);
+    add_test(test_invalid_id_r);
+    add_test(test_constexpr_simple);
+    add_test(test_constexpr_long);
+    add_test(test_constexpr_logical_or);
+    add_test(test_constexpr_logical_and);
+    add_test(test_constexpr_bitwise_or);
+    add_test(test_constexpr_bitwise_xor);
+    add_test(test_constexpr_bitwise_and);
+    add_test(test_constexpr_enum_constant);
+    add_test(test_constexpr_enum_no_value);
+    add_test(test_constexpr_enum_sequential);
+
+    add_test(test_typing_simple);
+    add_test(test_typing_nested);
+    add_test(test_typing_ptr);
+    add_test(test_typing_function);
+    add_test(test_typing_interleaved);
+    add_test(test_typing_function_ptr);
+    add_test(test_typing_function_ptr_array);
+    add_test(test_typing_struct);
+    add_test(test_typing_enum);
+    add_test(test_typing_enum_constant);
+    add_test(test_typing_abs_declr);
 
     run_tests(argc, argv);
 }

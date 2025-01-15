@@ -190,7 +190,7 @@ syntax_component_t* parse_stub(lexer_token_t** tokens, parse_request_code_t req,
 }
 
 // 6.4.2.1
-syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type)
+syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
     if (!token)
@@ -199,7 +199,7 @@ syntax_component_t* parse_identifier(lexer_token_t** tokens, parse_request_code_
         fail_parse(token, "expected identifier, got EOF");
         return NULL;
     }
-    init_syn(type);
+    init_syn(SC_IDENTIFIER);
     if (token->type != LEXER_TOKEN_IDENTIFIER)
     {
         // ISO: 6.4.2.1 (1)
@@ -323,7 +323,7 @@ syntax_component_t* parse_struct_or_union_specifier(lexer_token_t** tokens, pars
     }
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+    syn->sus_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn);
     if (!is_separator(token, '{'))
     {
         if (id_stat == NOT_FOUND)
@@ -375,7 +375,7 @@ syntax_component_t* parse_enumerator(lexer_token_t** tokens, parse_request_code_
     init_parse;
     init_syn(SC_ENUMERATOR);
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->enumr_constant = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_ENUMERATION_CONSTANT);
+    syn->enumr_constant = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -415,7 +415,7 @@ syntax_component_t* parse_enum_specifier(lexer_token_t** tokens, parse_request_c
     init_syn(SC_ENUM_SPECIFIER);
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->enums_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+    syn->enums_id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn);
     if (!is_separator(token, '{'))
     {
         if (id_stat == NOT_FOUND)
@@ -561,10 +561,18 @@ syntax_component_t* parse_type_specifier(lexer_token_t** tokens, parse_request_c
         return es;
     }
     parse_status_code_t td_stat = UNKNOWN_STATUS;
-    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, parent, SC_TYPEDEF_NAME);
+    syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, parent);
     if (td_stat == FOUND)
     {
-        if (!symbol_table_lookup(tlu->tlu_st, td))
+        c_namespace_t ns = get_basic_namespace(NSC_ORDINARY);
+        symbol_t* sy;
+        if (!(sy = symbol_table_lookup(tlu->tlu_st, td, &ns)))
+        {
+            free_syntax(td, tlu);
+            fail_parse(token, "could not find the given typedef name");
+            return NULL;
+        }
+        if (!syntax_is_typedef_name(sy->declarer))
         {
             free_syntax(td, tlu);
             fail_parse(token, "could not find the given typedef name");
@@ -1108,7 +1116,7 @@ syntax_component_t* parse_partial_function_declarator(lexer_token_t** tokens, pa
     for (;;)
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+        syntax_component_t* id = parse_identifier(&token, OPTIONAL, &id_stat, tlu, next_depth, syn);
         // TODO: consider adding to symbol table?
         if (id_stat == NOT_FOUND)
             break;
@@ -1178,7 +1186,7 @@ syntax_component_t* parse_direct_declarator(lexer_token_t** tokens, parse_reques
     else
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, parent, SC_IDENTIFIER);
+        left = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, parent);
         if (id_stat == ABORT)
         {
             fail_parse(token, "expected identifier");
@@ -1382,7 +1390,7 @@ syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_reques
         return NULL;
     }
     init_syn(SC_FLOATING_CONSTANT);
-    syn->floc = strtold(token->string_value, NULL); // temporary solution
+    syn->con = strdup(token->string_value);
     advance_token;
     update_status(FOUND);
     return syn;
@@ -1390,7 +1398,22 @@ syntax_component_t* parse_floating_constant(lexer_token_t** tokens, parse_reques
 
 syntax_component_t* parse_character_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
-    return parse_stub(tokens, req, stat, tlu, depth, parent);
+    init_parse;
+    if (!token)
+    {
+        fail_parse(token, "expected character constant, got EOF");
+        return NULL;
+    }
+    if (token->type != LEXER_TOKEN_CHARACTER_CONSTANT)
+    {
+        fail_parse(token, "expected character constant");
+        return NULL;
+    }
+    init_syn(SC_CHARACTER_CONSTANT);
+    syn->con = strdup(token->string_value);
+    advance_token;
+    update_status(FOUND);
+    return syn;
 }
 
 syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
@@ -1407,7 +1430,7 @@ syntax_component_t* parse_integer_constant(lexer_token_t** tokens, parse_request
         return NULL;
     }
     init_syn(SC_INTEGER_CONSTANT);
-    syn->intc = strtoll(token->string_value, NULL, 0); // temporary solution
+    syn->con = strdup(token->string_value);
     advance_token;
     update_status(FOUND);
     return syn;
@@ -1427,7 +1450,7 @@ syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_c
         return NULL;
     }
     init_syn(SC_STRING_LITERAL);
-    syn->strl = strdup(token->string_value);
+    syn->con = strdup(token->string_value);
     advance_token;
     update_status(FOUND);
     return syn;
@@ -1436,7 +1459,7 @@ syntax_component_t* parse_string_literal(lexer_token_t** tokens, parse_request_c
 syntax_component_t* parse_primary_expression(lexer_token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
 {
     init_parse;
-    try_parse(identifier, id, SC_IDENTIFIER)
+    try_parse(identifier, id)
     try_parse(floating_constant, fcon)
     try_parse(character_constant, ccon)
     try_parse(integer_constant, icon)
@@ -1497,7 +1520,7 @@ syntax_component_t* parse_designation(lexer_token_t** tokens, parse_request_code
         {
             advance_token;
             parse_status_code_t id_stat = UNKNOWN_STATUS;
-            syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+            syntax_component_t* id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn);
             if (id_stat == ABORT)
             {
                 fail_status;
@@ -1628,7 +1651,7 @@ syntax_component_t* parse_partial_member_expression(lexer_token_t** tokens, pars
     advance_token;
     init_syn(type);
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->memexpr_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+    syn->memexpr_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -2244,7 +2267,7 @@ syntax_component_t* parse_goto_statement(lexer_token_t** tokens, parse_request_c
     }
     advance_token;
     parse_status_code_t id_stat = UNKNOWN_STATUS;
-    syn->gtstmt_label_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+    syn->gtstmt_label_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn);
     if (id_stat == ABORT)
     {
         fail_status;
@@ -2651,7 +2674,7 @@ syntax_component_t* parse_labeled_statement(lexer_token_t** tokens, parse_reques
     else
     {
         parse_status_code_t id_stat = UNKNOWN_STATUS;
-        syn->lstmt_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn, SC_IDENTIFIER);
+        syn->lstmt_id = parse_identifier(&token, EXPECTED, &id_stat, tlu, next_depth, syn);
         if (id_stat == ABORT)
         {
             fail_status;
@@ -2807,14 +2830,6 @@ syntax_component_t* parse_translation_unit(lexer_token_t** tokens, parse_request
         syntax_component_t* decl = parse_declaration(&token, OPTIONAL, &decl_stat, tlu, next_depth, syn);
         if (decl_stat == FOUND)
         {
-            if (syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_AUTO) ||
-                syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_REGISTER))
-            {
-                // ISO: 6.9 (2)
-                fail_parse(decl, "declaration in global scope may not include storage-class specifiers 'auto' or 'register'");
-                free_syntax(decl, tlu);
-                return syn;
-            }
             vector_add(syn->tlu_external_declarations, decl);
             continue;
         }

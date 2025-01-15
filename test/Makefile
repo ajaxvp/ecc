@@ -1,7 +1,7 @@
 EXE=test
-TEST_OBJS=parse.o
+TEST_OBJS=parse.o analyze.o type.o
 OBJS=testutils.o main.o test.o
-PRGM_OBJS=util.o buffer.o const.o emit.o lex.o log.o parse.o set.o symbol.o syntax.o vector.o
+PRGM_OBJS=util.o type.o buffer.o const.o lex.o log.o traverse.o analyze.o parse.o set.o symbol.o syntax.o vector.o
 TEST_BUILD=$(addprefix build/, $(TEST_OBJS))
 BUILD=$(addprefix build/, $(OBJS))
 PRGM_BUILD=$(addprefix ../build/, $(PRGM_OBJS))

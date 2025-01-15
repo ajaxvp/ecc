@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include "cc.h"
 
@@ -55,6 +56,66 @@ bool syntax_is_statement_type(syntax_component_type_t type)
         type == SC_CONTINUE_STATEMENT ||
         type == SC_BREAK_STATEMENT ||
         type == SC_RETURN_STATEMENT;
+}
+
+bool syntax_is_expression_type(syntax_component_type_t type)
+{
+    return type == SC_EXPRESSION ||
+        type == SC_ASSIGNMENT_EXPRESSION ||
+        type == SC_LOGICAL_OR_EXPRESSION ||
+        type == SC_LOGICAL_AND_EXPRESSION ||
+        type == SC_BITWISE_OR_EXPRESSION ||
+        type == SC_BITWISE_XOR_EXPRESSION ||
+        type == SC_BITWISE_AND_EXPRESSION ||
+        type == SC_EQUALITY_EXPRESSION ||
+        type == SC_INEQUALITY_EXPRESSION ||
+        type == SC_GREATER_EQUAL_EXPRESSION ||
+        type == SC_LESS_EQUAL_EXPRESSION ||
+        type == SC_GREATER_EXPRESSION ||
+        type == SC_LESS_EXPRESSION ||
+        type == SC_BITWISE_RIGHT_EXPRESSION ||
+        type == SC_BITWISE_LEFT_EXPRESSION ||
+        type == SC_SUBTRACTION_EXPRESSION ||
+        type == SC_ADDITION_EXPRESSION ||
+        type == SC_MODULAR_EXPRESSION ||
+        type == SC_DIVISION_EXPRESSION ||
+        type == SC_MULTIPLICATION_EXPRESSION ||
+        type == SC_CONDITIONAL_EXPRESSION ||
+        type == SC_CAST_EXPRESSION ||
+        type == SC_PREFIX_INCREMENT_EXPRESSION ||
+        type == SC_PREFIX_DECREMENT_EXPRESSION ||
+        type == SC_REFERENCE_EXPRESSION ||
+        type == SC_DEREFERENCE_EXPRESSION ||
+        type == SC_PLUS_EXPRESSION ||
+        type == SC_MINUS_EXPRESSION ||
+        type == SC_COMPLEMENT_EXPRESSION ||
+        type == SC_NOT_EXPRESSION ||
+        type == SC_SIZEOF_EXPRESSION ||
+        type == SC_SIZEOF_TYPE_EXPRESSION ||
+        type == SC_INITIALIZER_LIST_EXPRESSION ||
+        type == SC_POSTFIX_INCREMENT_EXPRESSION ||
+        type == SC_POSTFIX_DECREMENT_EXPRESSION ||
+        type == SC_DEREFERENCE_MEMBER_EXPRESSION ||
+        type == SC_MEMBER_EXPRESSION ||
+        type == SC_FUNCTION_CALL_EXPRESSION ||
+        type == SC_SUBSCRIPT_EXPRESSION ||
+        type == SC_CONSTANT_EXPRESSION ||
+        type == SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION ||
+        type == SC_DIVISION_ASSIGNMENT_EXPRESSION ||
+        type == SC_MODULAR_ASSIGNMENT_EXPRESSION ||
+        type == SC_ADDITION_ASSIGNMENT_EXPRESSION ||
+        type == SC_SUBTRACTION_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_AND_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_OR_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION ||
+        type == SC_IDENTIFIER ||
+        type == SC_INTEGER_CONSTANT ||
+        type == SC_FLOATING_CONSTANT ||
+        type == SC_CHARACTER_CONSTANT ||
+        type == SC_ENUMERATION_CONSTANT ||
+        type == SC_STRING_LITERAL;
 }
 
 bool syntax_is_concrete_declarator_type(syntax_component_type_t type)
@@ -144,6 +205,204 @@ syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
 {
     for (; syn && syn->type != SC_TRANSLATION_UNIT; syn = syn->parent);
     return syn;
+}
+
+// identifier must be a declaring identifier
+bool syntax_is_typedef_name(syntax_component_t* id)
+{
+    if (!id) return false;
+    syntax_component_t* full_declr = syntax_get_full_declarator(id);
+    if (!full_declr) return false;
+    syntax_component_t* decl = full_declr->parent;
+    if (!syntax_is_declaration_type(decl->type))
+        return false;
+    vector_t* declspecs;
+    switch (decl->type)
+    {
+        case SC_DECLARATION: declspecs = decl->decl_declaration_specifiers; break;
+        case SC_STRUCT_DECLARATION: declspecs = decl->sdecl_specifier_qualifier_list; break;
+        case SC_PARAMETER_DECLARATION: declspecs = decl->pdecl_declaration_specifiers; break;
+        default: return false;
+    }
+    return syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_TYPEDEF);
+}
+
+void namespace_delete(c_namespace_t* ns)
+{
+    if (!ns) return;
+    if (ns->struct_union_type) free(ns->struct_union_type);
+    free(ns);
+}
+
+// allocates space for the c_namespace_t object
+// ONLY USE THIS FUNCTION DURING OR AFTER TYPING.
+c_namespace_t* syntax_get_namespace(syntax_component_t* id)
+{
+    if (!id) return NULL;
+    syntax_component_t* syn = id->parent;
+    if (!syn) return NULL;
+    c_namespace_t* ns = calloc(1, sizeof *ns);
+    if (syn->type == SC_LABELED_STATEMENT)
+    {
+        ns->class = NSC_LABEL;
+        return ns;
+    }
+    if (syn->type == SC_STRUCT_UNION_SPECIFIER)
+    {
+        switch (syn->sus_sou)
+        {
+            case SOU_STRUCT: ns->class = NSC_STRUCT; break;
+            case SOU_UNION: ns->class = NSC_UNION; break;
+        }
+        return ns;
+    }
+    if (syn->type == SC_ENUM_SPECIFIER)
+    {
+        ns->class = NSC_ENUM;
+        return ns;
+    }
+    if (syn->type == SC_MEMBER_EXPRESSION ||
+        syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
+    {
+        c_type_t* ty = syn->memexpr_expression->ctype;
+        if (!ty || (ty->class != CTC_STRUCTURE && ty->class != CTC_UNION))
+        {
+            namespace_delete(ns);
+            return NULL;
+        }
+        ns->struct_union_type = ty;
+        switch (ty->class)
+        {
+            case CTC_STRUCTURE: ns->class = NSC_STRUCT_MEMBER; break;
+            case CTC_UNION: ns->class = NSC_UNION_MEMBER; break;
+            default:
+            {
+                namespace_delete(ns);
+                return NULL;
+            }
+        }
+        return ns;
+    }
+    ns->class = NSC_ORDINARY;
+    return ns;
+}
+
+c_namespace_t get_basic_namespace(c_namespace_class_t nsc)
+{
+    return (c_namespace_t) { .class = nsc, .struct_union_type = NULL };
+}
+
+bool syntax_is_lvalue(syntax_component_t* syn)
+{
+    if (!syn) return false;
+    if (!syn->ctype) return false;
+    // ISO: 6.3.2.1 (1)
+    return syntax_is_expression_type(syn->type) &&
+        (type_is_object_type(syn->ctype) ||
+        (!type_is_complete(syn->ctype) && syn->ctype->class != CTC_VOID));
+}
+
+void object_delete(c_object_t* obj)
+{
+    type_delete(obj->effective_type);
+    free(obj);
+}
+
+c_object_t* syntax_get_designated_object(syntax_component_t* lvalue)
+{
+    return NULL;
+}
+
+bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type)
+{
+    c_type_class_t c = CTC_ERROR;;
+    evaluate_constant_expression(expr, &c, ce_type);
+    return c != CTC_ERROR;
+}
+
+bool syntax_is_known_size_array(syntax_component_t* declr)
+{
+    if (!declr) return false;
+    syntax_component_t* length_expr = NULL;
+    switch (declr->type)
+    {
+        case SC_ARRAY_DECLARATOR: length_expr = declr->adeclr_length_expression; break;
+        case SC_ABSTRACT_ARRAY_DECLARATOR: length_expr = declr->abadeclr_length_expression; break;
+        default: return false;
+    }
+    if (!length_expr) 
+        return false;
+    return can_evaluate(length_expr, CE_INTEGER);
+}
+
+// if this function returns false it DOES NOT necessarily mean that
+// the array is of known size! use the other function fool
+bool syntax_is_vla(syntax_component_t* declr)
+{
+    if (!declr) return false;
+    syntax_component_t* length_expr = NULL;
+    if (declr->type == SC_ARRAY_DECLARATOR)
+    {
+        if (declr->adeclr_unspecified_size)
+            return true;
+        length_expr = declr->adeclr_length_expression;
+    }
+    if (declr->type == SC_ABSTRACT_ARRAY_DECLARATOR)
+    {
+        if (declr->abadeclr_unspecified_size)
+            return true;
+        length_expr = declr->abadeclr_length_expression;
+    }
+    if (!length_expr)
+        return false;
+    return !can_evaluate(length_expr, CE_INTEGER);
+}
+
+// "if it is a structure or union, does not have any member (including,
+// recursively, any member or element of all contained aggregates or unions)
+// with a const-qualified type."
+static bool compliance_6_3_2_1_para1_struct_clause(c_type_t* ct)
+{
+    if (!ct)
+        return false;
+    
+    if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION)
+        return true;
+
+    // shouldn't happen but safety check nonetheless against incomplete struct/union types
+    if (!ct->struct_union.member_names || !ct->struct_union.member_types)
+        return false;
+    
+    for (unsigned int i = 0; i < ct->struct_union.member_names->size; ++i)
+    {
+        c_type_t* mct = vector_get(ct->struct_union.member_types, i);
+        if (mct->qualifiers & TQ_B_CONST)
+            return false;
+        if (mct->class == CTC_STRUCTURE || mct->class == CTC_UNION)
+            if (!compliance_6_3_2_1_para1_struct_clause(mct))
+                return false;
+    }
+
+    return true;
+}
+
+bool syntax_is_modifiable_lvalue(syntax_component_t* syn)
+{
+    if (!syn) return false;
+    if (!syn->ctype) return false;
+    if (!syntax_is_lvalue(syn))
+        return false;
+    if (syn->ctype->class == CTC_ARRAY)
+        return false;
+    if (!type_is_complete(syn->ctype))
+        return false;
+    if (syn->ctype->qualifiers & TQ_B_CONST)
+        return false;
+    if (!compliance_6_3_2_1_para1_struct_clause(syn->ctype))
+        return false;
+
+    // ISO: 6.3.2.1 (1)
+    return true;
 }
 
 // ps - print structure
@@ -445,7 +704,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
 
         case SC_INTEGER_CONSTANT:
         {
-            ps("integer constant: %lld\n", s->intc);
+            ps("integer constant: %s\n", s->con);
             break;
         }
 
@@ -606,10 +865,67 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SC_ENUM_SPECIFIER:
+        {
+            ps(sty("enum specifier") "\n");
+            pf("identifier:\n");
+            print_syntax_indented(s->enums_id, next_indent, printer);
+            pf("enumerators:\n");
+            print_vector_indented(s->enums_enumerators, next_indent, printer);
+            break;
+        }
+
+        case SC_ENUMERATOR:
+        {
+            ps(sty("enumerator") "\n");
+            pf("enumeration constant:\n");
+            print_syntax_indented(s->enumr_constant, next_indent, printer);
+            pf("expression:\n");
+            print_syntax_indented(s->enumr_expression, next_indent, printer);
+            break;
+        }
+
+        case SC_SUBSCRIPT_EXPRESSION:
+        {
+            ps(sty("subscript expression") "\n");
+            pf("expression:\n");
+            print_syntax_indented(s->subsexpr_expression, next_indent, printer);
+            pf("index expression:\n");
+            print_syntax_indented(s->subsexpr_index_expression, next_indent, printer);
+            break;
+        }
+
+        case SC_ABSTRACT_DECLARATOR:
+        {
+            ps(sty("abstract declarator") "\n");
+            pf("direct declarator:\n");
+            print_syntax_indented(s->abdeclr_direct, next_indent, printer);
+            pf("pointers:\n");
+            print_vector_indented(s->abdeclr_pointers, next_indent, printer);
+            break;
+        }
+
+        case SC_ABSTRACT_ARRAY_DECLARATOR:
+        {
+            ps(sty("abstract array declarator") "\n");
+            pf("direct declarator:\n");
+            print_syntax_indented(s->abadeclr_direct, next_indent, printer);
+            pf("length expression:\n");
+            print_syntax_indented(s->abadeclr_length_expression, next_indent, printer);
+            pf("unspecified size: %s\n", BOOL_NAMES[s->abadeclr_unspecified_size]);
+            break;
+        }
+
         default:
             ps(sty("unknown/unprintable syntax") "\n");
             pf("type name: %s\n", SYNTAX_COMPONENT_NAMES[s->type]);
             return;
+    }
+    if (s->ctype)
+    {
+        pf("C type: ");
+        type_humanized_print(s->ctype, printer);
+        pf("\n");
     }
     if (debug)
     {
@@ -849,8 +1165,11 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             break;
         }
         case SC_STRING_LITERAL:
+        case SC_FLOATING_CONSTANT:
+        case SC_INTEGER_CONSTANT:
+        case SC_CHARACTER_CONSTANT:
         {
-            free(syn->strl);
+            free(syn->con);
             break;
         }
         case SC_IF_STATEMENT:
@@ -936,8 +1255,6 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         case SC_STORAGE_CLASS_SPECIFIER:
         case SC_BREAK_STATEMENT:
         case SC_CONTINUE_STATEMENT:
-        case SC_INTEGER_CONSTANT:
-        case SC_FLOATING_CONSTANT:
             break;
         default:
         {
@@ -946,5 +1263,575 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             break;
         }
     }
+    type_delete(syn->ctype);
     free(syn);
+}
+
+// only handles arithmetic types
+unsigned long long constexpr_cast(unsigned long long value, c_type_t* old_type, c_type_t* new_type)
+{
+    unsigned long long nv = 0;
+    #define subcase(ctc, t, old_t) \
+        case ctc: \
+        { \
+            t v = (t) (*((old_t*) &value));\
+            *((t*) &nv) = v; \
+            break; \
+        }
+    #define subswitch(old_t) \
+        switch (new_type->class) \
+        { \
+            subcase(CTC_BOOL, bool, old_t) \
+            subcase(CTC_CHAR, char, old_t) \
+            subcase(CTC_SIGNED_CHAR, signed char, old_t) \
+            subcase(CTC_SHORT_INT, short int, old_t) \
+            subcase(CTC_INT, int, old_t) \
+            subcase(CTC_LONG_INT, long int, old_t) \
+            subcase(CTC_LONG_LONG_INT, long long int, old_t) \
+            subcase(CTC_UNSIGNED_CHAR, unsigned char, old_t) \
+            subcase(CTC_UNSIGNED_SHORT_INT, unsigned short int, old_t) \
+            subcase(CTC_UNSIGNED_INT, unsigned int, old_t) \
+            subcase(CTC_UNSIGNED_LONG_INT, unsigned long int, old_t) \
+            subcase(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long int, old_t) \
+            subcase(CTC_FLOAT, float, old_t) \
+            subcase(CTC_DOUBLE, double, old_t) \
+            subcase(CTC_LONG_DOUBLE, long double, old_t) \
+            subcase(CTC_FLOAT_COMPLEX, float _Complex, old_t) \
+            subcase(CTC_DOUBLE_COMPLEX, double _Complex, old_t) \
+            subcase(CTC_LONG_DOUBLE_COMPLEX, long double _Complex, old_t) \
+            default: return 0; \
+        }
+    switch (old_type->class)
+    {
+        case CTC_BOOL:
+            subswitch(bool);
+            break;
+        case CTC_CHAR:
+            subswitch(char)
+            break;
+        case CTC_SIGNED_CHAR:
+            subswitch(signed char)
+            break;
+        case CTC_SHORT_INT:
+            subswitch(short int)
+            break;
+        case CTC_INT:
+            subswitch(int)
+            break;
+        case CTC_LONG_INT:
+            subswitch(long int)
+            break;
+        case CTC_LONG_LONG_INT:
+            subswitch(long long int)
+            break;
+        case CTC_UNSIGNED_CHAR:
+            subswitch(unsigned char)
+            break;
+        case CTC_UNSIGNED_SHORT_INT:
+            subswitch(unsigned short int)
+            break;
+        case CTC_UNSIGNED_INT:
+            subswitch(unsigned int)
+            break;
+        case CTC_UNSIGNED_LONG_INT:
+            subswitch(unsigned long int)
+            break;
+        case CTC_UNSIGNED_LONG_LONG_INT:
+            subswitch(unsigned long long int)
+            break;
+        case CTC_FLOAT:
+            subswitch(float)
+            break;
+        case CTC_DOUBLE:
+            subswitch(double)
+            break;
+        case CTC_LONG_DOUBLE:
+            subswitch(double)
+            break;
+        case CTC_FLOAT_COMPLEX:
+            subswitch(float _Complex)
+            break;
+        case CTC_DOUBLE_COMPLEX:
+            subswitch(double _Complex)
+            break;
+        case CTC_LONG_DOUBLE_COMPLEX:
+            subswitch(long double _Complex)
+            break;
+        default: return 0;
+    }
+    #undef subswitch
+    #undef subcase
+    return nv;
+}
+
+unsigned long long constexpr_cast_type(unsigned long long value, c_type_class_t old_class, c_type_class_t new_class)
+{
+    c_type_t* old = make_basic_type(old_class);
+    c_type_t* new = make_basic_type(new_class);
+    unsigned long long r = constexpr_cast(value, old, new);
+    type_delete(old);
+    type_delete(new);
+    return r;
+}
+
+static bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
+{
+    if (!str && !substr)
+        return true;
+    if (!str || !substr)
+        return false;
+    size_t str_len = strlen(str);
+    size_t substr_len = strlen(substr);
+    if (substr_len > str_len)
+        return false;
+    if (!substr_len)
+        return true;
+    size_t i = 0;
+    for (; i < substr_len; ++i)
+    {
+        if (tolower(str[ends ? (str_len - 1 - i) : i]) != tolower(substr[ends ? (substr_len - 1 - i) : i]))
+            return false;
+    }
+    return true;
+}
+
+#define ends_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, true)
+#define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
+
+unsigned long long process_integer_constant(syntax_component_t* syn, c_type_class_t* class)
+{
+    char* con = syn->con;
+    int radix = 10;
+    if (starts_with_ignore_case(con, "0x"))
+    {
+        radix = 16;
+        con += 2;
+    }
+    else if (starts_with_ignore_case(con, "0") && strlen(con) > 1 && con[1] >= '0' && con[2] <= '9')
+    {
+        radix = 8;
+        ++con;
+    }
+    unsigned long long full = strtoull(con, NULL, radix);
+    if (ends_with_ignore_case(con, "ull") ||
+        ends_with_ignore_case(con, "llu"))
+    {
+        *class = CTC_UNSIGNED_LONG_LONG_INT;
+        return full;
+    }
+    if (ends_with_ignore_case(con, "ll"))
+    {
+        *class = CTC_LONG_LONG_INT;
+        if (radix == 10)
+            return (long long) full;
+        if (full > LONG_LONG_INT_MAX)
+        {
+            *class = CTC_UNSIGNED_LONG_LONG_INT;
+            return full;
+        }
+        return (long long) full;
+    }
+    if (ends_with_ignore_case(con, "ul") ||
+        ends_with_ignore_case(con, "lu"))
+    {
+        *class = CTC_UNSIGNED_LONG_INT;
+        if (full > UNSIGNED_LONG_INT_MAX)
+        {
+            *class = CTC_UNSIGNED_LONG_LONG_INT;
+            return full;
+        }
+        return (long long) full;
+    }
+    if (ends_with_ignore_case(con, "l"))
+    {
+        *class = CTC_LONG_INT;
+
+        if (radix == 10)
+        {
+            if (full > LONG_INT_MAX)
+            {
+                *class = CTC_LONG_LONG_INT;
+                return (long long) full;
+            }
+            return (long) full;
+        }
+
+        if (full > LONG_INT_MAX)
+            *class = CTC_UNSIGNED_LONG_INT;
+        if (full > UNSIGNED_LONG_INT_MAX)
+            *class = CTC_LONG_LONG_INT;
+        if (full > UNSIGNED_LONG_LONG_INT_MAX)
+            *class = CTC_UNSIGNED_LONG_LONG_INT;
+        
+        if (*class == CTC_LONG_INT)
+            return (long) full;
+        if (*class == CTC_UNSIGNED_LONG_INT)
+            return (unsigned long) full;
+        if (*class == CTC_LONG_LONG_INT)
+            return (long long) full;
+        return full;
+    }
+    if (ends_with_ignore_case(con, "u"))
+    {
+        *class = CTC_UNSIGNED_INT;
+
+        if (full > UNSIGNED_INT_MAX)
+            *class = CTC_UNSIGNED_LONG_INT;
+        if (full > UNSIGNED_LONG_INT_MAX)
+            *class = CTC_UNSIGNED_LONG_LONG_INT;
+        
+        if (*class == CTC_UNSIGNED_INT)
+            return (unsigned) full;
+        if (*class == CTC_UNSIGNED_LONG_INT)
+            return (unsigned long) full;
+        return full;
+    }
+    
+    *class = CTC_INT;
+
+    if (full > INT_MAX)
+        *class = radix == 10 ? CTC_LONG_INT : CTC_UNSIGNED_INT;
+    if (radix != 10 && full > UNSIGNED_INT_MAX)
+        *class = CTC_LONG_INT;
+    if (full > LONG_INT_MAX)
+        *class = radix == 10 ? CTC_LONG_LONG_INT : CTC_UNSIGNED_LONG_INT;
+    if (radix != 10 && full > UNSIGNED_LONG_INT_MAX)
+        *class = CTC_LONG_LONG_INT;
+    if (radix != 10 && full > LONG_LONG_INT_MAX)
+        *class = CTC_UNSIGNED_LONG_LONG_INT;
+    
+    if (*class == CTC_INT)
+        return (int) full;
+    if (*class == CTC_UNSIGNED_INT)
+        return (unsigned) full;
+    if (*class == CTC_LONG_INT)
+        return (long) full;
+    if (*class == CTC_UNSIGNED_LONG_INT)
+        return (unsigned long) full;
+    if (*class == CTC_LONG_LONG_INT)
+        return (long long) full;
+    return full;
+}
+// temp expression til i figure out errors here
+#define do_something(syn, error) (void) (error)
+
+// ! UNFINISHED !
+// the expression given to this function doesn't have to be checked for constant-ness
+// if it finds something it can't evaluate, it will toss it out and return CTC_ERROR in the 'class' parameter
+// otherwise, it will give back the type you should cast the return type to.
+unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constant_expression_type_t cexpr_type)
+{
+    //     type == SC_EQUALITY_EXPRESSION ||
+    //     type == SC_INEQUALITY_EXPRESSION ||
+    //     type == SC_GREATER_EQUAL_EXPRESSION ||
+    //     type == SC_LESS_EQUAL_EXPRESSION ||
+    //     type == SC_GREATER_EXPRESSION ||
+    //     type == SC_LESS_EXPRESSION ||
+    //     type == SC_BITWISE_RIGHT_EXPRESSION ||
+    //     type == SC_BITWISE_LEFT_EXPRESSION ||
+    //     type == SC_SUBTRACTION_EXPRESSION ||
+    //     type == SC_ADDITION_EXPRESSION ||
+    //     type == SC_MODULAR_EXPRESSION ||
+    //     type == SC_DIVISION_EXPRESSION ||
+    //     type == SC_MULTIPLICATION_EXPRESSION ||
+    //     type == SC_CONDITIONAL_EXPRESSION ||
+    //     type == SC_CAST_EXPRESSION ||
+    //     type == SC_REFERENCE_EXPRESSION ||
+    //     type == SC_DEREFERENCE_EXPRESSION ||
+    //     type == SC_PLUS_EXPRESSION ||
+    //     type == SC_MINUS_EXPRESSION ||
+    //     type == SC_COMPLEMENT_EXPRESSION ||
+    //     type == SC_NOT_EXPRESSION ||
+    //     type == SC_SIZEOF_EXPRESSION ||
+    //     type == SC_SIZEOF_TYPE_EXPRESSION ||
+    //     type == SC_INITIALIZER_LIST_EXPRESSION ||
+    //     type == SC_DEREFERENCE_MEMBER_EXPRESSION ||
+    //     type == SC_MEMBER_EXPRESSION ||
+    //     type == SC_SUBSCRIPT_EXPRESSION ||
+    //     type == SC_CONSTANT_EXPRESSION ||
+    //     type == SC_INTEGER_CONSTANT ||
+    //     type == SC_FLOATING_CONSTANT ||
+    //     type == SC_CHARACTER_CONSTANT ||
+    //     type == SC_STRING_LITERAL;
+    *class = CTC_ERROR;
+    unsigned long long r = 0;
+    if (!expr)
+    {
+        do_something(expr, "couldn't find expression");
+        return 0;
+    }
+    switch (expr->type)
+    {
+        case SC_LOGICAL_OR_EXPRESSION:
+        {
+            c_type_class_t c = CTC_ERROR;
+            unsigned long long value = evaluate_constant_expression(expr->bexpr_lhs, &c, cexpr_type);
+            if (!type_is_scalar_type(c))
+            {
+                do_something(expr->bexpr_lhs, "left hand side of logical or expression must be of scalar type");
+                break;
+            }
+            if (value != 0)
+            {
+                *class = CTC_INT;
+                r = 1ULL;
+                break;
+            }
+            c = CTC_ERROR;
+            value = evaluate_constant_expression(expr->bexpr_rhs, &c, cexpr_type);
+            if (!type_is_scalar_type(c))
+            {
+                do_something(expr->bexpr_rhs, "right hand side of logical or expression must be of scalar type");
+                break;
+            }
+            *class = CTC_INT;
+            r = value != 0 ? 1ULL : 0ULL;
+            break;
+        }
+
+        case SC_LOGICAL_AND_EXPRESSION:
+        {
+            c_type_class_t c = CTC_ERROR;
+            unsigned long long value = evaluate_constant_expression(expr->bexpr_lhs, &c, cexpr_type);
+            if (!type_is_scalar_type(c))
+            {
+                do_something(expr->bexpr_lhs, "left hand side of logical and expression must be of scalar type");
+                break;
+            }
+            if (value == 0)
+            {
+                *class = CTC_INT;
+                break;
+            }
+            c = CTC_ERROR;
+            value = evaluate_constant_expression(expr->bexpr_rhs, &c, cexpr_type);
+            if (!type_is_scalar_type(c))
+            {
+                do_something(expr->bexpr_rhs, "right hand side of logical and expression must be of scalar type");
+                break;
+            }
+            *class = CTC_INT;
+            r = value != 0 ? 1ULL : 0ULL;
+            break;
+        }
+
+        #define bitwise_case(name, operator, sc_type) \
+            case sc_type: \
+            { \
+                c_type_class_t lhc = CTC_ERROR; \
+                c_type_class_t rhc = CTC_ERROR; \
+                unsigned long long lhvalue = evaluate_constant_expression(expr->bexpr_lhs, &lhc, cexpr_type); \
+                unsigned long long rhvalue = evaluate_constant_expression(expr->bexpr_rhs, &rhc, cexpr_type); \
+                if (!type_is_integer_type(lhc)) \
+                { \
+                    do_something(expr->bexpr_lhs, "left hand side of " name " expression must of integer type"); \
+                    break; \
+                } \
+                if (!type_is_integer_type(rhc)) \
+                { \
+                    do_something(expr->bexpr_rhs, "right hand side of " name " expression must of integer type"); \
+                    break; \
+                } \
+                c_type_t* t1 = make_basic_type(lhc); \
+                c_type_t* t2 = make_basic_type(rhc); \
+                c_type_t* rt = usual_arithmetic_conversions_result_type(t1, t2); \
+                *class = rt->class; \
+                lhvalue = constexpr_cast(lhvalue, t1, rt); \
+                rhvalue = constexpr_cast(rhvalue, t2, rt); \
+                c_type_t* ull = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT); \
+                r = constexpr_cast(lhvalue operator rhvalue, ull, rt); \
+                type_delete(t1); \
+                type_delete(t2); \
+                type_delete(rt); \
+                type_delete(ull); \
+                break; \
+            }
+
+        bitwise_case("bitwise or", |, SC_BITWISE_OR_EXPRESSION)
+
+        bitwise_case("bitwise xor", ^, SC_BITWISE_XOR_EXPRESSION)
+
+        bitwise_case("bitwise and", &, SC_BITWISE_AND_EXPRESSION)
+    
+        // case SC_EQUALITY_EXPRESSION: 
+        // { 
+        //     c_type_class_t lhc = CTC_ERROR; 
+        //     c_type_class_t rhc = CTC_ERROR;
+        //     unsigned long long lhvalue = evaluate_constant_expression(expr->bexpr_lhs, &lhc, cexpr_type); 
+        //     unsigned long long rhvalue = evaluate_constant_expression(expr->bexpr_rhs, &rhc, cexpr_type); 
+        //     if (!type_is_integer_type(lhc)) 
+        //     { 
+        //         do_something(expr->bexpr_lhs, "left hand side of equality expression must of integer type"); 
+        //         break;
+        //     } 
+        //     if (!type_is_integer_type(rhc)) 
+        //     { 
+        //         do_something(expr->bexpr_rhs, "right hand side of equality expression must of integer type"); 
+        //         break;
+        //     } 
+        //     c_type_t* t1 = make_basic_type(lhc); 
+        //     c_type_t* t2 = make_basic_type(rhc); 
+        //     c_type_t* rt = usual_arithmetic_conversions_result_type(t1, t2); 
+        //     *class = rt->class; 
+        //     lhvalue = constexpr_cast(lhvalue, t1, rt); 
+        //     rhvalue = constexpr_cast(rhvalue, t2, rt); 
+        //     c_type_t* ull = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT); 
+        //     r = constexpr_cast(lhvalue == rhvalue, ull, rt); 
+        //     type_delete(t1);
+        //     type_delete(t2);
+        //     type_delete(rt);
+        //     type_delete(ull);
+        //     break;
+        // }
+
+        case SC_INTEGER_CONSTANT:
+            r = process_integer_constant(expr, class);
+            break;
+
+        // ISO: 6.6 (3)
+        case SC_ASSIGNMENT_EXPRESSION:
+        case SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION:
+        case SC_DIVISION_ASSIGNMENT_EXPRESSION:
+        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
+        case SC_ADDITION_ASSIGNMENT_EXPRESSION:
+        case SC_SUBTRACTION_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
+        case SC_PREFIX_INCREMENT_EXPRESSION:
+        case SC_PREFIX_DECREMENT_EXPRESSION:
+        case SC_POSTFIX_INCREMENT_EXPRESSION:
+        case SC_POSTFIX_DECREMENT_EXPRESSION:
+        case SC_FUNCTION_CALL_EXPRESSION:
+            break;
+        
+        case SC_EXPRESSION:
+        {
+            // ISO: 6.6 (3)
+            if (expr->expr_expressions->size > 1)
+                break;
+            r = evaluate_constant_expression(vector_get(expr->expr_expressions, 0), class, cexpr_type);
+            break;
+        }
+
+        case SC_IDENTIFIER:
+        {
+            c_namespace_t ns = get_basic_namespace(NSC_ORDINARY);
+            symbol_t* sy = symbol_table_lookup(syntax_get_translation_unit(expr)->tlu_st, expr, &ns);
+            // enumeration constant
+            if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
+            {
+                syntax_component_t* enumr = sy->declarer->parent;
+                int offset = -1;
+                // if the given enumerator doesn't have a constant assignment,
+                // we have to find its value by looking at previous values
+                if (!enumr->enumr_expression)
+                {
+                    syntax_component_t* orig_enumr = enumr;
+                    syntax_component_t* enums = enumr->parent;
+                    int orig_idx = 0, idx = 0;
+                    // loop thru enumerators, finding the one closest to ours
+                    // that has a constant assigned to it
+                    VECTOR_FOR(syntax_component_t*, s, enums->enums_enumerators)
+                    {
+                        if (s == orig_enumr)
+                        {
+                            orig_idx = i;
+                            break;
+                        }
+                        if (s->enumr_expression)
+                        {
+                            enumr = s;
+                            idx = i;
+                        }
+                    }
+                    // if we didn't find an enumerator with an expression,
+                    // use its index in the vector
+                    if (orig_enumr == enumr)
+                    {
+                        r = (int) orig_idx;
+                        *class = CTC_INT;
+                        break;
+                    }
+                    offset = orig_idx - idx;
+                }
+                c_type_class_t c = CTC_ERROR;
+                unsigned long long result = evaluate_constant_expression(enumr->enumr_expression, &c, CE_INTEGER);
+                if (c == CTC_ERROR)
+                    break;
+                if ((get_integer_type_conversion_rank(c) > get_integer_type_conversion_rank(CTC_INT)) || c == CTC_UNSIGNED_INT)
+                {
+                    do_something(expr, "enumerator must be able to fit in type 'int'");
+                    break;
+                }
+                if (offset != -1)
+                {
+                    if (offset > 0 && result > INT_MAX - offset)
+                    {
+                        do_something(expr, "enumerator value overflows type 'int'");
+                        break;
+                    }
+                    result += offset;
+                }
+                r = constexpr_cast_type(result, c, CTC_INT);
+                *class = CTC_INT;
+                break;
+            }
+            do_something(expr, "identifier that is not enumeration constant not allowed in constant expression");
+            break;
+        }
+
+        default:
+            do_something(expr, "undefined operation");
+            break;
+    }
+    return r;
+}
+
+unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr)
+{
+    int offset = -1;
+    // if the given enumerator doesn't have a constant assignment,
+    // we have to find its value by looking at previous values
+    if (!enumr->enumr_expression)
+    {
+        syntax_component_t* orig_enumr = enumr;
+        syntax_component_t* enums = enumr->parent;
+        int orig_idx = 0, idx = 0;
+        // loop thru enumerators, finding the one closest to ours
+        // that has a constant assigned to it
+        VECTOR_FOR(syntax_component_t*, s, enums->enums_enumerators)
+        {
+            if (s == orig_enumr)
+            {
+                orig_idx = i;
+                break;
+            }
+            if (s->enumr_expression)
+            {
+                enumr = s;
+                idx = i;
+            }
+        }
+        // if we didn't find an enumerator with an expression,
+        // use its index in the vector
+        if (orig_enumr == enumr)
+            return (int) orig_idx;
+        offset = orig_idx - idx;
+    }
+    c_type_class_t c = CTC_ERROR;
+    unsigned long long result = evaluate_constant_expression(enumr->enumr_expression, &c, CE_INTEGER);
+    if (c == CTC_ERROR)
+        report_return_value(0);
+    if ((get_integer_type_conversion_rank(c) > get_integer_type_conversion_rank(CTC_INT)) || c == CTC_UNSIGNED_INT)
+        report_return_value(0);
+    if (offset != -1)
+    {
+        if (offset > 0 && result > INT_MAX - offset)
+            report_return_value(0);
+        result += offset;
+    }
+    return constexpr_cast_type(result, c, CTC_INT);
 }
