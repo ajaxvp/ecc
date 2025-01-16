@@ -38,6 +38,17 @@ bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type,
     return false;
 }
 
+size_t syntax_no_specifiers(vector_t* declspecs, syntax_component_type_t type)
+{
+    size_t i = 0;
+    VECTOR_FOR(syntax_component_t*, declspec, declspecs)
+    {
+        if (declspec->type != type) continue;
+        ++i;
+    }
+    return i;
+}
+
 // SC_STATEMENT = SC_LABELED_STATEMENT | SC_COMPOUND_STATEMENT | SC_EXPRESSION_STATEMENT | SC_SELECTION_STATEMENT | SC_ITERATION_STATEMENT | SC_JUMP_STATEMENT
 // SC_SELECTION_STATEMENT = SC_IF_STATEMENT | SC_SWITCH_STATEMENT
 // SC_ITERATION_STATEMENT = SC_DO_STATEMENT | SC_WHILE_STATEMENT | SC_FOR_STATEMENT
@@ -207,26 +218,6 @@ syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
     return syn;
 }
 
-// identifier must be a declaring identifier
-bool syntax_is_typedef_name(syntax_component_t* id)
-{
-    if (!id) return false;
-    syntax_component_t* full_declr = syntax_get_full_declarator(id);
-    if (!full_declr) return false;
-    syntax_component_t* decl = full_declr->parent;
-    if (!syntax_is_declaration_type(decl->type))
-        return false;
-    vector_t* declspecs;
-    switch (decl->type)
-    {
-        case SC_DECLARATION: declspecs = decl->decl_declaration_specifiers; break;
-        case SC_STRUCT_DECLARATION: declspecs = decl->sdecl_specifier_qualifier_list; break;
-        case SC_PARAMETER_DECLARATION: declspecs = decl->pdecl_declaration_specifiers; break;
-        default: return false;
-    }
-    return syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_TYPEDEF);
-}
-
 void namespace_delete(c_namespace_t* ns)
 {
     if (!ns) return;
@@ -300,17 +291,6 @@ bool syntax_is_lvalue(syntax_component_t* syn)
     return syntax_is_expression_type(syn->type) &&
         (type_is_object_type(syn->ctype) ||
         (!type_is_complete(syn->ctype) && syn->ctype->class != CTC_VOID));
-}
-
-void object_delete(c_object_t* obj)
-{
-    type_delete(obj->effective_type);
-    free(obj);
-}
-
-c_object_t* syntax_get_designated_object(syntax_component_t* lvalue)
-{
-    return NULL;
 }
 
 bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type)
@@ -402,6 +382,66 @@ bool syntax_is_modifiable_lvalue(syntax_component_t* syn)
         return false;
 
     // ISO: 6.3.2.1 (1)
+    return true;
+}
+
+// using a declaring identifier, get its declaration specifiers, if any
+vector_t* syntax_get_declspecs(syntax_component_t* id)
+{
+    if (!id) return NULL;
+    syntax_component_t* full_declr = syntax_get_full_declarator(id);
+    if (!full_declr) return NULL;
+    syntax_component_t* decl = full_declr->parent;
+    if (decl && decl->type == SC_FUNCTION_DEFINITION)
+        return decl->fdef_declaration_specifiers;
+    if (!syntax_is_declaration_type(decl->type))
+        return NULL;
+    vector_t* declspecs;
+    switch (decl->type)
+    {
+        case SC_DECLARATION: declspecs = decl->decl_declaration_specifiers; break;
+        case SC_STRUCT_DECLARATION: declspecs = decl->sdecl_specifier_qualifier_list; break;
+        case SC_PARAMETER_DECLARATION: declspecs = decl->pdecl_declaration_specifiers; break;
+        default: return NULL;
+    }
+    return declspecs;
+}
+
+// identifier must be a declaring identifier
+bool syntax_is_typedef_name(syntax_component_t* id)
+{
+    if (!id) return false;
+    vector_t* declspecs = syntax_get_declspecs(id);
+    if (!declspecs) return false;
+    return syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_TYPEDEF);
+}
+
+bool syntax_is_tentative_definition(syntax_component_t* id)
+{
+    syntax_component_t* tlu = syntax_get_translation_unit(id);
+    if (!tlu)
+        return false;
+    symbol_t* sy = symbol_table_get_syn_id(tlu->tlu_st, id);
+    if (!sy)
+        return false;
+    syntax_component_t* ideclr = syntax_get_full_declarator(id);
+    if (!ideclr)
+        return false;
+    if (ideclr->type != SC_INIT_DECLARATOR)
+        return false;
+    if (ideclr->ideclr_initializer)
+        return false;
+    syntax_component_t* scope = symbol_get_scope(sy);
+    if (!scope || scope->type != SC_TRANSLATION_UNIT)
+        return false;
+    syntax_component_t* decl = ideclr->parent;
+    if (!decl || decl->type != SC_DECLARATION)
+        return false;
+    VECTOR_FOR(syntax_component_t*, declspec, decl->decl_declaration_specifiers)
+    {
+        if (declspec->type == SC_STORAGE_CLASS_SPECIFIER && declspec->scs != SCS_STATIC)
+            return false;
+    }
     return true;
 }
 

@@ -265,6 +265,35 @@ symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_names
     return NULL;
 }
 
+// 3 return values here:
+//  - actual return value: the symbol representing the identifier given as an arg, if any (must be declaring)
+//  - count: the number of duplicate entries in the symbol table (i.e., same namespace and scope)
+//  - first: whether the symbol representing a declaring id was the first duplicate
+symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, size_t* count, bool* first)
+{
+    if (first) *first = false;
+    symbol_t* sylist = symbol_table_get_all(t, id->id);
+    if (count) *count = 0;
+    symbol_t* found = NULL;
+    for (; sylist; sylist = sylist->next)
+    {
+        if (sylist->declarer == id)
+        {
+            if (count && first && *count == 0)
+                *first = true;
+            if (count)
+                ++(*count);
+            found = sylist;
+            continue;
+        }
+        c_namespace_t* sns = syntax_get_namespace(sylist->declarer);
+        if (count && symbol_in_scope(sylist, id) && (!ns || (ns->class == sns->class && type_is_compatible(ns->struct_union_type, sns->struct_union_type))))
+            ++(*count);
+        free(sns);
+    }
+    return found;
+}
+
 // removes a symbol from the table
 symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id)
 {

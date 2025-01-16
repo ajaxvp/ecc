@@ -145,6 +145,7 @@ typedef enum c_type_class
     CTC_UNION,
     CTC_FUNCTION,
     CTC_POINTER,
+    CTC_LABEL,
     CTC_ERROR
 } c_type_class_t;
 
@@ -163,6 +164,7 @@ typedef enum c_type_class
 
 #define C_TYPE_SIZE_T CTC_UNSIGNED_LONG_INT
 #define C_TYPE_PTRSIZE_T CTC_LONG_INT
+#define C_TYPE_WCHAR_T CTC_INT
 
 typedef struct c_type c_type_t;
 
@@ -205,12 +207,6 @@ typedef enum storage_duration
     STATIC,
     ALLOCATED
 } storage_duration_t;
-
-typedef struct c_object
-{
-    c_type_t* effective_type;
-    symbol_t* sy;
-} c_object_t;
 
 typedef enum c_namespace_class
 {
@@ -875,7 +871,7 @@ extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];
-extern const char* C_TYPE_CLASS_NAMES[28];
+extern const char* C_TYPE_CLASS_NAMES[30];
 
 /* lex.c */
 lexer_token_t* lex(FILE* file);
@@ -914,6 +910,7 @@ symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id);
 symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns);
+symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, size_t* count, bool* first);
 symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
@@ -931,6 +928,10 @@ bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type);
 bool syntax_is_vla(syntax_component_t* declr);
 bool syntax_is_known_size_array(syntax_component_t* declr);
 bool syntax_is_modifiable_lvalue(syntax_component_t* syn);
+bool syntax_is_tentative_definition(syntax_component_t* id);
+size_t syntax_no_specifiers(vector_t* declspecs, syntax_component_type_t type);
+void namespace_delete(c_namespace_t* ns);
+vector_t* syntax_get_declspecs(syntax_component_t* id);
 syntax_component_t* syntax_get_declarator_identifier(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_function_definition(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_declaration(syntax_component_t* declr);

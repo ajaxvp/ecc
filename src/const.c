@@ -136,7 +136,7 @@ const char* SYNTAX_COMPONENT_NAMES[95] = {
     "SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION"
 };
 
-const char* C_TYPE_CLASS_NAMES[29] = {
+const char* C_TYPE_CLASS_NAMES[30] = {
     "_Bool",
     "char",
     "signed char",
@@ -165,6 +165,7 @@ const char* C_TYPE_CLASS_NAMES[29] = {
     "union",
     "function",
     "pointer",
+    "label",
     "error"
 };
 

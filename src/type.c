@@ -1464,7 +1464,7 @@ void assign_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
     // label identifier
     if (parent->type == SC_LABELED_STATEMENT)
     {
-        sy->type = NULL; // labels go untyped
+        sy->type = make_basic_type(CTC_LABEL); // fake type for label to avoid null ptr issues
         return;
     }
 

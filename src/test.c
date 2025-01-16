@@ -14,7 +14,7 @@ PARSER - parse(tokens): take the preprocessed tokens and arrange them into a tre
 TYPER - type(tree): takes the tree and types all of the symbols associated with it
 STATIC ANALYZER - analyze(tree): takes the tree and catches errors in the semantics of it, along with typing expressions
 (NOT WRITTEN) LINEARIZER - linearize(tree): takes the tree and converts it into a list of assembly instructions/macros/labels
-(NOT WRITTEN) ALLOCATOR - allocate(ir): takes the IR from the linearization and properly allocates its register usage
+(NOT WRITTEN) ALLOCATOR - allocate(list): takes the linearized code and properly allocates its register usage
 
 once all of these steps are done, it will take the list and dump it into the output file
 
@@ -50,7 +50,8 @@ int main(int argc, char** argv)
     if (type_errors)
     {
         dump_errors(type_errors);
-        return 1;
+        if (error_list_size(type_errors, false) > 0)
+            return 1;
     }
 
     printf("<<typed symbol table>>\n");
@@ -60,7 +61,8 @@ int main(int argc, char** argv)
     if (errors)
     {
         dump_errors(errors);
-        return 1;
+        if (error_list_size(errors, false) > 0)
+            return 1;
     }
 
     printf("<<typed syntax tree>>\n");
