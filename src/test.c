@@ -30,45 +30,49 @@ int main(int argc, char** argv)
     }
     FILE* file = fopen(argv[1], "r");
 
-    lexer_token_t* tokens = lex(file);
+    preprocessor_token_t* tokens = lex_new(file, true);
     if (!tokens) return 1;
 
-    // printf("<<lexer output>>\n");
-    // for (lexer_token_t* tok = tokens; tok; tok = tok->next)
-    //     print_token(tok, printf);
-
-    syntax_component_t* tlu = parse(tokens);
-    if (!tlu) return 1;
-
-    printf("<<parser output>>\n");
-    print_syntax(tlu, printf);
-
-    printf("<<symbol table>>\n");
-    symbol_table_print(tlu->tlu_st, printf);
-
-    analysis_error_t* type_errors = type(tlu);
-    if (type_errors)
+    printf("<<lexer output>>\n");
+    for (preprocessor_token_t* token = tokens; token; token = token->next)
     {
-        dump_errors(type_errors);
-        if (error_list_size(type_errors, false) > 0)
-            return 1;
+        pp_token_print(token, printf);
+        printf("\n");
     }
 
-    printf("<<typed symbol table>>\n");
-    symbol_table_print(tlu->tlu_st, printf);
+    // syntax_component_t* tlu = parse(tokens);
+    // if (!tlu) return 1;
 
-    analysis_error_t* errors = analyze(tlu);
-    if (errors)
-    {
-        dump_errors(errors);
-        if (error_list_size(errors, false) > 0)
-            return 1;
-    }
+    // printf("<<parser output>>\n");
+    // print_syntax(tlu, printf);
 
-    printf("<<typed syntax tree>>\n");
-    print_syntax(tlu, printf);
+    // printf("<<symbol table>>\n");
+    // symbol_table_print(tlu->tlu_st, printf);
 
-    fclose(file);
-    free_syntax(tlu, tlu);
+    // analysis_error_t* type_errors = type(tlu);
+    // if (type_errors)
+    // {
+    //     dump_errors(type_errors);
+    //     if (error_list_size(type_errors, false) > 0)
+    //         return 1;
+    // }
+
+    // printf("<<typed symbol table>>\n");
+    // symbol_table_print(tlu->tlu_st, printf);
+
+    // analysis_error_t* errors = analyze(tlu);
+    // if (errors)
+    // {
+    //     dump_errors(errors);
+    //     if (error_list_size(errors, false) > 0)
+    //         return 1;
+    // }
+
+    // printf("<<typed syntax tree>>\n");
+    // print_syntax(tlu, printf);
+
+    // fclose(file);
+    // free_syntax(tlu, tlu);
+    pp_token_delete_all(tokens);
     return 0;
 }

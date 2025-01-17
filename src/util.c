@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
+
+#define max(x, y) ((x) > (y) ? (x) : (y))
 
 const bool debug_m = true;
 
@@ -44,4 +47,32 @@ bool streq(char* s1, char* s2)
 bool in_debug(void)
 {
     return debug_m;
+}
+
+int int_array_index_max(int* array, size_t length)
+{
+    if (!length)
+        return -1;
+    int mi = -1, max_value = -0x80000000;
+    for (size_t i = 0; i < length; ++i)
+    {
+        if (array[i] > max_value)
+        {
+            max_value = array[i];
+            mi = i;
+        }
+    }
+    return mi;
+}
+
+void print_int_array(int* array, size_t length)
+{
+    printf("[");
+    for (int i = 0; i < length; ++i)
+    {
+        if (i != 0)
+            printf(", ");
+        printf("%d", array[i]);
+    }
+    printf("]\n");
 }

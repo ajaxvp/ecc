@@ -74,10 +74,231 @@
 #define KEYWORD_COMPLEX 35
 #define KEYWORD_IMAGINARY 36
 
+typedef enum c_keyword
+{
+    KW_AUTO,
+    KW_BREAK,
+    KW_CASE,
+    KW_CHAR,
+    KW_CONST,
+    KW_CONTINUE,
+    KW_DEFAULT,
+    KW_DO,
+    KW_DOUBLE,
+    KW_ELSE,
+    KW_ENUM,
+    KW_EXTERN,
+    KW_FLOAT,
+    KW_FOR,
+    KW_GOTO,
+    KW_IF,
+    KW_INLINE,
+    KW_INT,
+    KW_LONG,
+    KW_REGISTER,
+    KW_RESTRICT,
+    KW_RETURN,
+    KW_SHORT,
+    KW_SIGNED,
+    KW_SIZEOF,
+    KW_STATIC,
+    KW_STRUCT,
+    KW_SWITCH,
+    KW_TYPEDEF,
+    KW_UNION,
+    KW_UNSIGNED,
+    KW_VOID,
+    KW_VOLATILE,
+    KW_WHILE,
+    KW_BOOL,
+    KW_COMPLEX,
+    KW_IMAGINARY,
+    KW_ELEMENTS,
+} c_keyword_t;
+
+typedef enum preprocessor_token_type
+{
+    PPT_HEADER_NAME,
+    PPT_IDENTIFIER,
+    PPT_PP_NUMBER,
+    PPT_CHARACTER_CONSTANT,
+    PPT_STRING_LITERAL,
+    PPT_PUNCTUATOR,
+    PPT_OTHER,
+    PPT_COMMENT,
+    PPT_WHITESPACE,
+    PPT_NO_ELEMENTS
+} preprocessor_token_type_t;
+
+typedef enum punctuator_type
+{
+    P_LEFT_BRACKET,
+    P_RIGHT_BRACKET,
+    P_LEFT_PARENTHESIS,
+    P_RIGHT_PARENTHESIS,
+    P_LEFT_BRACE,
+    P_RIGHT_BRACE,
+    P_PERIOD,
+    P_DEREFERENCE_MEMBER,
+    P_INCREMENT,
+    P_DECREMENT,
+    P_AND,
+    P_ASTERISK,
+    P_PLUS,
+    P_MINUS,
+    P_TILDE,
+    P_EXCLAMATION_POINT,
+    P_SLASH,
+    P_PERCENT,
+    P_LEFT_SHIFT,
+    P_RIGHT_SHIFT,
+    P_LESS,
+    P_GREATER,
+    P_LESS_EQUAL,
+    P_GREATER_EQUAL,
+    P_EQUAL,
+    P_INEQUAL,
+    P_CARET,
+    P_PIPE,
+    P_LOGICAL_AND,
+    P_LOGICAL_OR,
+    P_QUESTION_MARK,
+    P_COLON,
+    P_SEMICOLON,
+    P_ELLIPSIS,
+    P_ASSIGNMENT,
+    P_MULTIPLY_ASSIGNMENT,
+    P_DIVIDE_ASSIGNMENT,
+    P_MODULO_ASSIGNMENT,
+    P_ADD_ASSIGNMENT,
+    P_SUB_ASSIGNMENT,
+    P_SHIFT_LEFT_ASSIGNMENT,
+    P_SHIFT_RIGHT_ASSIGNMENT,
+    P_BITWISE_AND_ASSIGNMENT,
+    P_BITWISE_XOR_ASSIGNMENT,
+    P_BITWISE_OR_ASSIGNMENT,
+    P_COMMA,
+    P_HASH,
+    P_DOUBLE_HASH,
+    P_DIGRAPH_LEFT_BRACKET,
+    P_DIGRAPH_RIGHT_BRACKET,
+    P_DIGRAPH_LEFT_BRACE,
+    P_DIGRAPH_RIGHT_BRACE,
+    P_DIGRAPH_HASH,
+    P_DIGRAPH_DOUBLE_HASH,
+    P_NO_ELEMENTS
+} punctuator_type_t;
+
+typedef enum token_type
+{
+    T_KEYWORD,
+    T_IDENTIFIER,
+    T_INTEGER_CONSTANT,
+    T_FLOATING_CONSTANT,
+    T_CHARACTER_CONSTANT,
+    T_STRING_LITERAL,
+    T_PUNCTUATOR
+} token_type_t;
+
 typedef struct symbol_table_t symbol_table_t;
 typedef struct syntax_traverser syntax_traverser_t;
 typedef struct analysis_error analysis_error_t;
 typedef struct syntax_component_t syntax_component_t;
+typedef struct preprocessor_token preprocessor_token_t;
+
+typedef struct preprocessor_token
+{
+    preprocessor_token_type_t type;
+    unsigned row, col;
+    preprocessor_token_t* next;
+    union
+    {
+        // PPT_HEADER_NAME
+        struct
+        {
+            bool quote_delimited;
+            char* name;
+        } header_name;
+
+        // PPT_IDENTIFIER
+        char* identifier;
+
+        // PPT_PP_NUMBER
+        char* pp_number;
+
+        // PPT_CHARACTER_CONSTANT
+        struct
+        {
+            int value;
+            bool wide;
+        } character_constant;
+
+        // PPT_STRING_LITERAL
+        struct
+        {
+            char* value;
+            bool wide;
+        } string_literal;
+
+        // PPT_PUNCTUATOR
+        punctuator_type_t punctuator;
+
+        // PPT_WHITESPACE
+        char* whitespace;
+
+        // PPT_COMMENT
+        char* comment;
+
+        // PPT_OTHER
+        unsigned char other;
+    };
+} preprocessor_token_t;
+
+typedef struct token_t
+{
+    token_type_t type;
+    unsigned row, col;
+    token_t* next;
+    union
+    {
+        // T_KEYWORD
+        c_keyword_t keyword;
+
+        // T_IDENTIFIER
+        char* identifier;
+
+        // T_INTEGER_CONSTANT
+        struct
+        {
+            unsigned long long value;
+            c_type_class_t class;
+        } integer_constant;
+
+        // T_FLOATING_CONSTANT
+        struct
+        {
+            long double value;
+            c_type_class_t class;
+        } floating_constant;
+
+        // T_CHARACTER_CONSTANT
+        struct
+        {
+            int value;
+            bool wide;
+        } character_constant;
+
+        // T_STRING_LITERAL
+        struct
+        {
+            char* value;
+            bool wide;
+        } string_literal;
+
+        // T_PUNCTUATOR
+        punctuator_type_t punctuator;
+    };
+} token_t;
 
 typedef struct lexer_token_t
 {
@@ -826,6 +1047,7 @@ int snerrorf(char* buffer, size_t maxlen, char* fmt, ...);
 buffer_t* buffer_init(void);
 buffer_t* buffer_append(buffer_t* b, char c);
 buffer_t* buffer_append_str(buffer_t* b, char* str);
+buffer_t* buffer_pop(buffer_t* b);
 void buffer_delete(buffer_t* b);
 char* buffer_export(buffer_t* b);
 
@@ -872,8 +1094,15 @@ extern const char* ABSTRACT_DECLARATOR_NAMES[4];
 extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];
 extern const char* C_TYPE_CLASS_NAMES[30];
+extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
+extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 
 /* lex.c */
+preprocessor_token_t* lex_new(FILE* file, bool dump_error);
+void pp_token_delete_all(preprocessor_token_t* tokens);
+void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...));
+
+// old
 lexer_token_t* lex(FILE* file);
 void lex_delete(lexer_token_t* start);
 void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...));
@@ -989,6 +1218,8 @@ c_type_t* type_copy(c_type_t* ct);
 char* strdup(char* str);
 bool contains_substr(char* str, char* substr);
 bool streq(char* s1, char* s2);
+int int_array_index_max(int* array, size_t length);
+void print_int_array(int* array, size_t length);
 
 /* from somewhere */
 bool in_debug(void);

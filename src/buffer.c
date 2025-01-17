@@ -34,6 +34,14 @@ buffer_t* buffer_append_str(buffer_t* b, char* str)
     return b;
 }
 
+buffer_t* buffer_pop(buffer_t* b)
+{
+    if (!b->size)
+        return b;
+    --b->size;
+    return b;
+}
+
 char* buffer_export(buffer_t* b)
 {
     char* str = malloc(b->size + 1);

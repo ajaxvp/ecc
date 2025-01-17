@@ -1,497 +1,1129 @@
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #include "cc.h"
 
-#define lex_terminate(pos, fmt, ...) terminate("(line %d, col. %d) " fmt, pos->row, pos->col, ## __VA_ARGS__)
+/*
 
-#define isloweralpha(x) ((x) >= 'a' && (x) <= 'z')
-#define isupperalpha(x) ((x) >= 'A' && (x) <= 'Z')
-#define isnumeric(x) ((x) >= '0' && (x) <= '9')
-#define isalpha_cc(x) (isloweralpha((x)) || isupperalpha((x)))
-#define isalphanumeric(x) (isalpha_cc((x)) || isnumeric((x)))
+TODO HERE:
+ - allow for backslash line continuation
+ - figure out some crap with character constants
+ - do the things i said down in string literals
 
-#define IGNORE_TOKEN ((lexer_token_t*) 1)
+*/
 
-typedef struct filepos_t
+#define MAX_ERROR_LENGTH 512
+
+typedef struct lex_state
 {
+    unsigned char* data;
+    size_t length;
+    long long cursor;
     unsigned row, col;
-    unsigned pcol;
-} filepos_t;
+    bool counting;
+    int counter;
+    char* error;
+    int include_condition;
+} lex_state_t;
 
-int unread_buffer[1024];
-int unread_buffer_pos = -1;
-
-static int readc_opt_term(FILE* file, filepos_t* pos, bool terminate_eof)
+void lex_state_delete(lex_state_t* state)
 {
-    int c;
-    if (unread_buffer_pos == -1)
-        c = fgetc(file);
-    else
-        c = unread_buffer[unread_buffer_pos--];
-    if (c == EOF)
-    {
-        if (terminate_eof)
-            lex_terminate(pos, "reached end of file while parsing token")
-        else
-            return c;
-    }
+    if (!state) return;
+    free(state->data);
+    free(state->error);
+    free(state);
+}
+
+static int read_impl(lex_state_t* state)
+{
+    // if (state->cursor + 1 < state->length &&
+    //     state->data[state->cursor] == '\\' &&
+    //     state->data[state->cursor + 1] == '\n')
+    //     state->cursor += 2;
+
+    if (state->cursor >= state->length)
+        return EOF;
+
+    int c = state->data[state->cursor++];
     if (c == '\n')
     {
-        ++(pos->row);
-        pos->pcol = pos->col;
-        pos->col = 1;
+        ++state->row;
+        state->col = 1;
     }
     else
-        ++(pos->col);
+        ++state->col;
     return c;
 }
 
-static int readc(FILE* file, filepos_t* pos)
+static unsigned get_column(lex_state_t* state, long long cursor)
 {
-    return readc_opt_term(file, pos, true);
+    long long orig = cursor;
+    for (--cursor; cursor >= 0 && state->data[cursor] != '\n'; --cursor);
+    if (cursor == -1)
+        return 1;
+    return orig - cursor;
 }
 
-static void unreadc(int c, FILE* file, filepos_t* pos)
+static bool unread_impl(lex_state_t* state)
 {
-    unread_buffer[++unread_buffer_pos] = c;
+    if (state->cursor <= 0)
+    {
+        state->cursor = 0;
+        return false;
+    }
+    int c = state->data[--state->cursor];
     if (c == '\n')
     {
-        --(pos->row);
-        pos->col = pos->pcol;
+        // if (state->cursor >= 1 && state->data[state->cursor - 1] == '\\')
+        // {
+            
+        // }
+        --state->row;
+        state->col = get_column(state, state->cursor);
     }
     else
-        --(pos->col);
+        --state->col;
+    return true;
 }
 
-static int peekc(FILE* file, filepos_t* pos)
+static bool jump_impl(lex_state_t* state, long long cursor, unsigned row, unsigned col)
 {
-    int c = readc_opt_term(file, pos, false);
-    unreadc(c, file, pos);
-    return c;
+    state->cursor = cursor;
+    state->row = row;
+    state->col = col;
+    return true;
 }
 
-// this monstrosity of a function handles EVERY SINGLE TOKEN
-static lexer_token_t* lex_single(FILE* file, filepos_t* pos)
+static preprocessor_token_t* add_token(preprocessor_token_t* head, preprocessor_token_t* token)
 {
-    int c = readc_opt_term(file, pos, false);
-    lexer_token_t* tok = calloc(1, sizeof *tok);
-    tok->row = pos->row;
-    tok->col = pos->col;
-    tok->next = NULL;
-    tok->type = LEXER_TOKEN_OPERATOR; // (it's the most common token)
-    int cpk = peekc(file, pos);
-    bool chk_long_const = c == 'L' && (cpk == '"' || cpk == '\'');
-    bool is_unicode_identifier = c == '\\' && (tolower(cpk) == 'u');
-    if ((isalpha_cc(c) || c == '_' || is_unicode_identifier) && !chk_long_const)
-    {
-        buffer_t* b = buffer_init();
-        buffer_append(b, c);
-        int d = readc(file, pos);
-        for (; isalphanumeric(d) || d == '\\' || d == '_'; d = readc(file, pos))
-        {
-            // LOL UNICODEEEEEEEEEEE
-            if (d == '\\' || is_unicode_identifier) // is_unicode_identifier is reused here to catch the skipped backslash
-            {
-                int digits = d == 'u' ? 4 : 8;
-                buffer_append(b, d);
-                int e = readc(file, pos);
-                if (d == '\\')
-                {
-                    if (tolower(e) != 'u') lex_terminate(pos, "expected 'u' or 'U' for unicode character in identifier");
-                    buffer_append(b, e);
-                    digits = e == 'u' ? 4 : 8;
-                    e = readc(file, pos); // skip past u or U
-                }
-                for (unsigned i = 0; i < digits; ++i)
-                {
-                    if (!isnumeric(e) && (tolower(e) < 'a' || tolower(e) > 'f'))
-                        lex_terminate(pos, "expected %d hexadecimal digits for unicode character", digits);
-                    buffer_append(b, e);
-                    e = readc(file, pos);
-                }
-                unreadc(e, file, pos);
-                is_unicode_identifier = false;
-                continue;
-            }
-            buffer_append(b, d);
-        }
-        unreadc(d, file, pos); // get rid of the non-alphanumeric character at the end
-        // check if it's a keyword
-        for (unsigned i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); ++i)
-        {
-            if (!strcmp(b->data, KEYWORDS[i])) // compare the found identifier to each keyword
-            {
-                // if found, return the keyword
-                tok->type = LEXER_TOKEN_KEYWORD;
-                tok->keyword_id = i;
-                buffer_delete(b);
-                return tok;
-            }
-        }
-        tok->type = LEXER_TOKEN_IDENTIFIER;
-        tok->string_value = buffer_export(b);
-        buffer_delete(b);
-        return tok;
-    }
-    if (c == '*' || c == '%' || c == '^' || c == '=' || c == '!')
-    {
-        tok->operator_id = c;
-        if (peekc(file, pos) == '=')
-        {
-            readc(file, pos);
-            tok->operator_id = c * '=';
-        }
-        return tok;
-    }
-    if (c == '/')
-    {
-        tok->operator_id = c;
-        int d = peekc(file, pos);
-        if (d == '=')
-        {
-            readc(file, pos);
-            tok->operator_id = c * '=';
-        }
-        if (d == '/')
-        {
-            readc(file, pos); // go past '/'
-            for (;;)
-            {
-                int e = readc_opt_term(file, pos, false);
-                if (e == '\n' || e == EOF)
-                    break;
-            }
-            free(tok);
-            return IGNORE_TOKEN;
-        }
-        if (d == '*')
-        {
-            readc(file, pos); // go past '*'
-            while (readc(file, pos) != '*');
-            int e = readc(file, pos);
-            if (e != '/') lex_terminate(pos, "expected '*/' to end block comment");
-            free(tok);
-            return IGNORE_TOKEN;
-        }
-        return tok;
-    }
-    if (c == '+')
-    {
-        tok->operator_id = c;
-        int d = peekc(file, pos);
-        if (d == c || d == '=')
-        {
-            readc(file, pos);
-            tok->operator_id = c * d;
-        }
-        return tok;
-    }
-    if (c == '-')
-    {
-        tok->operator_id = c;
-        int d = peekc(file, pos);
-        if (d == c || d == '=' || d == '>')
-        {
-            readc(file, pos);
-            tok->operator_id = c * d;
-        }
-        return tok;
-    }
-    if (c == '&' || c == '|')
-    {
-        tok->operator_id = c;
-        int d = peekc(file, pos);
-        if (d == c || d == '=')
-        {
-            readc(file, pos);
-            tok->operator_id = c * d;
-        }
-        return tok;
-    }
-    if (c == '<' || c == '>')
-    {
-        tok->operator_id = c;
-        int d = peekc(file, pos);
-        if (d == c)
-        {
-            readc(file, pos);
-            tok->operator_id = c * d;
-            int e = peekc(file, pos);
-            if (e == '=')
-            {
-                readc(file, pos);
-                tok->operator_id = c * d * e;
-            }
-        }
-        if (d == '=')
-        {
-            readc(file, pos);
-            tok->operator_id = c * d;
-        }
-        return tok;
-    }
-    if (c == '~' || c == '[' || c == ']' || c == '?' || c == ':')
-    {
-        tok->operator_id = c;
-        return tok;
-    }
-    int maybe_num = peekc(file, pos);
-    if (c == '.' && !isnumeric(maybe_num))
-    {
-        tok->operator_id = c;
-        int d = readc(file, pos);
-        int e = readc(file, pos);
-        if (d == c && e == c)
-            tok->operator_id = c * d * e;
-        else
-        {
-            unreadc(e, file, pos);
-            unreadc(d, file, pos);
-        }
-        return tok;
-    }
-    if (c == '(' || c == ')' || c == '{' || c == '}' || c == ',' || c == ';')
-    {
-        tok->type = LEXER_TOKEN_SEPARATOR;
-        tok->operator_id = c;
-        return tok;
-    }
-    if (isnumeric(c) || c == '.')
-    {
-        buffer_t* b = buffer_init();
-        buffer_append(b, c); // add the first character
-
-        // check for prefix
-        int d = peekc(file, pos);
-        bool hex = d == 'x' || d == 'X';
-        bool binary = d == 'b' || d == 'B';
-        bool prefixed = hex || binary;
-        if (prefixed)
-            buffer_append(b, readc(file, pos));
-        
-        bool floating = false, numbers = false;
-        int e = readc(file, pos);
-        int decimals = 0;
-        // read the significand (for floats) or the whole number (for integers)
-        // allow for a-f when hex is true
-        // allow for decimal points but only one
-        for (; isnumeric(e) || (hex && tolower(e) >= 'a' && tolower(e) <= 'f') || e == '.'; e = readc(file, pos))
-        {
-            if (e == '.') 
-            {
-                ++decimals; // count the decimals
-                floating = true; // if there's a decimal, it must be a floating point number
-                // if there's more than one decimal, get em out
-                if (decimals > 1) lex_terminate(pos, "too many decimals in floating point literal");
-            }
-            else
-                numbers = true;
-            // if a digit provided is greater than 1 and the number is binary by prefix, get em out
-            if (e >= '2' && binary) lex_terminate(pos, "only digits 0 and 1 allowed in binary literal");
-            // if a digit provided is greater than 7 and the number has a leading zero and is not prefixed (octal), get em out
-            if (e >= '8' && c == '0' && !prefixed) lex_terminate(pos, "only digits 0-7 allowed in octal literal");
-            // add the digit
-            buffer_append(b, e);
-        }
-        if (prefixed && !numbers) lex_terminate(pos, "expected a number after the prefix");
-        // record here if the for loop's failure was on an E or a P (exponent)
-        bool e_exp = tolower(e) == 'e';
-        bool p_exp = tolower(e) == 'p';
-        if (e_exp || p_exp) // if either is found, handle em
-        {
-            // don't allow integer literal prefixes with 'E' notation
-            if (e_exp && prefixed) lex_terminate(pos, "integer literal prefixes not allowed for 'E' exponent notation");
-            // only allow hex literals with 'P' notation
-            if (p_exp && !hex) lex_terminate(pos, "expected hexadecimal constant for 'P' exponent notation");
-            floating = true; // this number is by necessity floating
-            buffer_append(b, e); // add the loop failure character
-            int f = readc(file, pos);
-            bool numbers = false;
-            // read numbers for the exponent and allow for +s and -s
-            for (int signs = 0; isnumeric(f) || f == '+' || f == '-'; f = readc(file, pos))
-            {
-                if (f == '+' || f == '-') // if it's a + or a -
-                {
-                    ++signs; // add to the signs count
-                    // if there is more than one sign or if the sign is not at the start, get em out
-                    if (signs > 1 || numbers) lex_terminate(pos, "malformed use of the exponent sign");
-                }
-                else numbers = true;
-                buffer_append(b, f);
-            }
-            // update the outer character with the one bound for looping over the digits of the exponent, which should be right past the those digits
-            e = f;
-            // make sure they actually put in an exponent number
-            if (!numbers) lex_terminate(pos, "exponent expected after 'E' or 'P' exponent notation");
-        }
-        // loop here and find suffixes
-        bool f_suffix = false, u_suffix = false, l_suffix = false, ll_suffix = false;
-        for (; tolower(e) == 'f' || tolower(e) == 'l' || tolower(e) == 'u'; e = readc(file, pos))
-        {
-            if (tolower(e) == 'f')
-            {
-                if (f_suffix) lex_terminate(pos, "repeated use of 'F' suffix");
-                if (l_suffix || ll_suffix) lex_terminate(pos, "the 'L' and 'LL' suffixes cannot be used in conjunction with the 'F' suffix");
-                // f suffix does not work if there is no decimal point and no E or P extension
-                if (!floating) lex_terminate(pos, "decimal point or 'E' or 'P' exponent notation expected before 'F' suffix");
-                buffer_append(b, e);
-                f_suffix = true;
-            }
-            if (tolower(e) == 'l')
-            {
-                if (peekc(file, pos) == e)
-                {
-                    int g = readc(file, pos);
-                    if (ll_suffix) lex_terminate(pos, "repeated use of the 'LL' suffix");
-                    if (l_suffix) lex_terminate(pos, "constant already has 'L' suffix");
-                    if (floating) lex_terminate(pos, "'LL' suffix can only be used for non-floating point constants");
-                    buffer_append(b, e);
-                    buffer_append(b, g);
-                    ll_suffix = true;
-                }
-                else
-                {
-                    if (l_suffix) lex_terminate(pos, "repeated use of the 'L' suffix");
-                    if (ll_suffix) lex_terminate(pos, "constant already has 'LL' suffix");
-                    buffer_append(b, e);
-                    l_suffix = true;
-                }
-            }
-            if (tolower(e) == 'u')
-            {
-                if (u_suffix) lex_terminate(pos, "repeated use of the 'U' suffix");
-                if (f_suffix) lex_terminate(pos, "the 'F' suffix cannot be used in conjunction with the 'F' suffix");
-                if (floating) lex_terminate(pos, "'U' suffix can only be used for non-floating point constants");
-                buffer_append(b, e);
-                u_suffix = true;
-            }
-        }
-        unreadc(e, file, pos);
-        tok->type = floating ? LEXER_TOKEN_FLOATING_CONSTANT : LEXER_TOKEN_INTEGER_CONSTANT;
-        tok->string_value = buffer_export(b);
-        buffer_delete(b);
-        return tok;
-    }
-    if (chk_long_const || c == '"' || c == '\'')
-    {
-        buffer_t* b = buffer_init();
-        buffer_append(b, c);
-        if (chk_long_const)
-            buffer_append(b, c = readc(file, pos));
-        bool string_const = c == '"';
-        c = readc(file, pos);
-        // i know this condition expression is ridiculous but i cba to invert everything
-        for (bool escape = false; !(!escape && ((c == '"' && string_const) || (c == '\'' && !string_const))); escape = c == '\\' && !escape, c = readc(file, pos))
-            buffer_append(b, c);
-        buffer_append(b, c); // add ending quote
-        tok->type = string_const ? LEXER_TOKEN_STRING_CONSTANT : LEXER_TOKEN_CHARACTER_CONSTANT;
-        tok->string_value = buffer_export(b);
-        buffer_delete(b);
-        return tok;
-    }
-    if (c == EOF)
-        return NULL;
-    free(tok);
-    return IGNORE_TOKEN;
+    preprocessor_token_t* orig = head;
+    if (!head) return token;
+    for (; head->next; head = head->next);
+    head->next = token;
+    return orig;
 }
 
-lexer_token_t* lex(FILE* file)
+static bool in_source_charset(int c)
 {
-    if (!file)
-        return NULL;
-    lexer_token_t* start = NULL, * current = NULL;
-    filepos_t pos;
-    pos.row = 1;
-    pos.col = 1;
-    pos.pcol = 1;
-    for (;;)
+    return true; // all characters are in the source charset! :)
+}
+
+static bool is_nondigit(int c)
+{
+    return (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        c == '_';
+}
+
+static bool is_digit(int c)
+{
+    return c >= '0' && c <= '9';
+}
+
+static bool is_octal_digit(int c)
+{
+    return c >= '0' && c <= '7';
+}
+
+static bool is_hexadecimal_digit(int c)
+{
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool is_whitespace(int c)
+{
+    return c == ' ' || c == '\t' || c == '\v' || c == '\n' || c == '\f';
+}
+
+// gets the actual value hex value for a char 0-9 or A-F or a-f
+int hexadecimal_digit_value(int c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return (c - 'A') + 10;
+    if (c >= 'a' && c <= 'f')
+        return (c - 'a') + 10;
+    return -1;
+}
+
+void pp_token_delete(preprocessor_token_t* token)
+{
+    if (!token) return;
+    switch (token->type)
     {
-        lexer_token_t* tok = lex_single(file, &pos);
-        if (!tok)
+        case PPT_STRING_LITERAL:
+            free(token->string_literal.value);
             break;
-        if (tok == IGNORE_TOKEN)
-            continue;
-        if (!start)
-            start = tok;
-        if (current)
-            current->next = tok;
-        current = tok;
+        case PPT_IDENTIFIER:
+            free(token->identifier);
+            break;
+        case PPT_PP_NUMBER:
+            free(token->pp_number);
+            break;
+        case PPT_HEADER_NAME:
+            free(token->header_name.name);
+            break;
+        case PPT_COMMENT:
+            free(token->comment);
+            break;
+        case PPT_WHITESPACE:
+            free(token->whitespace);
+            break;
+        default:
+            break;
     }
-    return start;
+    free(token);
 }
 
-// delete an entire chain of tokens
-void lex_delete(lexer_token_t* start)
+void pp_token_delete_all(preprocessor_token_t* tokens)
 {
-    if (!start) return;
-    if (start->type == LEXER_TOKEN_IDENTIFIER || (start->type >= LEXER_TOKEN_INTEGER_CONSTANT && start->type <= LEXER_TOKEN_STRING_CONSTANT))
-        free(start->string_value);
-    lexer_token_t* nxt = start->next;
-    free(start);
-    lex_delete(nxt);
+    if (!tokens) return;
+    pp_token_delete_all(tokens->next);
+    pp_token_delete(tokens);
 }
 
-void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...))
+void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...))
 {
-    if (!tok) return;
-    printer("lexer_token_t {\n");
-    printer("    type: %s\n", LEXER_TOKEN_NAMES[tok->type]);
-    printer("    row: %d\n", tok->row);
-    printer("    col: %d\n", tok->col);
-    switch (tok->type)
+    if (!token) return;
+    printer("preprocessor token { type: %s, line: %u, column: %u", PP_TOKEN_NAMES[token->type], token->row, token->col);
+    switch (token->type)
     {
-        case LEXER_TOKEN_KEYWORD:
+        case PPT_HEADER_NAME:
         {
-            printer("    keyword: %s\n", KEYWORDS[tok->keyword_id]);
+            printer(", name: \"%s\", quote delimited: %s", token->header_name.name, BOOL_NAMES[token->header_name.quote_delimited]);
             break;
         }
-        case LEXER_TOKEN_OPERATOR:
+        case PPT_IDENTIFIER:
         {
-            printer("    operator_id: %d\n", tok->operator_id);
+            printer(", identifier: \"%s\"", token->identifier);
             break;
         }
-        case LEXER_TOKEN_SEPARATOR:
+        case PPT_PP_NUMBER:
         {
-            printer("    separator_id: %d\n", tok->separator_id);
+            printer(", pp number: %s", token->pp_number);
+            break;
+        }
+        case PPT_CHARACTER_CONSTANT:
+        {
+            printer(", value: %d, wide: %s", token->character_constant.value, BOOL_NAMES[token->character_constant.wide]);
+            break;
+        }
+        case PPT_STRING_LITERAL:
+        {
+            printer(", value: \"%s\", wide: %s", token->string_literal.value, BOOL_NAMES[token->string_literal.wide]);
+            break;
+        }
+        case PPT_PUNCTUATOR:
+        {
+            printer(", punctuator: %s", PUNCTUATOR_STRING_REPRS[token->punctuator]);
+            break;
+        }
+        case PPT_OTHER:
+        {
+            printer(", value: %c", token->other);
+            break;
+        }
+        case PPT_COMMENT:
+        {
+            printer(", comment: \"%s\"", token->comment);
             break;
         }
         default:
-        {
-            printer("    string_value: %s\n", tok->string_value);
             break;
+    }
+    printer(" }");
+}
+
+typedef preprocessor_token_t* (*lex_function)(lex_state_t* state);
+
+#define create_jump(x) int x##_cursor = state->cursor; unsigned x##_row = state->row; unsigned x##_col = state->col;
+#define jump(x) jump_impl(state, x##_cursor, x##_row, x##_col)
+#define init_base int c = 0, p = 0; create_jump(o)
+#define init_helper init_base
+#define init_lex(t) \
+    init_base \
+    state->counter = 0; \
+    preprocessor_token_t* token = calloc(1, sizeof *token); \
+    token->type = t; \
+    token->row = state->row; \
+    token->col = state->col;
+#define cleanup_retreat jump(o)
+#define cleanup_helper cleanup_retreat
+#define cleanup_lex_fail cleanup_retreat, pp_token_delete(token)
+#define cleanup_lex_pass state->counting ? (cleanup_lex_fail) : (void) 0
+#define read (++state->counter, c = read_impl(state))
+#define unread (--state->counter, unread_impl(state))
+#define peek (p = read_impl(state), p != EOF ? unread_impl(state) : false, p)
+#define SET_ERROR(fmt, ...) snerrorf(state->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt "\n", state->row, state->col, ## __VA_ARGS__)
+
+preprocessor_token_t* lex_header_name(lex_state_t* state)
+{
+    init_lex(PPT_HEADER_NAME);
+    if (peek != '<' && peek != '"')
+    {
+        cleanup_lex_fail;
+        SET_ERROR("expected '<' or '\"' for start of header name");
+        return NULL;
+    }
+    read;
+    int ending = c == '<' ? '>' : '"';
+    buffer_t* buf = buffer_init();
+    while (in_source_charset(read) && c != '\n' && c != ending)
+        buffer_append(buf, c);
+    if (c != ending)
+    {
+        cleanup_lex_fail;
+        buffer_delete(buf);
+        SET_ERROR("expected '%c' for end of header name", ending);
+        return NULL;
+    }
+    token->header_name.name = buffer_export(buf);
+    buffer_delete(buf);
+    token->header_name.quote_delimited = ending == '"';
+    cleanup_lex_pass;
+    return token;
+}
+
+// expects a string of form "\uXXXX" or "\uXXXXXXXX"
+unsigned get_universal_character_hex_value(char* unichar)
+{
+    size_t length = strlen(unichar);
+    long long value = 0;
+    for (int i = 0; i < (length == 6 ? 4 : 8); ++i)
+        value = (value << 4) | hexadecimal_digit_value(unichar[i + 2]);
+    return value;
+}
+
+unsigned get_universal_character_utf8_encoding(unsigned value)
+{
+    if (value < 0x80)
+        return value;
+    unsigned first = (value & 0xF) | (((value >> 4) & 0x3) << 4) | (0x2 << 6);
+    if (value < 0x800)
+        return first | (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x3 << 14);
+    unsigned second = (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x2 << 14);
+    if (value < 0x10000)
+        return first | second | (0xE << 20) | (((value >> 12) & 0xF) << 16);
+    unsigned third = ((value >> 12) & 0xF) << 16 | (((value >> 16) & 0x3) << 20) | (0x2 << 22);
+    if (value < 0x110000)
+        return first | second | third | (0xF << 28) | (((value >> 18) & 0x3) << 24) | (((value >> 20) & 0x1) << 26);
+    return 0;
+}
+
+// gives back a string of form "\uXXXX" or "\uXXXXXXXX"
+char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
+{
+    init_helper;
+    buffer_t* buf = buffer_init();
+    if (peek != '\\')
+    {
+        cleanup_helper;
+        buffer_delete(buf);
+        SET_ERROR("expected universal character of form '\\uXXXX' or '\\uXXXXXXXX'");
+        return NULL;
+    }
+    buffer_append(buf, read);
+    if (peek != 'u' && peek != 'U')
+    {
+        cleanup_helper;
+        buffer_delete(buf);
+        SET_ERROR("expected universal character of form '\\uXXXX' or '\\uXXXXXXXX'");
+        return NULL;
+    }
+    int type = read;
+    buffer_append(buf, type);
+    int i = 0;
+    for (; i < 4 && is_hexadecimal_digit(peek); ++i)
+        buffer_append(buf, read);
+    if (i != 4)
+    {
+        cleanup_helper;
+        buffer_delete(buf);
+        SET_ERROR("universal character should have %d hex digits with '\\%c' prefix", type == 'u' ? 4 : 8, type);
+        return NULL;
+    }
+    if (type == 'U')
+    {
+        for (; i < 8 && is_hexadecimal_digit(peek); ++i)
+            buffer_append(buf, read);
+        if (i != 8)
+        {
+            cleanup_helper;
+            buffer_delete(buf);
+            SET_ERROR("universal character should have 8 hex digits with '\\U' prefix");
         }
     }
-    printer("}\n");
+    char* unichar = buffer_export(buf);
+    unsigned value = get_universal_character_hex_value(unichar);
+    buffer_delete(buf);
+    if ((value < 0x00A0U && value != 0x0024U && value != 0x0040U && value != 0x0060U) || (value >= 0xD800U && value <= 0xDFFFU))
+    {
+        cleanup_helper;
+        free(unichar);
+        // ISO: 6.4.3 (2)
+        SET_ERROR("invalid universal character name");
+        return NULL;
+    }
+    return unichar;
 }
 
-bool is_assignment_operator_token(lexer_token_t* tok)
+preprocessor_token_t* lex_identifier(lex_state_t* state)
 {
-    if (!tok) return false;
-    if (tok->type != LEXER_TOKEN_OPERATOR) return false;
-    return tok->operator_id == '=' ||
-        tok->operator_id == '*' * '=' ||
-        tok->operator_id == '/' * '=' ||
-        tok->operator_id == '%' * '=' ||
-        tok->operator_id == '+' * '=' ||
-        tok->operator_id == '-' * '=' ||
-        tok->operator_id == '<' * '<' * '=' ||
-        tok->operator_id == '>' * '>' * '=' ||
-        tok->operator_id == '&' * '=' ||
-        tok->operator_id == '^' * '=' ||
-        tok->operator_id == '|' * '=';
+    init_lex(PPT_IDENTIFIER);
+    buffer_t* buf = buffer_init();
+    for (;;)
+    {
+        if (is_nondigit(peek))
+        {
+            buffer_append(buf, read);
+            continue;
+        }
+        if (buf->size >= 1 && is_digit(peek))
+        {
+            buffer_append(buf, read);
+            continue;
+        }
+        if (peek == '\\')
+        {
+            char* unichar = lex_universal_character(state, token);
+            if (!unichar)
+            {
+                cleanup_lex_fail;
+                buffer_delete(buf);
+                // error provided by helper function
+                free(unichar);
+                return NULL;
+            }
+            buffer_append_str(buf, unichar);
+            free(unichar);
+            continue;
+        }
+        break;
+    }
+    if (!buf->size)
+    {
+        cleanup_lex_fail;
+        buffer_delete(buf);
+        SET_ERROR("identifier cannot be empty");
+        return NULL;
+    }
+    token->identifier = buffer_export(buf);
+    buffer_delete(buf);
+    if (!strcmp(token->identifier, "include"))
+        ++state->include_condition;
+    cleanup_lex_pass;
+    return token;
 }
 
-bool is_unary_operator_token(lexer_token_t* tok)
+preprocessor_token_t* lex_pp_number(lex_state_t* state)
 {
-    if (!tok) return false;
-    if (tok->type != LEXER_TOKEN_OPERATOR) return false;
-    return tok->operator_id == '&' ||
-        tok->operator_id == '*' ||
-        tok->operator_id == '+' ||
-        tok->operator_id == '-' ||
-        tok->operator_id == '~' ||
-        tok->operator_id == '!';
+    init_lex(PPT_PP_NUMBER);
+    buffer_t* buf = buffer_init();
+    if (peek == '.')
+        buffer_append(buf, read);
+    if (!is_digit(peek))
+    {
+        cleanup_lex_fail;
+        buffer_delete(buf);
+        SET_ERROR("expected at least one digit in number");
+        return NULL;
+    }
+    read;
+    buffer_append(buf, c);
+    for (;;)
+    {
+        if (is_digit(peek))
+        {
+            buffer_append(buf, read);
+            continue;
+        }
+        if (peek == '.')
+        {
+            buffer_append(buf, read);
+            continue;
+        }
+        if (peek == 'e' || peek == 'E' ||
+            peek == 'p' || peek == 'P')
+        {
+            buffer_append(buf, read);
+            if (peek == '+' || peek == '-')
+                buffer_append(buf, read);
+            continue;
+        }
+        if (is_nondigit(peek))
+        {
+            buffer_append(buf, read);
+            continue;
+        }
+        if (peek == '\\')
+        {
+            char* unichar = lex_universal_character(state, token);
+            if (!unichar)
+            {
+                cleanup_lex_fail;
+                buffer_delete(buf);
+                // error provided by helper function
+                free(unichar);
+                return NULL;
+            }
+            buffer_append_str(buf, unichar);
+            free(unichar);
+            continue;
+        }
+        break;
+    }
+    token->pp_number = buffer_export(buf);
+    buffer_delete(buf);
+    cleanup_lex_pass;
+    return token;
+}
+
+preprocessor_token_t* lex_character_constant(lex_state_t* state)
+{
+    init_lex(PPT_CHARACTER_CONSTANT);
+    if (peek == 'L')
+    {
+        read;
+        token->character_constant.wide = true;
+    }
+    if (peek != '\'')
+    {
+        cleanup_lex_fail;
+        SET_ERROR("expected single quotes enclosing character constant");
+        return NULL;
+    }
+    read;
+    if (peek == '\'')
+    {
+        cleanup_lex_fail;
+        SET_ERROR("character constant cannot be empty");
+        return NULL;
+    }
+    unsigned long long value = 0;
+    for (;;)
+    {
+        if (peek == '\'')
+        {
+            read;
+            break;
+        }
+        if (peek == '\n')
+        {
+            cleanup_lex_fail;
+            SET_ERROR("newlines not allowed in character constant");
+            return NULL;
+        }
+        if (peek == '\\')
+        {
+            read;
+            if (peek == '\'' ||
+                peek == '"' ||
+                peek == '?' ||
+                peek == '\\')
+                value = (value << 8) | read;
+            else if (peek == 'a')
+                value = (value << 8) | (read, '\a');
+            else if (peek == 'b')
+                value = (value << 8) | (read, '\b');
+            else if (peek == 'f')
+                value = (value << 8) | (read, '\f');
+            else if (peek == 'n')
+                value = (value << 8) | (read, '\n');
+            else if (peek == 'r')
+                value = (value << 8) | (read, '\r');
+            else if (peek == 't')
+                value = (value << 8) | (read, '\t');
+            else if (peek == 'v')
+                value = (value << 8) | (read, '\v');
+            else if (peek == 'x')
+            {
+                read;
+                unsigned long long tvalue = 0;
+                int shift = 0;
+                while (is_hexadecimal_digit(peek))
+                    tvalue = (tvalue << (shift += 4, 4)) | hexadecimal_digit_value(read);
+                if ((token->character_constant.wide && shift > 32) ||
+                    (!token->character_constant.wide && shift > 8))
+                {
+                    cleanup_lex_fail;
+                    // ISO: 6.4.4.4 (9)
+                    SET_ERROR("hex escape sequence is too large for character constant");
+                    return NULL;
+                }
+                if (!shift)
+                {
+                    cleanup_lex_fail;
+                    SET_ERROR("hex escape sequence should have at least 1 hex digit");
+                    return NULL;
+                }
+                value = (value << shift) | tvalue;
+            }
+            else if (is_octal_digit(peek))
+            {
+                unsigned long long tvalue = 0;
+                int shift = 0;
+                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
+                if (!is_octal_digit(peek))
+                    continue;
+                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
+                if (!is_octal_digit(peek))
+                    continue;
+                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
+                if (!token->character_constant.wide && tvalue > UNSIGNED_CHAR_MAX)
+                {
+                    cleanup_lex_fail;
+                    // ISO: 6.4.4.4 (9)
+                    SET_ERROR("octal escape sequence is too large for character constant");
+                    return NULL;
+                }
+                value = (value << shift) | tvalue;
+            }
+            else if (peek == 'u' || peek == 'U')
+            {
+                unread;
+                char* unichar = lex_universal_character(state, token);
+                if (!unichar)
+                {
+                    cleanup_lex_fail;
+                    // error provided by helper function
+                    free(unichar);
+                    return NULL;
+                }
+                unsigned utf8 = get_universal_character_utf8_encoding(get_universal_character_hex_value(unichar));
+                for (; utf8; utf8 = utf8 >> 8)
+                    value = (value << 8) | (utf8 & 0xFF);
+                free(unichar);
+            }
+            else
+            {
+                unread;
+                cleanup_lex_fail;
+                SET_ERROR("invalid escape sequence in character constant");
+                return NULL;
+            }
+            continue;
+        }
+        value = (value << 8) | read;
+    }
+    token->character_constant.value = value;
+    cleanup_lex_pass;
+    return token;
+}
+
+preprocessor_token_t* lex_string_literal(lex_state_t* state)
+{
+    init_lex(PPT_STRING_LITERAL);
+    if (peek == 'L')
+    {
+        read;
+        token->string_literal.wide = true;
+    }
+    if (peek != '"')
+    {
+        cleanup_lex_fail;
+        SET_ERROR("expected double quotes enclosing string literal");
+        return NULL;
+    }
+    read;
+    buffer_t* buf = buffer_init();
+    for (;;)
+    {
+        if (peek == '"')
+        {
+            read;
+            break;
+        }
+        if (peek == '\n')
+        {
+            cleanup_lex_fail;
+            buffer_delete(buf);
+            SET_ERROR("newlines not allowed in string literal");
+            return NULL;
+        }
+        if (peek == '\\')
+        {
+            read;
+            if (peek == '\'' ||
+                peek == '"' ||
+                peek == '?' ||
+                peek == '\\')
+                buffer_append(buf, read);
+            else if (peek == 'a')
+                buffer_append(buf, (read, '\a'));
+            else if (peek == 'b')
+                buffer_append(buf, (read, '\b'));
+            else if (peek == 'f')
+                buffer_append(buf, (read, '\f'));
+            else if (peek == 'n')
+                buffer_append(buf, (read, '\n'));
+            else if (peek == 'r')
+                buffer_append(buf, (read, '\r'));
+            else if (peek == 't')
+                buffer_append(buf, (read, '\t'));
+            else if (peek == 'v')
+                buffer_append(buf, (read, '\v'));
+            // TODO: hexadecimal, octal, and universal
+            // else if (peek == 'x')
+            // {
+            //     read;
+            //     unsigned long long tvalue = 0;
+            //     int shift = 0;
+            //     while (is_hexadecimal_digit(peek))
+            //         tvalue = (tvalue << (shift += 4, 4)) | hexadecimal_digit_value(read);
+            //     if ((token->character_constant.wide && shift > 32) ||
+            //         (!token->character_constant.wide && shift > 8))
+            //     {
+            //         cleanup_lex_fail;
+            //         // ISO: 6.4.4.4 (9)
+            //         SET_ERROR("hex escape sequence is too large for string literal");
+            //         return NULL;
+            //     }
+            //     if (!shift)
+            //     {
+            //         cleanup_lex_fail;
+            //         SET_ERROR("hex escape sequence should have at least 1 hex digit");
+            //         return NULL;
+            //     }
+            // }
+            else
+            {
+                unread;
+                cleanup_lex_fail;
+                buffer_delete(buf);
+                SET_ERROR("invalid escape sequence in character constant");
+                return NULL;
+            }
+            continue;
+        }
+        buffer_append(buf, read);
+    }
+    token->string_literal.value = buffer_export(buf);
+    buffer_delete(buf);
+    cleanup_lex_pass;
+    return token;
+}
+
+preprocessor_token_t* lex_punctuator(lex_state_t* state)
+{
+    init_lex(PPT_PUNCTUATOR);
+    (void) c;
+    #define single_check(c, punct) \
+        if (peek == c) \
+        { \
+            read; \
+            token->punctuator = punct; \
+            cleanup_lex_pass; \
+            return token; \
+        }
+    
+    single_check('[', P_LEFT_BRACKET)
+    single_check(']', P_RIGHT_BRACKET)
+    single_check('(', P_LEFT_PARENTHESIS)
+    single_check(')', P_RIGHT_PARENTHESIS)
+    single_check('{', P_LEFT_BRACE)
+    single_check('}', P_RIGHT_BRACE)
+
+    // "." or "..."
+    if (peek == '.')
+    {
+        read;
+        if (peek == '.')
+        {
+            read;
+            single_check('.', P_ELLIPSIS)
+            else
+                unread;
+        }
+        token->punctuator = P_PERIOD;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "-", "--", "-=", or "->"
+    if (peek == '-')
+    {
+        read;
+        single_check('-', P_DECREMENT)
+        single_check('=', P_SUB_ASSIGNMENT)
+        single_check('>', P_DEREFERENCE_MEMBER)
+        token->punctuator = P_MINUS;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "+", "++", or "+="
+    if (peek == '+')
+    {
+        read;
+        single_check('+', P_INCREMENT)
+        single_check('=', P_ADD_ASSIGNMENT)
+        token->punctuator = P_PLUS;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "&", "&&", or "&="
+    if (peek == '&')
+    {
+        read;
+        single_check('&', P_LOGICAL_AND)
+        single_check('=', P_BITWISE_AND_ASSIGNMENT)
+        token->punctuator = P_AND;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "*" or "*="
+    if (peek == '*')
+    {
+        read;
+        single_check('=', P_MULTIPLY_ASSIGNMENT)
+        token->punctuator = P_ASTERISK;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    single_check('~', P_TILDE)
+
+    // "!" or "!="
+    if (peek == '!')
+    {
+        read;
+        single_check('=', P_INEQUAL)
+        token->punctuator = P_EXCLAMATION_POINT;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "/" or "/="
+    if (peek == '/')
+    {
+        read;
+        single_check('=', P_DIVIDE_ASSIGNMENT)
+        token->punctuator = P_SLASH;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "%", "%=", "%>", "%:", or "%:%:"
+    if (peek == '%')
+    {
+        read;
+        single_check('=', P_MODULO_ASSIGNMENT)
+        single_check('>', P_DIGRAPH_RIGHT_BRACE)
+        if (peek == ':')
+        {
+            read;
+            if (peek == '%')
+            {
+                read;
+                if (peek == ':')
+                {
+                    read;
+                    token->punctuator = P_DIGRAPH_DOUBLE_HASH;
+                    cleanup_lex_pass;
+                    return token;
+                }
+                else
+                    unread;
+            }
+            token->punctuator = P_DIGRAPH_HASH;
+            cleanup_lex_pass;
+            return token;
+        }
+        token->punctuator = P_PERCENT;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "<", "<<", "<=", "<%", "<<=", or "<:"
+    if (peek == '<')
+    {
+        read;
+        single_check('=', P_LESS_EQUAL)
+        single_check('%', P_DIGRAPH_LEFT_BRACE)
+        single_check(':', P_DIGRAPH_LEFT_BRACKET)
+        if (peek == '<')
+        {
+            read;
+            single_check('=', P_SHIFT_LEFT_ASSIGNMENT)
+            token->punctuator = P_LEFT_SHIFT;
+            cleanup_lex_pass;
+            return token;
+        }
+        token->punctuator = P_LESS;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // ">", ">>", ">=", or ">>="
+    if (peek == '>')
+    {
+        read;
+        single_check('=', P_GREATER_EQUAL)
+        if (peek == '>')
+        {
+            read;
+            single_check('=', P_SHIFT_RIGHT_ASSIGNMENT)
+            token->punctuator = P_RIGHT_SHIFT;
+            cleanup_lex_pass;
+            return token;
+        }
+        token->punctuator = P_GREATER;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "=" or "=="
+    if (peek == '=')
+    {
+        read;
+        single_check('=', P_EQUAL)
+        token->punctuator = P_ASSIGNMENT;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "^" or "^="
+    if (peek == '^')
+    {
+        read;
+        single_check('=', P_BITWISE_XOR_ASSIGNMENT)
+        token->punctuator = P_CARET;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    // "|", "||", or "|="
+    if (peek == '|')
+    {
+        read;
+        single_check('=', P_BITWISE_OR_ASSIGNMENT)
+        single_check('|', P_LOGICAL_OR)
+        token->punctuator = P_PIPE;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    single_check('?', P_QUESTION_MARK)
+
+    if (peek == ':')
+    {
+        read;
+        single_check('>', P_DIGRAPH_RIGHT_BRACKET)
+        token->punctuator = P_COLON;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    single_check(';', P_SEMICOLON)
+    single_check(',', P_COMMA)
+    if (peek == '#')
+    {
+        read;
+        single_check('#', P_DOUBLE_HASH)
+        ++state->include_condition;
+        token->punctuator = P_HASH;
+        cleanup_lex_pass;
+        return token;
+    }
+
+    #undef single_check
+
+    cleanup_lex_fail;
+    SET_ERROR("unknown punctuator");
+    return NULL;
+}
+
+preprocessor_token_t* lex_other(lex_state_t* state)
+{
+    init_lex(PPT_OTHER);
+    if (is_whitespace(peek))
+    {
+        cleanup_lex_fail;
+        return NULL;
+    }
+    token->other = read;
+    cleanup_lex_pass;
+    return token;
+}
+
+preprocessor_token_t* lex_whitespace(lex_state_t* state)
+{
+    init_lex(PPT_WHITESPACE);
+    buffer_t* buf = buffer_init();
+    bool newlines = false;
+    while (is_whitespace(peek))
+    {
+        if (p == '\n')
+            newlines = true;
+        buffer_append(buf, read);
+    }
+    token->whitespace = buffer_export(buf);
+    buffer_delete(buf);
+    if (state->include_condition != 0 && !newlines)
+        ++state->include_condition;
+    cleanup_lex_pass;
+    return token;
+}
+
+preprocessor_token_t* lex_comment(lex_state_t* state)
+{
+    init_lex(PPT_COMMENT);
+    if (peek != '/')
+    {
+        SET_ERROR("comment must start with '//' or '/*'");
+        cleanup_lex_fail;
+        return NULL;
+    }
+    read;
+    if (peek == '/')
+    {
+        read;
+        buffer_t* buf = buffer_init();
+        for (;;)
+        {
+            read;
+            if (c == EOF)
+            {
+                buffer_delete(buf);
+                SET_ERROR("source file must end with a newline");
+                cleanup_lex_fail;
+                return NULL;
+            }
+            buffer_append(buf, c);
+            if (c == '\n')
+                break;
+        }
+        token->comment = buffer_export(buf);
+        buffer_delete(buf);
+        cleanup_lex_pass;
+        return token;
+    }
+    else if (peek == '*')
+    {
+        read;
+        buffer_t* buf = buffer_init();
+        for (;;)
+        {
+            read;
+            if (c == EOF)
+            {
+                buffer_delete(buf);
+                SET_ERROR("source file must not end in a comment");
+                cleanup_lex_fail;
+                return NULL;
+            }
+            if (c == '*')
+            {
+                if (peek == '/')
+                {
+                    read;
+                    break;
+                }
+            }
+            buffer_append(buf, c);
+        }
+        token->comment = buffer_export(buf);
+        buffer_delete(buf);
+        cleanup_lex_pass;
+        return token;
+    }
+    SET_ERROR("comment must start with '//' or '/*'");
+    cleanup_lex_fail;
+    return NULL;
+}
+
+preprocessor_token_t* lex_new(FILE* file, bool dump_error)
+{
+    lex_state_t* state = calloc(1, sizeof *state);
+
+    size_t buffer_size = 1024;
+    size_t count = 0;
+    state->data = malloc(buffer_size);
+    for (int c; (c = fgetc(file)) != EOF;)
+    {
+        if (count % 1024 == 0)
+            state->data = realloc(state->data, buffer_size += 1024);
+        state->data[count++] = c;
+    }
+
+    state->length = count;
+    state->row = 1;
+    state->col = 1;
+    state->cursor = 0;
+    state->error = malloc(MAX_ERROR_LENGTH);
+    state->error[0] = '\0';
+    state->counting = false;
+    state->counter = 0;
+    state->include_condition = 0;
+
+    preprocessor_token_t* tokens = NULL;
+
+    lex_function functions[PPT_NO_ELEMENTS] = {
+        lex_string_literal,
+        lex_header_name,
+        lex_identifier,
+        lex_pp_number,
+        lex_character_constant,
+        lex_punctuator,
+        lex_whitespace,
+        lex_comment,
+        lex_other,
+    };
+    int counts[PPT_NO_ELEMENTS];
+    while (state->cursor < state->length)
+    {
+        memset(counts, 0, sizeof(int) * PPT_NO_ELEMENTS);
+
+        state->counting = true;
+
+        for (unsigned i = 0; i < PPT_NO_ELEMENTS; ++i)
+        {
+            functions[i](state);
+            counts[i] = state->counter;
+        }
+
+        state->counting = false;
+        int inc_cond_before = state->include_condition;
+
+        if (state->include_condition >= 2)
+        {
+            lex_function tmp = functions[0];
+            functions[0] = functions[1];
+            functions[1] = tmp;
+            int tmpc = counts[0];
+            counts[0] = counts[1];
+            counts[1] = tmpc;
+        }
+
+        int max = int_array_index_max(counts, PPT_NO_ELEMENTS);
+        preprocessor_token_t* token = functions[max](state);
+    
+        if (state->include_condition >= 2)
+        {
+            lex_function tmp = functions[0];
+            functions[0] = functions[1];
+            functions[1] = tmp;
+        }
+
+        if (inc_cond_before + 1 != state->include_condition)
+            state->include_condition = 0;
+
+        if (!token)
+        {
+            pp_token_delete_all(tokens);
+            tokens = NULL;
+            if (dump_error)
+                fprintf(stderr, "%s", state->error);
+            break;
+        }
+
+        tokens = add_token(tokens, token);
+    }
+
+    lex_state_delete(state);
+    return tokens;
 }

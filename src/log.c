@@ -14,7 +14,8 @@ static int snlf(char* buffer, size_t maxlen, char* form, char* fmt, va_list args
 {
     int i = 0;
     i += snprintf(buffer, maxlen, "cc: %s: ", form);
-    i += vsnprintf(buffer, maxlen -= i, fmt, args);
+    maxlen -= i;
+    i += vsnprintf(buffer + i, maxlen, fmt, args);
     return i;
 }
 
