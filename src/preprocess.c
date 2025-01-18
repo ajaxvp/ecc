@@ -2,6 +2,11 @@
 
 #include "cc.h"
 
+typedef struct preprocessing_state
+{
+    // some type of symbol table?
+} preprocessing_state_t;
+
 #define init_preprocess preprocessor_token_t* pp_token = *pp_tokens;
 
 token_t* preprocess_preprocessing_file(preprocessor_token_t** pp_tokens)

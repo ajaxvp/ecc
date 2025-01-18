@@ -51,6 +51,11 @@ static int read_impl(lex_state_t* state)
         ++state->row;
         state->col = 1;
     }
+    else if (c == '\\' && state->cursor < state->length && state->data[state->cursor] == '\n')
+    {
+        ++state->row;
+        state->col = 1;
+    }
     else
         ++state->col;
     return c;
