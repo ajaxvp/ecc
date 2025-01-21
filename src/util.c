@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
@@ -75,4 +76,25 @@ void print_int_array(int* array, size_t length)
         printf("%d", array[i]);
     }
     printf("]\n");
+}
+
+bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
+{
+    if (!str && !substr)
+        return true;
+    if (!str || !substr)
+        return false;
+    size_t str_len = strlen(str);
+    size_t substr_len = strlen(substr);
+    if (substr_len > str_len)
+        return false;
+    if (!substr_len)
+        return true;
+    size_t i = 0;
+    for (; i < substr_len; ++i)
+    {
+        if (tolower(str[ends ? (str_len - 1 - i) : i]) != tolower(substr[ends ? (substr_len - 1 - i) : i]))
+            return false;
+    }
+    return true;
 }

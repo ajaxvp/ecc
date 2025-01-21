@@ -8,8 +8,6 @@
 
 TODO HERE:
  - allow for backslash line continuation
- - figure out some crap with character constants
- - do the things i said down in string literals
 
 */
 
@@ -47,11 +45,6 @@ static int read_impl(lex_state_t* state)
 
     int c = state->data[state->cursor++];
     if (c == '\n')
-    {
-        ++state->row;
-        state->col = 1;
-    }
-    else if (c == '\\' && state->cursor < state->length && state->data[state->cursor] == '\n')
     {
         ++state->row;
         state->col = 1;
@@ -212,7 +205,7 @@ void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt,
         }
         case PPT_CHARACTER_CONSTANT:
         {
-            printer(", value: %d, wide: %s", token->character_constant.value, BOOL_NAMES[token->character_constant.wide]);
+            printer(", value: %s, wide: %s", token->character_constant.value, BOOL_NAMES[token->character_constant.wide]);
             break;
         }
         case PPT_STRING_LITERAL:
@@ -499,120 +492,99 @@ preprocessor_token_t* lex_character_constant(lex_state_t* state)
         SET_ERROR("expected single quotes enclosing character constant");
         return NULL;
     }
-    read;
+    buffer_t* buf = buffer_init();
+    buffer_append(buf, read);
     if (peek == '\'')
     {
         cleanup_lex_fail;
+        buffer_delete(buf);
         SET_ERROR("character constant cannot be empty");
         return NULL;
     }
-    unsigned long long value = 0;
     for (;;)
     {
         if (peek == '\'')
         {
-            read;
+            buffer_append(buf, read);
             break;
         }
         if (peek == '\n')
         {
             cleanup_lex_fail;
+            buffer_delete(buf);
             SET_ERROR("newlines not allowed in character constant");
             return NULL;
         }
         if (peek == '\\')
         {
-            read;
+            buffer_append(buf, read);
             if (peek == '\'' ||
                 peek == '"' ||
                 peek == '?' ||
-                peek == '\\')
-                value = (value << 8) | read;
-            else if (peek == 'a')
-                value = (value << 8) | (read, '\a');
-            else if (peek == 'b')
-                value = (value << 8) | (read, '\b');
-            else if (peek == 'f')
-                value = (value << 8) | (read, '\f');
-            else if (peek == 'n')
-                value = (value << 8) | (read, '\n');
-            else if (peek == 'r')
-                value = (value << 8) | (read, '\r');
-            else if (peek == 't')
-                value = (value << 8) | (read, '\t');
-            else if (peek == 'v')
-                value = (value << 8) | (read, '\v');
+                peek == '\\' ||
+                peek == 'a' ||
+                peek == 'b' ||
+                peek == 'f' ||
+                peek == 'n' ||
+                peek == 'r' ||
+                peek == 't' ||
+                peek == 'v')
+                buffer_append(buf, read);
             else if (peek == 'x')
             {
-                read;
-                unsigned long long tvalue = 0;
-                int shift = 0;
-                while (is_hexadecimal_digit(peek))
-                    tvalue = (tvalue << (shift += 4, 4)) | hexadecimal_digit_value(read);
-                if ((token->character_constant.wide && shift > 32) ||
-                    (!token->character_constant.wide && shift > 8))
+                buffer_append(buf, read);
+                int count = 0;
+                for (; is_hexadecimal_digit(peek); ++count)
+                    buffer_append(buf, read);
+                if (!count)
                 {
                     cleanup_lex_fail;
-                    // ISO: 6.4.4.4 (9)
-                    SET_ERROR("hex escape sequence is too large for character constant");
-                    return NULL;
-                }
-                if (!shift)
-                {
-                    cleanup_lex_fail;
+                    buffer_delete(buf);
+                    // ISO: 6.4.4.4 (1)
                     SET_ERROR("hex escape sequence should have at least 1 hex digit");
                     return NULL;
                 }
-                value = (value << shift) | tvalue;
             }
             else if (is_octal_digit(peek))
             {
-                unsigned long long tvalue = 0;
-                int shift = 0;
-                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
+                buffer_append(buf, read);
                 if (!is_octal_digit(peek))
                     continue;
-                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
+                buffer_append(buf, read);
                 if (!is_octal_digit(peek))
                     continue;
-                tvalue = (tvalue << (shift += 3, 3)) | (read - '0');
-                if (!token->character_constant.wide && tvalue > UNSIGNED_CHAR_MAX)
-                {
-                    cleanup_lex_fail;
-                    // ISO: 6.4.4.4 (9)
-                    SET_ERROR("octal escape sequence is too large for character constant");
-                    return NULL;
-                }
-                value = (value << shift) | tvalue;
+                buffer_append(buf, read);
             }
             else if (peek == 'u' || peek == 'U')
             {
                 unread;
+                buffer_pop(buf);
                 char* unichar = lex_universal_character(state, token);
                 if (!unichar)
                 {
                     cleanup_lex_fail;
                     // error provided by helper function
+                    buffer_delete(buf);
                     free(unichar);
                     return NULL;
                 }
-                unsigned utf8 = get_universal_character_utf8_encoding(get_universal_character_hex_value(unichar));
-                for (; utf8; utf8 = utf8 >> 8)
-                    value = (value << 8) | (utf8 & 0xFF);
+                buffer_append_str(buf, unichar);
                 free(unichar);
             }
             else
             {
                 unread;
                 cleanup_lex_fail;
+                buffer_delete(buf);
                 SET_ERROR("invalid escape sequence in character constant");
                 return NULL;
             }
             continue;
         }
-        value = (value << 8) | read;
+        buffer_append(buf, read);
     }
-    token->character_constant.value = value;
+    token->character_constant.value = buffer_export(buf);
+    buffer_delete(buf);
     cleanup_lex_pass;
     return token;
 }
@@ -649,49 +621,60 @@ preprocessor_token_t* lex_string_literal(lex_state_t* state)
         }
         if (peek == '\\')
         {
-            read;
+            buffer_append(buf, read);
             if (peek == '\'' ||
                 peek == '"' ||
                 peek == '?' ||
-                peek == '\\')
+                peek == '\\' ||
+                peek == 'a' ||
+                peek == 'b' ||
+                peek == 'f' ||
+                peek == 'n' ||
+                peek == 'r' ||
+                peek == 't' ||
+                peek == 'v')
                 buffer_append(buf, read);
-            else if (peek == 'a')
-                buffer_append(buf, (read, '\a'));
-            else if (peek == 'b')
-                buffer_append(buf, (read, '\b'));
-            else if (peek == 'f')
-                buffer_append(buf, (read, '\f'));
-            else if (peek == 'n')
-                buffer_append(buf, (read, '\n'));
-            else if (peek == 'r')
-                buffer_append(buf, (read, '\r'));
-            else if (peek == 't')
-                buffer_append(buf, (read, '\t'));
-            else if (peek == 'v')
-                buffer_append(buf, (read, '\v'));
-            // TODO: hexadecimal, octal, and universal
-            // else if (peek == 'x')
-            // {
-            //     read;
-            //     unsigned long long tvalue = 0;
-            //     int shift = 0;
-            //     while (is_hexadecimal_digit(peek))
-            //         tvalue = (tvalue << (shift += 4, 4)) | hexadecimal_digit_value(read);
-            //     if ((token->character_constant.wide && shift > 32) ||
-            //         (!token->character_constant.wide && shift > 8))
-            //     {
-            //         cleanup_lex_fail;
-            //         // ISO: 6.4.4.4 (9)
-            //         SET_ERROR("hex escape sequence is too large for string literal");
-            //         return NULL;
-            //     }
-            //     if (!shift)
-            //     {
-            //         cleanup_lex_fail;
-            //         SET_ERROR("hex escape sequence should have at least 1 hex digit");
-            //         return NULL;
-            //     }
-            // }
+            else if (peek == 'x')
+            {
+                buffer_append(buf, read);
+                int count = 0;
+                for (; is_hexadecimal_digit(peek); ++count)
+                    buffer_append(buf, read);
+                if (!count)
+                {
+                    cleanup_lex_fail;
+                    buffer_delete(buf);
+                    // ISO: 6.4.4.4 (1)
+                    SET_ERROR("hex escape sequence should have at least 1 hex digit");
+                    return NULL;
+                }
+            }
+            else if (is_octal_digit(peek))
+            {
+                buffer_append(buf, read);
+                if (!is_octal_digit(peek))
+                    continue;
+                buffer_append(buf, read);
+                if (!is_octal_digit(peek))
+                    continue;
+                buffer_append(buf, read);
+            }
+            else if (peek == 'u' || peek == 'U')
+            {
+                unread;
+                buffer_pop(buf);
+                char* unichar = lex_universal_character(state, token);
+                if (!unichar)
+                {
+                    cleanup_lex_fail;
+                    // error provided by helper function
+                    buffer_delete(buf);
+                    free(unichar);
+                    return NULL;
+                }
+                buffer_append_str(buf, unichar);
+                free(unichar);
+            }
             else
             {
                 unread;

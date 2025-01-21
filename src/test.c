@@ -6,10 +6,12 @@
 
 /*
 
+the code for this project is developed to match the specifications of ISO/IEC 9899:1999, otherwise known as the C99 standard
+
 SEVEN PHASES OF THIS COMPILER:
 
 LEXER - lex(file): take a text source file and split it into manageable tokens to work with in future stages
-(NOT WRITTEN) PREPROCESSOR - preprocess(tokens): take in a sequence of tokens and give back a new sequence of tokens with macros expanded
+PREPROCESSOR - preprocess(tokens): take in a sequence of tokens and give back a new sequence of tokens with macros expanded
 PARSER - parse(tokens): take the preprocessed tokens and arrange them into a tree structure
 TYPER - type(tree): takes the tree and types all of the symbols associated with it
 STATIC ANALYZER - analyze(tree): takes the tree and catches errors in the semantics of it, along with typing expressions

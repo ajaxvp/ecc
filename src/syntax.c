@@ -1414,30 +1414,6 @@ unsigned long long constexpr_cast_type(unsigned long long value, c_type_class_t 
     return r;
 }
 
-static bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
-{
-    if (!str && !substr)
-        return true;
-    if (!str || !substr)
-        return false;
-    size_t str_len = strlen(str);
-    size_t substr_len = strlen(substr);
-    if (substr_len > str_len)
-        return false;
-    if (!substr_len)
-        return true;
-    size_t i = 0;
-    for (; i < substr_len; ++i)
-    {
-        if (tolower(str[ends ? (str_len - 1 - i) : i]) != tolower(substr[ends ? (substr_len - 1 - i) : i]))
-            return false;
-    }
-    return true;
-}
-
-#define ends_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, true)
-#define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
-
 unsigned long long process_integer_constant(syntax_component_t* syn, c_type_class_t* class)
 {
     char* con = syn->con;

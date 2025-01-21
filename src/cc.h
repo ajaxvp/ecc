@@ -200,11 +200,46 @@ typedef enum token_type
     T_PUNCTUATOR
 } token_type_t;
 
+typedef enum c_type_class
+{
+    CTC_BOOL,
+    CTC_CHAR,
+    CTC_SIGNED_CHAR,
+    CTC_SHORT_INT,
+    CTC_INT,
+    CTC_LONG_INT,
+    CTC_LONG_LONG_INT,
+    CTC_UNSIGNED_CHAR,
+    CTC_UNSIGNED_SHORT_INT,
+    CTC_UNSIGNED_INT,
+    CTC_UNSIGNED_LONG_INT,
+    CTC_UNSIGNED_LONG_LONG_INT,
+    CTC_FLOAT,
+    CTC_DOUBLE,
+    CTC_LONG_DOUBLE,
+    CTC_FLOAT_COMPLEX,
+    CTC_DOUBLE_COMPLEX,
+    CTC_LONG_DOUBLE_COMPLEX,
+    CTC_FLOAT_IMAGINARY,
+    CTC_DOUBLE_IMAGINARY,
+    CTC_LONG_DOUBLE_IMAGINARY,
+    CTC_ENUMERATED,
+    CTC_VOID,
+    CTC_ARRAY,
+    CTC_STRUCTURE,
+    CTC_UNION,
+    CTC_FUNCTION,
+    CTC_POINTER,
+    CTC_LABEL,
+    CTC_ERROR
+} c_type_class_t;
+
 typedef struct symbol_table_t symbol_table_t;
 typedef struct syntax_traverser syntax_traverser_t;
 typedef struct analysis_error analysis_error_t;
 typedef struct syntax_component_t syntax_component_t;
 typedef struct preprocessor_token preprocessor_token_t;
+typedef struct token token_t;
 
 typedef struct preprocessor_token
 {
@@ -229,7 +264,7 @@ typedef struct preprocessor_token
         // PPT_CHARACTER_CONSTANT
         struct
         {
-            int value;
+            char* value;
             bool wide;
         } character_constant;
 
@@ -254,7 +289,7 @@ typedef struct preprocessor_token
     };
 } preprocessor_token_t;
 
-typedef struct token_t
+typedef struct token
 {
     token_type_t type;
     unsigned row, col;
@@ -335,40 +370,6 @@ typedef enum constant_expression_type
     CE_ARITHMETIC,
     CE_ADDRESS
 } constant_expression_type_t;
-
-typedef enum c_type_class
-{
-    CTC_BOOL,
-    CTC_CHAR,
-    CTC_SIGNED_CHAR,
-    CTC_SHORT_INT,
-    CTC_INT,
-    CTC_LONG_INT,
-    CTC_LONG_LONG_INT,
-    CTC_UNSIGNED_CHAR,
-    CTC_UNSIGNED_SHORT_INT,
-    CTC_UNSIGNED_INT,
-    CTC_UNSIGNED_LONG_INT,
-    CTC_UNSIGNED_LONG_LONG_INT,
-    CTC_FLOAT,
-    CTC_DOUBLE,
-    CTC_LONG_DOUBLE,
-    CTC_FLOAT_COMPLEX,
-    CTC_DOUBLE_COMPLEX,
-    CTC_LONG_DOUBLE_COMPLEX,
-    CTC_FLOAT_IMAGINARY,
-    CTC_DOUBLE_IMAGINARY,
-    CTC_LONG_DOUBLE_IMAGINARY,
-    CTC_ENUMERATED,
-    CTC_VOID,
-    CTC_ARRAY,
-    CTC_STRUCTURE,
-    CTC_UNION,
-    CTC_FUNCTION,
-    CTC_POINTER,
-    CTC_LABEL,
-    CTC_ERROR
-} c_type_class_t;
 
 #define BOOL_MAX (unsigned char) 0xff
 #define CHAR_MAX (signed char) 0x7f
@@ -1215,11 +1216,15 @@ c_type_t* type_copy(c_type_t* ct);
 #define type_is_qualified(ct) (ct ? ((ct)->qualifiers != 0) : false)
 
 /* util.c */
+#define ends_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, true)
+#define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
+
 char* strdup(char* str);
 bool contains_substr(char* str, char* substr);
 bool streq(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
 void print_int_array(int* array, size_t length);
+bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
 
 /* from somewhere */
 bool in_debug(void);
