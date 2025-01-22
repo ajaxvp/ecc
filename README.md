@@ -1,2 +1,2 @@
 # cc
- ISO '99-complicit (eventually) C compiler
+ ISO C99-compliant (eventually) C compiler
