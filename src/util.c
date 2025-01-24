@@ -98,3 +98,38 @@ bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
     }
     return true;
 }
+
+// not finished but idrc
+void repr_print(char* str, int (*printer)(const char* fmt, ...))
+{
+    for (; *str; ++str)
+    {
+        switch (*str)
+        {
+            case '\n':
+                printer("\\n");
+                break;
+            case '\t':
+                printer("\\t");
+                break;
+            case '\b':
+                printer("\\b");
+                break;
+            default:
+                printer("%c", *str);
+                break;
+        }
+    }
+}
+
+// not mine
+unsigned long hash(char* str)
+{
+    unsigned long hash = 5381;
+    int c;
+
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c;
+
+    return hash;
+}

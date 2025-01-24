@@ -245,7 +245,9 @@ typedef struct preprocessor_token
 {
     preprocessor_token_type_t type;
     unsigned row, col;
+    preprocessor_token_t* prev;
     preprocessor_token_t* next;
+    bool can_start_directive;
     union
     {
         // PPT_HEADER_NAME
@@ -280,9 +282,6 @@ typedef struct preprocessor_token
 
         // PPT_WHITESPACE
         char* whitespace;
-
-        // PPT_COMMENT
-        char* comment;
 
         // PPT_OTHER
         unsigned char other;
@@ -1100,8 +1099,10 @@ extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 
 /* lex.c */
 preprocessor_token_t* lex_new(FILE* file, bool dump_error);
+void pp_token_delete(preprocessor_token_t* token);
 void pp_token_delete_all(preprocessor_token_t* tokens);
 void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...));
+preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preprocessor_token_t* end);
 
 // old
 lexer_token_t* lex(FILE* file);
@@ -1225,6 +1226,8 @@ bool streq(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
 void print_int_array(int* array, size_t length);
 bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
+void repr_print(char* str, int (*printer)(const char* fmt, ...));
+unsigned long hash(char* str);
 
 /* from somewhere */
 bool in_debug(void);

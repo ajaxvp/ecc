@@ -23,6 +23,7 @@ typedef struct lex_state
     int counter;
     char* error;
     int include_condition;
+    preprocessor_token_t* prev;
 } lex_state_t;
 
 void lex_state_delete(lex_state_t* state)
@@ -163,9 +164,6 @@ void pp_token_delete(preprocessor_token_t* token)
         case PPT_HEADER_NAME:
             free(token->header_name.name);
             break;
-        case PPT_COMMENT:
-            free(token->comment);
-            break;
         case PPT_WHITESPACE:
             free(token->whitespace);
             break;
@@ -186,6 +184,8 @@ void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt,
 {
     if (!token) return;
     printer("preprocessor token { type: %s, line: %u, column: %u", PP_TOKEN_NAMES[token->type], token->row, token->col);
+    if (token->can_start_directive)
+        printer(", can start preprocessor directive");
     switch (token->type)
     {
         case PPT_HEADER_NAME:
@@ -223,15 +223,95 @@ void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt,
             printer(", value: %c", token->other);
             break;
         }
-        case PPT_COMMENT:
+        case PPT_WHITESPACE:
         {
-            printer(", comment: \"%s\"", token->comment);
+            printer(", whitespace: \"");
+            repr_print(token->whitespace, printer);
+            printer("\"");
             break;
         }
         default:
             break;
     }
     printer(" }");
+}
+
+// does not recursively copy if in a linked list structure
+preprocessor_token_t* pp_token_copy(preprocessor_token_t* token)
+{
+    if (!token) return NULL;
+    preprocessor_token_t* n = calloc(1, sizeof *n);
+    n->type = token->type;
+    n->row = token->row;
+    n->col = token->col;
+    n->prev = token->prev;
+    n->next = token->next;
+    switch (token->type)
+    {
+        case PPT_HEADER_NAME:
+        {
+            n->header_name.name = strdup(token->header_name.name);
+            n->header_name.quote_delimited = token->header_name.quote_delimited;
+            break;
+        }
+        case PPT_IDENTIFIER:
+        {
+            n->identifier = strdup(token->identifier);
+            break;
+        }
+        case PPT_PP_NUMBER:
+        {
+            n->pp_number = strdup(token->pp_number);
+            break;
+        }
+        case PPT_CHARACTER_CONSTANT:
+        {
+            n->character_constant.value = strdup(token->character_constant.value);
+            n->character_constant.wide = token->character_constant.wide;
+            break;
+        }
+        case PPT_STRING_LITERAL:
+        {
+            n->string_literal.value = strdup(token->string_literal.value);
+            n->string_literal.wide = token->string_literal.wide;
+            break;
+        }
+        case PPT_PUNCTUATOR:
+        {
+            n->punctuator = token->punctuator;
+            break;
+        }
+        case PPT_OTHER:
+        {
+            n->other = token->other;
+            break;
+        }
+        case PPT_WHITESPACE:
+        {
+            n->whitespace = strdup(token->whitespace);
+            break;
+        }
+        default:
+            break;
+    }
+    return n;
+}
+
+// copies from start to end inclusive
+preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preprocessor_token_t* end)
+{
+    preprocessor_token_t* prev = NULL;
+    preprocessor_token_t* nstart = NULL;
+    while (start && start != end)
+    {
+        preprocessor_token_t* token = pp_token_copy(start);
+        if (!nstart)
+            nstart = token;
+        token->prev = prev;
+        prev = token;
+        start = start->next;
+    }
+    return nstart;
 }
 
 typedef preprocessor_token_t* (*lex_function)(lex_state_t* state);
@@ -310,7 +390,7 @@ unsigned get_universal_character_utf8_encoding(unsigned value)
     return 0;
 }
 
-// gives back a string of form "\uXXXX" or "\uXXXXXXXX"
+// gives back a string of form "\uXXXX" or "\UXXXXXXXX"
 char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
 {
     init_helper;
@@ -319,7 +399,7 @@ char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
     {
         cleanup_helper;
         buffer_delete(buf);
-        SET_ERROR("expected universal character of form '\\uXXXX' or '\\uXXXXXXXX'");
+        SET_ERROR("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
         return NULL;
     }
     buffer_append(buf, read);
@@ -327,7 +407,7 @@ char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
     {
         cleanup_helper;
         buffer_delete(buf);
-        SET_ERROR("expected universal character of form '\\uXXXX' or '\\uXXXXXXXX'");
+        SET_ERROR("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
         return NULL;
     }
     int type = read;
@@ -914,6 +994,8 @@ preprocessor_token_t* lex_punctuator(lex_state_t* state)
         single_check('#', P_DOUBLE_HASH)
         ++state->include_condition;
         token->punctuator = P_HASH;
+        if (!state->prev || (state->prev->type == PPT_WHITESPACE && (contains_substr(state->prev->whitespace, "\n") || state->prev->can_start_directive)))
+            token->can_start_directive = true;
         cleanup_lex_pass;
         return token;
     }
@@ -951,6 +1033,8 @@ preprocessor_token_t* lex_whitespace(lex_state_t* state)
     }
     token->whitespace = buffer_export(buf);
     buffer_delete(buf);
+    if (!state->prev)
+        token->can_start_directive = true;
     if (state->include_condition != 0 && !newlines)
         ++state->include_condition;
     cleanup_lex_pass;
@@ -959,7 +1043,7 @@ preprocessor_token_t* lex_whitespace(lex_state_t* state)
 
 preprocessor_token_t* lex_comment(lex_state_t* state)
 {
-    init_lex(PPT_COMMENT);
+    init_lex(PPT_WHITESPACE);
     if (peek != '/')
     {
         SET_ERROR("comment must start with '//' or '/*'");
@@ -970,36 +1054,35 @@ preprocessor_token_t* lex_comment(lex_state_t* state)
     if (peek == '/')
     {
         read;
-        buffer_t* buf = buffer_init();
         for (;;)
         {
             read;
             if (c == EOF)
             {
-                buffer_delete(buf);
                 SET_ERROR("source file must end with a newline");
                 cleanup_lex_fail;
                 return NULL;
             }
-            buffer_append(buf, c);
             if (c == '\n')
                 break;
         }
-        token->comment = buffer_export(buf);
-        buffer_delete(buf);
+        char* space = malloc(2);
+        space[0] = ' ';
+        space[1] = '\0';
+        token->whitespace = space;
+        if (!state->prev)
+            token->can_start_directive = true;
         cleanup_lex_pass;
         return token;
     }
     else if (peek == '*')
     {
         read;
-        buffer_t* buf = buffer_init();
         for (;;)
         {
             read;
             if (c == EOF)
             {
-                buffer_delete(buf);
                 SET_ERROR("source file must not end in a comment");
                 cleanup_lex_fail;
                 return NULL;
@@ -1012,10 +1095,13 @@ preprocessor_token_t* lex_comment(lex_state_t* state)
                     break;
                 }
             }
-            buffer_append(buf, c);
         }
-        token->comment = buffer_export(buf);
-        buffer_delete(buf);
+        char* space = malloc(2);
+        space[0] = ' ';
+        space[1] = '\0';
+        token->whitespace = space;
+        if (!state->prev)
+            token->can_start_directive = true;
         cleanup_lex_pass;
         return token;
     }
@@ -1047,6 +1133,7 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error)
     state->counting = false;
     state->counter = 0;
     state->include_condition = 0;
+    state->prev = NULL;
 
     preprocessor_token_t* tokens = NULL;
 
@@ -1109,7 +1196,24 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error)
             break;
         }
 
-        tokens = add_token(tokens, token);
+        // concatenate whitespace tokens together
+        if (state->prev && state->prev->type == PPT_WHITESPACE && token->type == PPT_WHITESPACE)
+        {
+            buffer_t* buf = buffer_init();
+            buffer_append_str(buf, state->prev->whitespace);
+            buffer_append_str(buf, token->whitespace);
+            free(state->prev->whitespace);
+            pp_token_delete(token);
+            token = NULL;
+            state->prev->whitespace = buffer_export(buf);
+            buffer_delete(buf);
+        }
+        else
+        {
+            tokens = add_token(tokens, token);
+            token->prev = state->prev;
+            state->prev = token;
+        }
     }
 
     lex_state_delete(state);

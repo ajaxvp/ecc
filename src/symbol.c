@@ -3,18 +3,6 @@
 
 #include "cc.h"
 
-// not mine
-static unsigned long hash(char* str)
-{
-    unsigned long hash = 5381;
-    int c;
-
-    while ((c = *str++))
-        hash = ((hash << 5) + hash) + c;
-
-    return hash;
-}
-
 symbol_t* symbol_init(syntax_component_t* declarer)
 {
     symbol_t* sy = calloc(1, sizeof *sy);
@@ -34,8 +22,6 @@ function: declared by a SC_DECLARATOR
 tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
 
 */
-
-int f(int a, int (*b)(void));
 
 // SC_STATEMENT = SC_LABELED_STATEMENT | SC_COMPOUND_STATEMENT | SC_EXPRESSION_STATEMENT | SC_SELECTION_STATEMENT | SC_ITERATION_STATEMENT | SC_JUMP_STATEMENT
 // SC_SELECTION_STATEMENT = SC_IF_STATEMENT | SC_SWITCH_STATEMENT
