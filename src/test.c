@@ -42,6 +42,15 @@ int main(int argc, char** argv)
         printf("\n");
     }
 
+    preprocess(tokens);
+
+    printf("<<preprocessor output>>");
+    for (preprocessor_token_t* token = tokens; token; token = token->next)
+    {
+        pp_token_print(token, printf);
+        printf("\n");
+    }
+
     // syntax_component_t* tlu = parse(tokens);
     // if (!tlu) return 1;
 

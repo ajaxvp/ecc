@@ -13,7 +13,7 @@ typedef struct preprocessing_table
 
 typedef struct preprocessing_state
 {
-    // some type of symbol table?
+    preprocessing_table_t* table;
     preprocessor_token_t* tokens;
 } preprocessing_state_t;
 
@@ -59,20 +59,82 @@ preprocessing_table_t* preprocessing_table_init(void)
     return t;
 }
 
-// the function will copy params passed in, i.e., the key and the token list
-void preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessor_token_t* token, preprocessor_token_t* end)
+preprocessing_table_t* preprocessing_table_resize(preprocessing_table_t* t)
 {
-    if (!t) return;
+    unsigned old_capacity = t->capacity;
+    t->key = realloc(t->key, (t->capacity = (unsigned) (t->capacity * 1.5)) * sizeof(char*));
+    memset(t->key + old_capacity, 0, (t->capacity - old_capacity) * sizeof(char*));
+    t->value = realloc(t->value, t->capacity * sizeof(symbol_t*));
+    memset(t->value + old_capacity, 0, (t->capacity - old_capacity) * sizeof(char*));
+    return t;
+}
+
+// the function will copy params passed in, i.e., the key and the token list
+preprocessor_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessor_token_t* token, preprocessor_token_t* end)
+{
+    if (!t) return NULL;
+    if (t->size >= t->capacity)
+        (void) preprocessing_table_resize(t);
+    unsigned long index = hash(k) % t->capacity;
+    preprocessor_token_t* v = NULL;
+    for (unsigned long i = index;;)
+    {
+        if (t->key[i] == NULL)
+        {
+            t->key[i] = strdup(k);
+            v = t->value[i] = pp_token_copy_range(token, end);
+            ++(t->size);
+            break;
+        }
+        i = (i + 1) % t->capacity;
+        if (i == index) // for safety but this should never happen
+            return NULL;
+    }
+    return v;
+}
+
+preprocessor_token_t* preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i)
+{
+    if (!t) return NULL;
+    unsigned long index = hash(k) % t->capacity;
+    unsigned long oidx = index;
+    do
+    {
+        if (t->key[index] != NULL && !strcmp(t->key[index], k))
+        {
+            if (i) *i = index;
+            return t->value[index];
+        }
+        index = (index + 1 == t->capacity ? 0 : index + 1);
+    }
+    while (index != oidx);
+    if (i) *i = -1;
+    return NULL;
 }
 
 preprocessor_token_t* preprocessing_table_get(preprocessing_table_t* t, char* k)
 {
-    if (!t) return;
+    return preprocessing_table_get_internal(t, k, NULL);
 }
 
 void preprocessing_table_remove(preprocessing_table_t* t, char* k)
 {
     if (!t) return;
+    unsigned long index = hash(k) % t->capacity;
+    for (unsigned long i = index;;)
+    {
+        if (t->key[i] != NULL && !strcmp(t->key[i], k))
+        {
+            free(t->key[i]);
+            pp_token_delete_all(t->value[i]);
+            t->key[i] = NULL;
+            t->value[i] = NULL;
+            return;
+        }
+        i = (i + 1) % t->capacity;
+        if (i == index)
+            break;
+    }
 }
 
 void preprocessing_table_delete(preprocessing_table_t* t)
@@ -90,6 +152,7 @@ void preprocessing_table_delete(preprocessing_table_t* t)
 void state_delete(preprocessing_state_t* state)
 {
     if (!state) return;
+    preprocessing_table_delete(state->table);
     free(state);
 }
 
@@ -127,15 +190,16 @@ static bool is_header_name(preprocessor_token_t* token)
     return token && token->type == PPT_HEADER_NAME;
 }
 
-static void insert_token_after(preprocessor_token_t* token, preprocessor_token_t* inserting)
+static preprocessor_token_t* insert_token_after(preprocessor_token_t* token, preprocessor_token_t* inserting)
 {
-    if (!token || !inserting) return;
+    if (!token || !inserting) return NULL;
     preprocessor_token_t* next = token->next;
     inserting->prev = token;
     inserting->next = next;
     token->next = inserting;
     if (next)
         next->prev = inserting;
+    return token;
 }
 
 static void remove_token(preprocessor_token_t* token)
@@ -148,10 +212,26 @@ static void remove_token(preprocessor_token_t* token)
     pp_token_delete(token);
 }
 
-static void expand_if_possible(preprocessing_state_t* state, preprocessor_token_t* token)
+// the token returned is the token at the start of the expansion
+// expands recursively
+// TODO: handle function-like macros and __VA_ARGS__
+static preprocessor_token_t* expand_if_possible(preprocessing_state_t* state, preprocessor_token_t* token)
 {
     if (!token || token->type != PPT_IDENTIFIER)
-        return;
+        return NULL;
+    preprocessor_token_t* tokens = preprocessing_table_get(state->table, token->identifier);
+    if (!tokens)
+        return NULL;
+    preprocessor_token_t* start = NULL;
+    for (preprocessor_token_t* inserting = token; tokens; tokens = tokens->next)
+    {
+        inserting = insert_token_after(pp_token_copy(tokens), inserting);
+        inserting = expand_if_possible(state, inserting);
+        if (!start)
+            start = inserting;
+    }
+    remove_token(token);
+    return start;
 }
 
 static bool can_start_control_line(preprocessing_state_t* state, preprocessor_token_t* token)
@@ -229,15 +309,22 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
     advance_token;
 
     if (!is_header_name(token))
-        return fail_preprocess(token, "expected a header file name (like <stdio.h> or \"stdio.h\") in include directive");
+        // TODO
+        return fail_preprocess(token, "#include with preprocessor tokens is not supported yet");
     
     char* filename = token->header_name.name;
+    bool quote_delimited = token->header_name.quote_delimited;
 
     // pass <...> or "..." to get to whitespace
     advance_token_list;
 
     if (!is_whitespace_ending_newline(token))
         return fail_preprocess(token, "expected newline to end include directive");
+    
+    if (quote_delimited)
+    {
+        fopen(filename, "r");
+    }
     
     return found_status;
 }
@@ -297,6 +384,12 @@ void preprocess(preprocessor_token_t* tokens)
 {
     preprocessing_state_t* state = calloc(1, sizeof *state);
     state->tokens = tokens;
+    state->table = preprocessing_table_init();
+    preprocessor_token_t* tmp = calloc(1, sizeof *tmp);
+    tmp->type = PPT_PP_NUMBER;
+    tmp->row = tmp->col = 0;
+    tmp->pp_number = strdup("1");
+    preprocessing_table_add(state->table, "__STDC__", tmp, tmp);
     preprocess_preprocessing_file(state, &tokens, EXPECTED);
     state_delete(state);
 }

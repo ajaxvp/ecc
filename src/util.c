@@ -4,6 +4,16 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+#include <unistd.h>
+
+#elif defined(_WIN32) || defined(__CYGWIN__)
+
+#include <direct.h>
+
+#endif
+
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
 const bool debug_m = true;
@@ -132,4 +142,21 @@ unsigned long hash(char* str)
         hash = ((hash << 5) + hash) + c;
 
     return hash;
+}
+
+int change_directory(char* dir)
+{
+    #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+    return chdir(dir);
+
+    #elif defined(_WIN32) || defined(__CYGWIN__)
+
+    return _chdir(dir);
+
+    #else
+
+    return -1;
+
+    #endif
 }

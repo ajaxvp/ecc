@@ -1102,6 +1102,7 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error);
 void pp_token_delete(preprocessor_token_t* token);
 void pp_token_delete_all(preprocessor_token_t* tokens);
 void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...));
+preprocessor_token_t* pp_token_copy(preprocessor_token_t* token);
 preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preprocessor_token_t* end);
 
 // old
@@ -1110,6 +1111,9 @@ void lex_delete(lexer_token_t* start);
 void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...));
 bool is_assignment_operator_token(lexer_token_t* tok);
 bool is_unary_operator_token(lexer_token_t* tok);
+
+/* preprocess.c */
+void preprocess(preprocessor_token_t* tokens);
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);
@@ -1228,6 +1232,7 @@ void print_int_array(int* array, size_t length);
 bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
 void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
+int change_directory(char* dir);
 
 /* from somewhere */
 bool in_debug(void);

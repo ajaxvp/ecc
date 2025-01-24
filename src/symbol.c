@@ -287,10 +287,10 @@ symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id)
     unsigned long index = hash(k) % t->capacity;
     for (unsigned long i = index;;)
     {
-        if (t->key[index] != NULL && !strcmp(t->key[index], k))
+        if (t->key[i] != NULL && !strcmp(t->key[i], k))
         {
             symbol_t* prev = NULL;
-            symbol_t* sy = t->value[index];
+            symbol_t* sy = t->value[i];
             symbol_t* sylist = sy;
             for (; sylist; prev = sylist, sylist = sylist->next)
             {
@@ -307,10 +307,10 @@ symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id)
                 return NULL;
             if (!sy)
             {
-                t->key[index] = NULL;
+                t->key[i] = NULL;
                 --(t->size);
             }
-            t->value[index] = sy;
+            t->value[i] = sy;
             return sylist;
         }
         i = (i + 1) % t->capacity;
