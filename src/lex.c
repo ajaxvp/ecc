@@ -4,13 +4,6 @@
 
 #include "cc.h"
 
-/*
-
-TODO HERE:
- - allow for backslash line continuation
-
-*/
-
 typedef struct lex_state
 {
     unsigned char* data;
@@ -21,7 +14,7 @@ typedef struct lex_state
     int counter;
     char* error;
     int include_condition;
-    preprocessor_token_t* prev;
+    preprocessing_token_t* prev;
 } lex_state_t;
 
 void lex_state_delete(lex_state_t* state)
@@ -34,23 +27,23 @@ void lex_state_delete(lex_state_t* state)
 
 static int read_impl(lex_state_t* state)
 {
-    // if (state->cursor + 1 < state->length &&
-    //     state->data[state->cursor] == '\\' &&
-    //     state->data[state->cursor + 1] == '\n')
-    //     state->cursor += 2;
-
     if (state->cursor >= state->length)
         return EOF;
 
-    int c = state->data[state->cursor++];
-    if (c == '\n')
+    if (state->cursor + 1 < state->length &&
+        state->data[state->cursor] == '\\' &&
+        state->data[state->cursor + 1] == '\n')
+        state->cursor += 2;
+    
+    if (state->cursor >= 1 && state->data[state->cursor - 1] == '\n')
     {
         ++state->row;
         state->col = 1;
     }
     else
         ++state->col;
-    return c;
+
+    return state->data[state->cursor++];
 }
 
 static unsigned get_column(lex_state_t* state, long long cursor)
@@ -70,12 +63,10 @@ static bool unread_impl(lex_state_t* state)
         return false;
     }
     int c = state->data[--state->cursor];
-    if (c == '\n')
+    if (c == '\n' && state->cursor >= 1 && state->data[state->cursor - 1] == '\\')
+        --state->cursor;
+    if (state->cursor >= 1 && state->data[state->cursor - 1] == '\n')
     {
-        // if (state->cursor >= 1 && state->data[state->cursor - 1] == '\\')
-        // {
-            
-        // }
         --state->row;
         state->col = get_column(state, state->cursor);
     }
@@ -92,9 +83,9 @@ static bool jump_impl(lex_state_t* state, long long cursor, unsigned row, unsign
     return true;
 }
 
-static preprocessor_token_t* add_token(preprocessor_token_t* head, preprocessor_token_t* token)
+static preprocessing_token_t* add_token(preprocessing_token_t* head, preprocessing_token_t* token)
 {
-    preprocessor_token_t* orig = head;
+    preprocessing_token_t* orig = head;
     if (!head) return token;
     for (; head->next; head = head->next);
     head->next = token;
@@ -145,7 +136,7 @@ int hexadecimal_digit_value(int c)
     return -1;
 }
 
-void pp_token_delete(preprocessor_token_t* token)
+void pp_token_delete(preprocessing_token_t* token)
 {
     if (!token) return;
     switch (token->type)
@@ -171,14 +162,14 @@ void pp_token_delete(preprocessor_token_t* token)
     free(token);
 }
 
-void pp_token_delete_all(preprocessor_token_t* tokens)
+void pp_token_delete_all(preprocessing_token_t* tokens)
 {
     if (!tokens) return;
     pp_token_delete_all(tokens->next);
     pp_token_delete(tokens);
 }
 
-void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...))
+void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...))
 {
     if (!token) return;
     printer("preprocessor token { type: %s, line: %u, column: %u", PP_TOKEN_NAMES[token->type], token->row, token->col);
@@ -235,10 +226,10 @@ void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt,
 }
 
 // does not recursively copy if in a linked list structure
-preprocessor_token_t* pp_token_copy(preprocessor_token_t* token)
+preprocessing_token_t* pp_token_copy(preprocessing_token_t* token)
 {
     if (!token) return NULL;
-    preprocessor_token_t* n = calloc(1, sizeof *n);
+    preprocessing_token_t* n = calloc(1, sizeof *n);
     n->type = token->type;
     n->row = token->row;
     n->col = token->col;
@@ -296,13 +287,13 @@ preprocessor_token_t* pp_token_copy(preprocessor_token_t* token)
 }
 
 // copies from start to end inclusive
-preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preprocessor_token_t* end)
+preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preprocessing_token_t* end)
 {
-    preprocessor_token_t* prev = NULL;
-    preprocessor_token_t* nstart = NULL;
+    preprocessing_token_t* prev = NULL;
+    preprocessing_token_t* nstart = NULL;
     while (start && start != end)
     {
-        preprocessor_token_t* token = pp_token_copy(start);
+        preprocessing_token_t* token = pp_token_copy(start);
         if (!nstart)
             nstart = token;
         token->prev = prev;
@@ -312,7 +303,7 @@ preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preproces
     return nstart;
 }
 
-typedef preprocessor_token_t* (*lex_function)(lex_state_t* state);
+typedef preprocessing_token_t* (*lex_function)(lex_state_t* state);
 
 #define create_jump(x) int x##_cursor = state->cursor; unsigned x##_row = state->row; unsigned x##_col = state->col;
 #define jump(x) jump_impl(state, x##_cursor, x##_row, x##_col)
@@ -321,10 +312,12 @@ typedef preprocessor_token_t* (*lex_function)(lex_state_t* state);
 #define init_lex(t) \
     init_base \
     state->counter = 0; \
-    preprocessor_token_t* token = calloc(1, sizeof *token); \
+    preprocessing_token_t* token = calloc(1, sizeof *token); \
     token->type = t; \
+    p = read_impl(state); \
     token->row = state->row; \
-    token->col = state->col;
+    token->col = state->col; \
+    p != EOF ? unread_impl(state) : false;
 #define cleanup_retreat jump(o)
 #define cleanup_helper cleanup_retreat
 #define cleanup_lex_fail cleanup_retreat, pp_token_delete(token)
@@ -334,7 +327,7 @@ typedef preprocessor_token_t* (*lex_function)(lex_state_t* state);
 #define peek (p = read_impl(state), p != EOF ? unread_impl(state) : false, p)
 #define SET_ERROR(fmt, ...) snerrorf(state->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt "\n", state->row, state->col, ## __VA_ARGS__)
 
-preprocessor_token_t* lex_header_name(lex_state_t* state)
+preprocessing_token_t* lex_header_name(lex_state_t* state)
 {
     init_lex(PPT_HEADER_NAME);
     if (peek != '<' && peek != '"')
@@ -389,7 +382,7 @@ unsigned get_universal_character_utf8_encoding(unsigned value)
 }
 
 // gives back a string of form "\uXXXX" or "\UXXXXXXXX"
-char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
+char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
 {
     init_helper;
     buffer_t* buf = buffer_init();
@@ -445,7 +438,7 @@ char* lex_universal_character(lex_state_t* state, preprocessor_token_t* token)
     return unichar;
 }
 
-preprocessor_token_t* lex_identifier(lex_state_t* state)
+preprocessing_token_t* lex_identifier(lex_state_t* state)
 {
     init_lex(PPT_IDENTIFIER);
     buffer_t* buf = buffer_init();
@@ -493,7 +486,7 @@ preprocessor_token_t* lex_identifier(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_pp_number(lex_state_t* state)
+preprocessing_token_t* lex_pp_number(lex_state_t* state)
 {
     init_lex(PPT_PP_NUMBER);
     buffer_t* buf = buffer_init();
@@ -556,7 +549,7 @@ preprocessor_token_t* lex_pp_number(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_character_constant(lex_state_t* state)
+preprocessing_token_t* lex_character_constant(lex_state_t* state)
 {
     init_lex(PPT_CHARACTER_CONSTANT);
     if (peek == 'L')
@@ -667,7 +660,7 @@ preprocessor_token_t* lex_character_constant(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_string_literal(lex_state_t* state)
+preprocessing_token_t* lex_string_literal(lex_state_t* state)
 {
     init_lex(PPT_STRING_LITERAL);
     if (peek == 'L')
@@ -771,7 +764,7 @@ preprocessor_token_t* lex_string_literal(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_punctuator(lex_state_t* state)
+preprocessing_token_t* lex_punctuator(lex_state_t* state)
 {
     init_lex(PPT_PUNCTUATOR);
     (void) c;
@@ -1005,7 +998,7 @@ preprocessor_token_t* lex_punctuator(lex_state_t* state)
     return NULL;
 }
 
-preprocessor_token_t* lex_other(lex_state_t* state)
+preprocessing_token_t* lex_other(lex_state_t* state)
 {
     init_lex(PPT_OTHER);
     if (is_whitespace(peek))
@@ -1018,7 +1011,7 @@ preprocessor_token_t* lex_other(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_whitespace(lex_state_t* state)
+preprocessing_token_t* lex_whitespace(lex_state_t* state)
 {
     init_lex(PPT_WHITESPACE);
     buffer_t* buf = buffer_init();
@@ -1039,7 +1032,7 @@ preprocessor_token_t* lex_whitespace(lex_state_t* state)
     return token;
 }
 
-preprocessor_token_t* lex_comment(lex_state_t* state)
+preprocessing_token_t* lex_comment(lex_state_t* state)
 {
     init_lex(PPT_WHITESPACE);
     if (peek != '/')
@@ -1108,7 +1101,7 @@ preprocessor_token_t* lex_comment(lex_state_t* state)
     return NULL;
 }
 
-preprocessor_token_t* lex_new(FILE* file, bool dump_error)
+preprocessing_token_t* lex_new(FILE* file, bool dump_error)
 {
     lex_state_t* state = calloc(1, sizeof *state);
 
@@ -1133,7 +1126,7 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error)
     state->include_condition = 0;
     state->prev = NULL;
 
-    preprocessor_token_t* tokens = NULL;
+    preprocessing_token_t* tokens = NULL;
 
     lex_function functions[PPT_NO_ELEMENTS] = {
         lex_string_literal,
@@ -1171,9 +1164,12 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error)
             counts[0] = counts[1];
             counts[1] = tmpc;
         }
+        else
+            // do not consider header names if we're not in an include directive
+            counts[1] = 0;
 
         int max = int_array_index_max(counts, PPT_NO_ELEMENTS);
-        preprocessor_token_t* token = functions[max](state);
+        preprocessing_token_t* token = functions[max](state);
     
         if (state->include_condition >= 2)
         {
@@ -1187,6 +1183,7 @@ preprocessor_token_t* lex_new(FILE* file, bool dump_error)
 
         if (!token)
         {
+            print_int_array(counts, PPT_NO_ELEMENTS);
             pp_token_delete_all(tokens);
             tokens = NULL;
             if (dump_error)

@@ -240,15 +240,15 @@ typedef struct symbol_table_t symbol_table_t;
 typedef struct syntax_traverser syntax_traverser_t;
 typedef struct analysis_error analysis_error_t;
 typedef struct syntax_component_t syntax_component_t;
-typedef struct preprocessor_token preprocessor_token_t;
+typedef struct preprocessing_token preprocessing_token_t;
 typedef struct token token_t;
 
-typedef struct preprocessor_token
+typedef struct preprocessing_token
 {
     preprocessor_token_type_t type;
     unsigned row, col;
-    preprocessor_token_t* prev;
-    preprocessor_token_t* next;
+    preprocessing_token_t* prev;
+    preprocessing_token_t* next;
     bool can_start_directive;
     union
     {
@@ -288,7 +288,7 @@ typedef struct preprocessor_token
         // PPT_OTHER
         unsigned char other;
     };
-} preprocessor_token_t;
+} preprocessing_token_t;
 
 typedef struct preprocessing_settings
 {
@@ -1104,14 +1104,15 @@ extern const char* LEXER_TOKEN_NAMES[8];
 extern const char* C_TYPE_CLASS_NAMES[30];
 extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
+extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[1];
 
 /* lex.c */
-preprocessor_token_t* lex_new(FILE* file, bool dump_error);
-void pp_token_delete(preprocessor_token_t* token);
-void pp_token_delete_all(preprocessor_token_t* tokens);
-void pp_token_print(preprocessor_token_t* token, int (*printer)(const char* fmt, ...));
-preprocessor_token_t* pp_token_copy(preprocessor_token_t* token);
-preprocessor_token_t* pp_token_copy_range(preprocessor_token_t* start, preprocessor_token_t* end);
+preprocessing_token_t* lex_new(FILE* file, bool dump_error);
+void pp_token_delete(preprocessing_token_t* token);
+void pp_token_delete_all(preprocessing_token_t* tokens);
+void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...));
+preprocessing_token_t* pp_token_copy(preprocessing_token_t* token);
+preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preprocessing_token_t* end);
 
 // old
 lexer_token_t* lex(FILE* file);
@@ -1121,7 +1122,7 @@ bool is_assignment_operator_token(lexer_token_t* tok);
 bool is_unary_operator_token(lexer_token_t* tok);
 
 /* preprocess.c */
-bool preprocess(preprocessor_token_t* tokens, preprocessing_settings_t* settings);
+bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settings);
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);

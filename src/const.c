@@ -442,3 +442,7 @@ const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS] = {
     "%:",
     "%:%:"
 };
+
+const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[1] = {
+    "/usr/include"
+};

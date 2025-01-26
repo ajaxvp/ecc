@@ -32,11 +32,11 @@ int main(int argc, char** argv)
     }
     FILE* file = fopen(argv[1], "r");
 
-    preprocessor_token_t* tokens = lex_new(file, true);
+    preprocessing_token_t* tokens = lex_new(file, true);
     if (!tokens) return 1;
 
     printf("<<lexer output>>\n");
-    for (preprocessor_token_t* token = tokens; token; token = token->next)
+    for (preprocessing_token_t* token = tokens; token; token = token->next)
     {
         pp_token_print(token, printf);
         printf("\n");
@@ -47,14 +47,14 @@ int main(int argc, char** argv)
     char pp_error[MAX_ERROR_LENGTH];
     settings.error = pp_error;
 
-    if (!preprocess(tokens, &settings))
+    if (!preprocess(&tokens, &settings))
     {
         printf(settings.error);
         return 1;
     }
 
     printf("<<preprocessor output>>\n");
-    for (preprocessor_token_t* token = tokens; token; token = token->next)
+    for (preprocessing_token_t* token = tokens; token; token = token->next)
     {
         pp_token_print(token, printf);
         printf("\n");

@@ -8,7 +8,7 @@
 typedef struct preprocessing_table
 {
     char** key;
-    preprocessor_token_t** value;
+    preprocessing_token_t** value;
     unsigned size;
     unsigned capacity;
 } preprocessing_table_t;
@@ -16,7 +16,7 @@ typedef struct preprocessing_table
 typedef struct preprocessing_state
 {
     preprocessing_table_t* table;
-    preprocessor_token_t* tokens;
+    preprocessing_token_t* tokens;
     preprocessing_settings_t* settings;
 } preprocessing_state_t;
 
@@ -36,7 +36,7 @@ typedef enum pp_request_code
     EXPECTED
 } pp_request_code_t;
 
-#define init_preprocess preprocessor_token_t* token = *tokens;
+#define init_preprocess preprocessing_token_t* token = *tokens;
 
 // goes to the next non-whitespace token (since
 // technically whitespace are not preprocessing tokens)
@@ -55,8 +55,8 @@ preprocessing_table_t* preprocessing_table_init(void)
     preprocessing_table_t* t = calloc(1, sizeof *t);
     t->key = calloc(50, sizeof(char*));
     memset(t->key, 0, 50 * sizeof(char*));
-    t->value = calloc(50, sizeof(preprocessor_token_t*));
-    memset(t->value, 0, 50 * sizeof(preprocessor_token_t*));
+    t->value = calloc(50, sizeof(preprocessing_token_t*));
+    memset(t->value, 0, 50 * sizeof(preprocessing_token_t*));
     t->size = 0;
     t->capacity = 50;
     return t;
@@ -73,13 +73,13 @@ preprocessing_table_t* preprocessing_table_resize(preprocessing_table_t* t)
 }
 
 // the function will copy params passed in, i.e., the key and the token list
-preprocessor_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessor_token_t* token, preprocessor_token_t* end)
+preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessing_token_t* token, preprocessing_token_t* end)
 {
     if (!t) return NULL;
     if (t->size >= t->capacity)
         (void) preprocessing_table_resize(t);
     unsigned long index = hash(k) % t->capacity;
-    preprocessor_token_t* v = NULL;
+    preprocessing_token_t* v = NULL;
     for (unsigned long i = index;;)
     {
         if (t->key[i] == NULL)
@@ -96,7 +96,7 @@ preprocessor_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k,
     return v;
 }
 
-preprocessor_token_t* preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i)
+preprocessing_token_t* preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i)
 {
     if (!t) return NULL;
     unsigned long index = hash(k) % t->capacity;
@@ -115,7 +115,7 @@ preprocessor_token_t* preprocessing_table_get_internal(preprocessing_table_t* t,
     return NULL;
 }
 
-preprocessor_token_t* preprocessing_table_get(preprocessing_table_t* t, char* k)
+preprocessing_token_t* preprocessing_table_get(preprocessing_table_t* t, char* k)
 {
     return preprocessing_table_get_internal(t, k, NULL);
 }
@@ -159,36 +159,36 @@ void state_delete(preprocessing_state_t* state)
     free(state);
 }
 
-static bool is_punctuator(preprocessor_token_t* token, punctuator_type_t type)
+static bool is_punctuator(preprocessing_token_t* token, punctuator_type_t type)
 {
     if (!token) return false;
     if (token->type != PPT_PUNCTUATOR) return false;
     return token->punctuator == type;
 }
 
-static bool is_identifier(preprocessor_token_t* token, char* identifier)
+static bool is_identifier(preprocessing_token_t* token, char* identifier)
 {
     if (!token) return false;
     if (token->type != PPT_IDENTIFIER) return false;
     return !strcmp(token->identifier, identifier);
 }
 
-static bool is_pp_token(preprocessor_token_t* token)
+static bool is_pp_token(preprocessing_token_t* token)
 {
     return token && token->type != PPT_WHITESPACE;
 }
 
-static bool is_whitespace(preprocessor_token_t* token)
+static bool is_whitespace(preprocessing_token_t* token)
 {
     return token && token->type == PPT_WHITESPACE;
 }
 
-static bool is_whitespace_ending_newline(preprocessor_token_t* token)
+static bool is_whitespace_ending_newline(preprocessing_token_t* token)
 {
     return is_whitespace(token) && ends_with_ignore_case(token->whitespace, "\n");
 }
 
-static bool is_header_name(preprocessor_token_t* token)
+static bool is_header_name(preprocessing_token_t* token)
 {
     return token && token->type == PPT_HEADER_NAME;
 }
@@ -196,10 +196,10 @@ static bool is_header_name(preprocessor_token_t* token)
 // inserting next
 // inserting token next
 
-static preprocessor_token_t* insert_token_after(preprocessor_token_t* token, preprocessor_token_t* inserting)
+static preprocessing_token_t* insert_token_after(preprocessing_token_t* token, preprocessing_token_t* inserting)
 {
     if (!token || !inserting) return NULL;
-    preprocessor_token_t* next = inserting->next;
+    preprocessing_token_t* next = inserting->next;
     inserting->next = token;
     token->prev = inserting;
     token->next = next;
@@ -208,28 +208,44 @@ static preprocessor_token_t* insert_token_after(preprocessor_token_t* token, pre
     return token;
 }
 
-static void remove_token(preprocessor_token_t* token)
+// prev token next
+// prev next
+
+// returns next token, if any
+static preprocessing_token_t* remove_token(preprocessing_token_t* token)
 {
-    if (!token) return;
-    if (token->prev)
-        token->prev->next = token->next;
-    if (token->next)
-        token->next->prev = token->prev;
+    if (!token) return NULL;
+    preprocessing_token_t* prev = token->prev;
+    preprocessing_token_t* next = token->next;
+    if (prev)
+        prev->next = next;
+    if (next)
+        next->prev = prev;
     pp_token_delete(token);
+    return next;
+}
+
+// given the starting # of a preprocessor directive, delete it
+// assumes that it's a preprocessor directive
+static void remove_preprocessor_directive(preprocessing_token_t* token)
+{
+    for (; token && !is_whitespace_ending_newline(token); token = remove_token(token));
+    if (!token) return;
+    remove_token(token);
 }
 
 // the token returned is the token at the start of the expansion
 // expands recursively
 // TODO: handle function-like macros and __VA_ARGS__
-static preprocessor_token_t* expand_if_possible(preprocessing_state_t* state, preprocessor_token_t* token)
+static preprocessing_token_t* expand_if_possible(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     if (!token || token->type != PPT_IDENTIFIER)
         return NULL;
-    preprocessor_token_t* tokens = preprocessing_table_get(state->table, token->identifier);
+    preprocessing_token_t* tokens = preprocessing_table_get(state->table, token->identifier);
     if (!tokens)
         return NULL;
-    preprocessor_token_t* start = NULL;
-    for (preprocessor_token_t* inserting = token; tokens; tokens = tokens->next)
+    preprocessing_token_t* start = NULL;
+    for (preprocessing_token_t* inserting = token; tokens; tokens = tokens->next)
     {
         inserting = insert_token_after(pp_token_copy(tokens), inserting);
         inserting = expand_if_possible(state, inserting);
@@ -240,7 +256,7 @@ static preprocessor_token_t* expand_if_possible(preprocessing_state_t* state, pr
     return start;
 }
 
-static bool can_start_control_line(preprocessing_state_t* state, preprocessor_token_t* token)
+static bool can_start_control_line(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     if (!is_punctuator(token, P_HASH))
         return false;
@@ -262,7 +278,7 @@ static bool can_start_control_line(preprocessing_state_t* state, preprocessor_to
         is_identifier(token, "pragma");
 }
 
-static bool can_start_if_section(preprocessing_state_t* state, preprocessor_token_t* token)
+static bool can_start_if_section(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     if (!is_punctuator(token, P_HASH))
         return false;
@@ -277,7 +293,7 @@ static bool can_start_if_section(preprocessing_state_t* state, preprocessor_toke
         is_identifier(token, "ifndef");
 }
 
-static bool can_start_non_directive(preprocessing_state_t* state, preprocessor_token_t* token)
+static bool can_start_non_directive(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     if (!is_punctuator(token, P_HASH))
         return false;
@@ -293,13 +309,13 @@ static bool can_start_non_directive(preprocessing_state_t* state, preprocessor_t
     return true;
 }
 
-static bool can_start_text_line(preprocessing_state_t* state, preprocessor_token_t* token)
+static bool can_start_text_line(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     for (; token && !is_whitespace_ending_newline(token); advance_token_list);
     return token;
 }
 
-static bool can_start_group_part(preprocessing_state_t* state, preprocessor_token_t* token)
+static bool can_start_group_part(preprocessing_state_t* state, preprocessing_token_t* token)
 {
     return can_start_control_line(state, token) ||
         can_start_if_section(state, token) ||
@@ -307,7 +323,7 @@ static bool can_start_group_part(preprocessing_state_t* state, preprocessor_toke
         can_start_text_line(state, token);
 }
 
-pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
 
@@ -318,6 +334,7 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
         // TODO
         return fail_preprocess(token, "#include with preprocessor tokens is not supported yet");
     
+    preprocessing_token_t* header_name = token;
     char* filename = token->header_name.name;
     bool quote_delimited = token->header_name.quote_delimited;
 
@@ -339,9 +356,20 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
     }
 
     if (!file)
-        return fail_preprocess(token, "could not find file '%s'", filename);
+    {
+        for (int i = 0; i < sizeof(ANGLED_INCLUDE_SEARCH_DIRECTORIES) / sizeof(ANGLED_INCLUDE_SEARCH_DIRECTORIES[0]); ++i)
+        {
+            snprintf(path, LINUX_MAX_PATH_LENGTH, "%s/%s", ANGLED_INCLUDE_SEARCH_DIRECTORIES[i], filename);
+            file = fopen(path, "r");
+            if (file)
+                break;
+        }
+    }
+
+    if (!file)
+        return fail_preprocess(header_name, "could not find file '%s'", filename);
     
-    preprocessor_token_t* subtokens = lex_new(file, true);
+    preprocessing_token_t* subtokens = lex_new(file, true);
     fclose(file);
     if (!subtokens)
         return fail_status;
@@ -349,43 +377,42 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
     settings.filepath = path;
     char suberror[MAX_ERROR_LENGTH];
     settings.error = suberror;
-    if (!preprocess(subtokens, &settings))
-    {
-        printf(settings.error);
-        return fail_status;
-    }
-    for (preprocessor_token_t* subtoken = subtokens; subtoken; subtoken = subtoken->next)
+    if (!preprocess(&subtokens, &settings))
+        return fail_preprocess(token, "%s", settings.error); // hmmmm
+    for (preprocessing_token_t* subtoken = subtokens; subtoken; subtoken = subtoken->next)
         token = insert_token_after(pp_token_copy(subtoken), token);
-    
+
     pp_token_delete_all(subtokens);
     
     return found_status;
 }
 
-pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     if (!is_punctuator(token, P_HASH))
         return fail_preprocess(token, "expected '#' to begin controlling preprocessing directive");
+    preprocessing_token_t* hash = token;
     advance_token;
     if (is_identifier(token, "include") && preprocess_include_line(state, &token, EXPECTED) == ABORT)
         return fail_status;
+    remove_preprocessor_directive(hash);
     return found_status;
 }
 
-pp_status_code_t preprocess_if_section(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_if_section(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     return found_status;
 }
 
-pp_status_code_t preprocess_non_directive(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_non_directive(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     return found_status;
 }
 
-pp_status_code_t preprocess_text_line(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_text_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     for (; token && !is_whitespace_ending_newline(token); advance_token_list);
@@ -395,7 +422,7 @@ pp_status_code_t preprocess_text_line(preprocessing_state_t* state, preprocessor
     return found_status;
 }
 
-pp_status_code_t preprocess_group_part(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_group_part(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     if (can_start_control_line(state, token) && preprocess_control_line(state, &token, EXPECTED) == ABORT)
@@ -409,7 +436,7 @@ pp_status_code_t preprocess_group_part(preprocessing_state_t* state, preprocesso
     return found_status;
 }
 
-pp_status_code_t preprocess_preprocessing_file(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
+pp_status_code_t preprocess_preprocessing_file(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
     while (can_start_group_part(state, token))
@@ -418,18 +445,30 @@ pp_status_code_t preprocess_preprocessing_file(preprocessing_state_t* state, pre
     return found_status;
 }
 
-bool preprocess(preprocessor_token_t* tokens, preprocessing_settings_t* settings)
+bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settings)
 {
     preprocessing_state_t* state = calloc(1, sizeof *state);
-    state->tokens = tokens;
+
+    preprocessing_token_t* dummy = calloc(1, sizeof *dummy);
+    dummy->type = PPT_OTHER;
+    (*tokens)->prev = dummy;
+    dummy->next = *tokens;
+
+    state->tokens = *tokens;
     state->table = preprocessing_table_init();
     state->settings = settings;
-    preprocessor_token_t* tmp = calloc(1, sizeof *tmp);
+    preprocessing_token_t* tmp = calloc(1, sizeof *tmp);
     tmp->type = PPT_PP_NUMBER;
     tmp->row = tmp->col = 0;
     tmp->pp_number = strdup("1");
     preprocessing_table_add(state->table, "__STDC__", tmp, tmp);
-    pp_status_code_t code = preprocess_preprocessing_file(state, &tokens, EXPECTED);
+    preprocessing_token_t* ts = *tokens;
+    pp_status_code_t code = preprocess_preprocessing_file(state, &ts, EXPECTED);
     state_delete(state);
+
+    *tokens = dummy->next;
+    pp_token_delete(dummy);
+    (*tokens)->prev = NULL;
+
     return code == FOUND;
 }
