@@ -42,9 +42,18 @@ int main(int argc, char** argv)
         printf("\n");
     }
 
-    preprocess(tokens);
+    preprocessing_settings_t settings;
+    settings.filepath = argv[1];
+    char pp_error[MAX_ERROR_LENGTH];
+    settings.error = pp_error;
 
-    printf("<<preprocessor output>>");
+    if (!preprocess(tokens, &settings))
+    {
+        printf(settings.error);
+        return 1;
+    }
+
+    printf("<<preprocessor output>>\n");
     for (preprocessor_token_t* token = tokens; token; token = token->next)
     {
         pp_token_print(token, printf);

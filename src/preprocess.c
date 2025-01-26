@@ -3,6 +3,8 @@
 
 #include "cc.h"
 
+#define LINUX_MAX_PATH_LENGTH 4096
+
 typedef struct preprocessing_table
 {
     char** key;
@@ -15,6 +17,7 @@ typedef struct preprocessing_state
 {
     preprocessing_table_t* table;
     preprocessor_token_t* tokens;
+    preprocessing_settings_t* settings;
 } preprocessing_state_t;
 
 typedef enum pp_status_code
@@ -43,7 +46,7 @@ typedef enum pp_request_code
 #define advance_token_list token = (token ? token->next : NULL)
 
 #define fail_status (req == OPTIONAL ? NOT_FOUND : ABORT)
-#define fail_preprocess(token, fmt, ...) (/* something w/ the error, */ fail_status)
+#define fail_preprocess(token, fmt, ...) (snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%d:%d] " fmt "\n", token->row, token->col, ## __VA_ARGS__), fail_status)
 
 #define found_status (*tokens = token, FOUND)
 
@@ -190,15 +193,18 @@ static bool is_header_name(preprocessor_token_t* token)
     return token && token->type == PPT_HEADER_NAME;
 }
 
+// inserting next
+// inserting token next
+
 static preprocessor_token_t* insert_token_after(preprocessor_token_t* token, preprocessor_token_t* inserting)
 {
     if (!token || !inserting) return NULL;
-    preprocessor_token_t* next = token->next;
-    inserting->prev = token;
-    inserting->next = next;
-    token->next = inserting;
+    preprocessor_token_t* next = inserting->next;
+    inserting->next = token;
+    token->prev = inserting;
+    token->next = next;
     if (next)
-        next->prev = inserting;
+        next->prev = token;
     return token;
 }
 
@@ -281,7 +287,7 @@ static bool can_start_non_directive(preprocessing_state_t* state, preprocessor_t
 
     advance_token;
 
-    if (!token)
+    if (!is_pp_token(token))
         return false;
     
     return true;
@@ -289,7 +295,7 @@ static bool can_start_non_directive(preprocessing_state_t* state, preprocessor_t
 
 static bool can_start_text_line(preprocessing_state_t* state, preprocessor_token_t* token)
 {
-    for (; !is_whitespace_ending_newline(token); advance_token_list);
+    for (; token && !is_whitespace_ending_newline(token); advance_token_list);
     return token;
 }
 
@@ -321,10 +327,37 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
     if (!is_whitespace_ending_newline(token))
         return fail_preprocess(token, "expected newline to end include directive");
     
+    FILE* file = NULL;
+    char path[LINUX_MAX_PATH_LENGTH];
+
     if (quote_delimited)
     {
-        fopen(filename, "r");
+        char* dirpath = get_directory_path(state->settings->filepath);
+        snprintf(path, LINUX_MAX_PATH_LENGTH, "%s/%s", dirpath, filename);
+        free(dirpath);
+        file = fopen(path, "r");
     }
+
+    if (!file)
+        return fail_preprocess(token, "could not find file '%s'", filename);
+    
+    preprocessor_token_t* subtokens = lex_new(file, true);
+    fclose(file);
+    if (!subtokens)
+        return fail_status;
+    preprocessing_settings_t settings;
+    settings.filepath = path;
+    char suberror[MAX_ERROR_LENGTH];
+    settings.error = suberror;
+    if (!preprocess(subtokens, &settings))
+    {
+        printf(settings.error);
+        return fail_status;
+    }
+    for (preprocessor_token_t* subtoken = subtokens; subtoken; subtoken = subtoken->next)
+        token = insert_token_after(pp_token_copy(subtoken), token);
+    
+    pp_token_delete_all(subtokens);
     
     return found_status;
 }
@@ -337,6 +370,7 @@ pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preproces
     advance_token;
     if (is_identifier(token, "include") && preprocess_include_line(state, &token, EXPECTED) == ABORT)
         return fail_status;
+    return found_status;
 }
 
 pp_status_code_t preprocess_if_section(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
@@ -354,6 +388,10 @@ pp_status_code_t preprocess_non_directive(preprocessing_state_t* state, preproce
 pp_status_code_t preprocess_text_line(preprocessing_state_t* state, preprocessor_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
+    for (; token && !is_whitespace_ending_newline(token); advance_token_list);
+    if (!token)
+        return fail_preprocess(token, "file must end with a newline");
+    advance_token_list;
     return found_status;
 }
 
@@ -380,16 +418,18 @@ pp_status_code_t preprocess_preprocessing_file(preprocessing_state_t* state, pre
     return found_status;
 }
 
-void preprocess(preprocessor_token_t* tokens)
+bool preprocess(preprocessor_token_t* tokens, preprocessing_settings_t* settings)
 {
     preprocessing_state_t* state = calloc(1, sizeof *state);
     state->tokens = tokens;
     state->table = preprocessing_table_init();
+    state->settings = settings;
     preprocessor_token_t* tmp = calloc(1, sizeof *tmp);
     tmp->type = PPT_PP_NUMBER;
     tmp->row = tmp->col = 0;
     tmp->pp_number = strdup("1");
     preprocessing_table_add(state->table, "__STDC__", tmp, tmp);
-    preprocess_preprocessing_file(state, &tokens, EXPECTED);
+    pp_status_code_t code = preprocess_preprocessing_file(state, &tokens, EXPECTED);
     state_delete(state);
+    return code == FOUND;
 }

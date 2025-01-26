@@ -26,6 +26,8 @@
 
 #define SYMBOL_TABLE_FOR_ENTRIES_END }
 
+#define MAX_ERROR_LENGTH 512
+
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
 #define LEXER_TOKEN_OPERATOR 2
@@ -287,6 +289,12 @@ typedef struct preprocessor_token
         unsigned char other;
     };
 } preprocessor_token_t;
+
+typedef struct preprocessing_settings
+{
+    char* filepath;
+    char* error;
+} preprocessing_settings_t;
 
 typedef struct token
 {
@@ -1113,7 +1121,7 @@ bool is_assignment_operator_token(lexer_token_t* tok);
 bool is_unary_operator_token(lexer_token_t* tok);
 
 /* preprocess.c */
-void preprocess(preprocessor_token_t* tokens);
+bool preprocess(preprocessor_token_t* tokens, preprocessing_settings_t* settings);
 
 /* parse.c */
 syntax_component_t* parse(lexer_token_t* toks);
@@ -1224,7 +1232,7 @@ c_type_t* type_copy(c_type_t* ct);
 #define ends_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, true)
 #define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
 
-char* strdup(char* str);
+char* strdup(const char* str);
 bool contains_substr(char* str, char* substr);
 bool streq(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
@@ -1232,7 +1240,7 @@ void print_int_array(int* array, size_t length);
 bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
 void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
-int change_directory(char* dir);
+char* get_directory_path(char* path);
 
 /* from somewhere */
 bool in_debug(void);

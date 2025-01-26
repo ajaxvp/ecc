@@ -1,28 +1,26 @@
+#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+#define _DEFAULT_SOURCE 1
+
+#include <libgen.h>
+
+#elif defined(_WIN32) || defined(__CYGWIN__)
+
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
 
-#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
-
-#include <unistd.h>
-
-#elif defined(_WIN32) || defined(__CYGWIN__)
-
-#include <direct.h>
-
-#endif
-
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
 const bool debug_m = true;
 
 // identical malloc'd copy of the parameter
-char* strdup(char* str)
+char* strdup(const char* str)
 {
-    if (!str)
-        return NULL;
     size_t len = strlen(str);
     char* dup = malloc(len + 1);
     dup[len] = '\0';
@@ -144,19 +142,26 @@ unsigned long hash(char* str)
     return hash;
 }
 
-int change_directory(char* dir)
+// result is malloc'd
+char* get_directory_path(char* path)
 {
+    if (!path)
+        return strdup("");
+
     #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
 
-    return chdir(dir);
+    char* fullpath = realpath(path, NULL);
+    char* dir = strdup(dirname(fullpath));
+    free(fullpath);
+    return dir;
 
     #elif defined(_WIN32) || defined(__CYGWIN__)
 
-    return _chdir(dir);
+    return NULL;
 
     #else
 
-    return -1;
+    return NULL;
 
     #endif
 }

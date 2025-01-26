@@ -11,8 +11,6 @@ TODO HERE:
 
 */
 
-#define MAX_ERROR_LENGTH 512
-
 typedef struct lex_state
 {
     unsigned char* data;
