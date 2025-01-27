@@ -49,7 +49,7 @@ int main(int argc, char** argv)
 
     if (!preprocess(&tokens, &settings))
     {
-        printf(settings.error);
+        printf("%s", settings.error);
         return 1;
     }
 

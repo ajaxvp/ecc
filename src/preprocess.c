@@ -45,7 +45,7 @@ typedef enum pp_request_code
 #define advance_token_list token = (token ? token->next : NULL)
 
 #define fail_status (req == OPTIONAL ? NOT_FOUND : ABORT)
-#define fail_preprocess(token, fmt, ...) (snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s:%d:%d] " fmt "\n", get_file_name(state->settings->filepath, false), token->row, token->col, ## __VA_ARGS__), fail_status)
+#define fail_preprocess(token, fmt, ...) (token ? snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s:%d:%d] " fmt "\n", get_file_name(state->settings->filepath, false), token->row, token->col, ## __VA_ARGS__) : snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s:?:?] " fmt "\n", ## __VA_ARGS__), fail_status)
 
 #define found_status (*tokens = token, FOUND)
 
@@ -161,6 +161,30 @@ void preprocessing_table_delete(preprocessing_table_t* t)
     free(t->v_id_list);
 }
 
+void preprocessing_table_print(preprocessing_table_t* t, int (*printer)(const char* fmt, ...))
+{
+    printer("preprocessing table:\n");
+    for (unsigned i = 0; i < t->capacity; ++i)
+    {
+        if (!t->key[i])
+            continue;
+        printer(" \"%s\" -> \n", t->key[i]);
+        if (t->v_id_list[i])
+        {
+            printer("  parameter list:\n");
+            for (unsigned j = 0; j < t->v_id_list[i]->size; ++j)
+                printer("   %s\n", vector_get(t->v_id_list[i], j));
+        }
+        printer("  token sequence:\n");
+        for (preprocessing_token_t* token = t->v_repl_list[i]; token; token = token->next)
+        {
+            printer("   ");
+            pp_token_print(token, printer);
+            printer("\n");
+        }
+    }
+}
+
 void state_delete(preprocessing_state_t* state)
 {
     if (!state) return;
@@ -200,6 +224,11 @@ static bool is_whitespace_ending_newline(preprocessing_token_t* token)
 static bool is_header_name(preprocessing_token_t* token)
 {
     return token && token->type == PPT_HEADER_NAME;
+}
+
+static bool is_identifier_type(preprocessing_token_t* token)
+{
+    return token && token->type == PPT_IDENTIFIER;
 }
 
 // inserting next
@@ -405,7 +434,55 @@ pp_status_code_t preprocess_define_line(preprocessing_state_t* state, preprocess
     // pass "define"
     advance_token;
 
+    if (!is_identifier_type(token))
+        return fail_preprocess(token, "expected identifier for macro replacement definition");
+    
+    preprocessing_token_t* macro_name_token = token;
+    char* macro_name = token->identifier;
 
+    advance_token;
+
+    vector_t* id_list = NULL;
+    
+    if (is_punctuator(token, P_LEFT_PARENTHESIS) && !is_whitespace(token->prev))
+    {
+        id_list = vector_init();
+        advance_token;
+        while (!is_punctuator(token, P_RIGHT_PARENTHESIS))
+        {
+            // special case for variadic function-like macros
+            if (is_punctuator(token, P_ELLIPSIS))
+            {
+                vector_add(id_list, strdup("__VA_ARGS__"));
+                advance_token;
+                if (!is_punctuator(token, P_RIGHT_PARENTHESIS))
+                    return fail_preprocess(token, "macro parameter list with ellipsis must end with that ellipsis");
+                break;
+            }
+            if (!is_identifier_type(token))
+                return fail_preprocess(token, "expected macro parameter list to end with ) or continue with more identifiers");
+            vector_add(id_list, strdup(token->identifier));
+            advance_token;
+            if (is_punctuator(token, P_COMMA))
+            {
+                advance_token;
+                if (is_punctuator(token, P_RIGHT_PARENTHESIS))
+                    return fail_preprocess(token, "expected macro parameter list to end with an identifier or an ellipsis");
+            }
+        }
+        advance_token_list;
+    }
+
+    preprocessing_token_t* start = token;
+
+    for (; token && !is_whitespace_ending_newline(token); advance_token_list);
+    if (!token)
+        return fail_preprocess(macro_name_token, "macro definition must end with a newline");
+
+    preprocessing_table_add(state->table, macro_name, start, token, id_list);
+
+    advance_token_list;
+    return found_status;
 }
 
 pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
@@ -484,14 +561,17 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     tmp->type = PPT_PP_NUMBER;
     tmp->row = tmp->col = 0;
     tmp->pp_number = strdup("1");
-    preprocessing_table_add(state->table, "__STDC__", tmp, tmp, NULL);
+    preprocessing_table_add(state->table, "__STDC__", tmp, NULL, NULL);
     preprocessing_token_t* ts = *tokens;
     pp_status_code_t code = preprocess_preprocessing_file(state, &ts, EXPECTED);
+    if (debug)
+        preprocessing_table_print(state->table, printf);
     state_delete(state);
 
     *tokens = dummy->next;
     pp_token_delete(dummy);
-    (*tokens)->prev = NULL;
+    if (*tokens)
+        (*tokens)->prev = NULL;
 
     return code == FOUND;
 }

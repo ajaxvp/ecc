@@ -286,7 +286,8 @@ preprocessing_token_t* pp_token_copy(preprocessing_token_t* token)
     return n;
 }
 
-// copies from start to end inclusive
+// copies from start inclusive to end exclusive
+// NULL will copy till the end of the token sequence
 preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preprocessing_token_t* end)
 {
     preprocessing_token_t* prev = NULL;
@@ -297,6 +298,9 @@ preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preproc
         if (!nstart)
             nstart = token;
         token->prev = prev;
+        token->next = NULL;
+        if (prev)
+            prev->next = token;
         prev = token;
         start = start->next;
     }
