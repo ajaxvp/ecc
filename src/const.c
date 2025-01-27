@@ -443,6 +443,10 @@ const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS] = {
     "%:%:"
 };
 
-const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[1] = {
-    "/usr/include"
+// use gcc libc essentially
+const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[] = {
+    "/usr/include",
+    "/usr/lib/gcc/x86_64-linux-gnu/12/include",
+    "/usr/local/include",
+    "/usr/include/x86_64-linux-gnu"
 };

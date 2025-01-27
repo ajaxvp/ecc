@@ -3,12 +3,11 @@
 
 #include "cc.h"
 
-#define LINUX_MAX_PATH_LENGTH 4096
-
 typedef struct preprocessing_table
 {
     char** key;
-    preprocessing_token_t** value;
+    preprocessing_token_t** v_repl_list;
+    vector_t** v_id_list;
     unsigned size;
     unsigned capacity;
 } preprocessing_table_t;
@@ -46,7 +45,7 @@ typedef enum pp_request_code
 #define advance_token_list token = (token ? token->next : NULL)
 
 #define fail_status (req == OPTIONAL ? NOT_FOUND : ABORT)
-#define fail_preprocess(token, fmt, ...) (snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%d:%d] " fmt "\n", token->row, token->col, ## __VA_ARGS__), fail_status)
+#define fail_preprocess(token, fmt, ...) (snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s:%d:%d] " fmt "\n", get_file_name(state->settings->filepath, false), token->row, token->col, ## __VA_ARGS__), fail_status)
 
 #define found_status (*tokens = token, FOUND)
 
@@ -55,8 +54,10 @@ preprocessing_table_t* preprocessing_table_init(void)
     preprocessing_table_t* t = calloc(1, sizeof *t);
     t->key = calloc(50, sizeof(char*));
     memset(t->key, 0, 50 * sizeof(char*));
-    t->value = calloc(50, sizeof(preprocessing_token_t*));
-    memset(t->value, 0, 50 * sizeof(preprocessing_token_t*));
+    t->v_repl_list = calloc(50, sizeof(preprocessing_token_t*));
+    memset(t->v_repl_list, 0, 50 * sizeof(preprocessing_token_t*));
+    t->v_id_list = calloc(50, sizeof(vector_t*));
+    memset(t->v_id_list, 0, 50 * sizeof(vector_t*));
     t->size = 0;
     t->capacity = 50;
     return t;
@@ -67,13 +68,15 @@ preprocessing_table_t* preprocessing_table_resize(preprocessing_table_t* t)
     unsigned old_capacity = t->capacity;
     t->key = realloc(t->key, (t->capacity = (unsigned) (t->capacity * 1.5)) * sizeof(char*));
     memset(t->key + old_capacity, 0, (t->capacity - old_capacity) * sizeof(char*));
-    t->value = realloc(t->value, t->capacity * sizeof(symbol_t*));
-    memset(t->value + old_capacity, 0, (t->capacity - old_capacity) * sizeof(char*));
+    t->v_repl_list = realloc(t->v_repl_list, t->capacity * sizeof(preprocessing_token_t*));
+    memset(t->v_repl_list + old_capacity, 0, (t->capacity - old_capacity) * sizeof(preprocessing_token_t*));
+    t->v_id_list = realloc(t->v_id_list, t->capacity * sizeof(vector_t*));
+    memset(t->v_id_list + old_capacity, 0, (t->capacity - old_capacity) * sizeof(vector_t*));
     return t;
 }
 
 // the function will copy params passed in, i.e., the key and the token list
-preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessing_token_t* token, preprocessing_token_t* end)
+preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessing_token_t* token, preprocessing_token_t* end, vector_t* id_list)
 {
     if (!t) return NULL;
     if (t->size >= t->capacity)
@@ -85,7 +88,8 @@ preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k
         if (t->key[i] == NULL)
         {
             t->key[i] = strdup(k);
-            v = t->value[i] = pp_token_copy_range(token, end);
+            v = t->v_repl_list[i] = pp_token_copy_range(token, end);
+            t->v_id_list[i] = vector_deep_copy(id_list, (void* (*)(void*)) strdup);
             ++(t->size);
             break;
         }
@@ -96,9 +100,9 @@ preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k
     return v;
 }
 
-preprocessing_token_t* preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i)
+void preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i, preprocessing_token_t** token, vector_t** id_list)
 {
-    if (!t) return NULL;
+    if (!t) return;
     unsigned long index = hash(k) % t->capacity;
     unsigned long oidx = index;
     do
@@ -106,18 +110,19 @@ preprocessing_token_t* preprocessing_table_get_internal(preprocessing_table_t* t
         if (t->key[index] != NULL && !strcmp(t->key[index], k))
         {
             if (i) *i = index;
-            return t->value[index];
+            if (token) *token = t->v_repl_list[index];
+            if (id_list) *id_list = t->v_id_list[index];
+            break;
         }
         index = (index + 1 == t->capacity ? 0 : index + 1);
     }
     while (index != oidx);
     if (i) *i = -1;
-    return NULL;
 }
 
-preprocessing_token_t* preprocessing_table_get(preprocessing_table_t* t, char* k)
+void preprocessing_table_get(preprocessing_table_t* t, char* k, preprocessing_token_t** token, vector_t** id_list)
 {
-    return preprocessing_table_get_internal(t, k, NULL);
+    preprocessing_table_get_internal(t, k, NULL, token, id_list);
 }
 
 void preprocessing_table_remove(preprocessing_table_t* t, char* k)
@@ -129,9 +134,11 @@ void preprocessing_table_remove(preprocessing_table_t* t, char* k)
         if (t->key[i] != NULL && !strcmp(t->key[i], k))
         {
             free(t->key[i]);
-            pp_token_delete_all(t->value[i]);
+            pp_token_delete_all(t->v_repl_list[i]);
+            vector_deep_delete(t->v_id_list[i], free);
             t->key[i] = NULL;
-            t->value[i] = NULL;
+            t->v_repl_list[i] = NULL;
+            t->v_id_list[i] = NULL;
             return;
         }
         i = (i + 1) % t->capacity;
@@ -146,10 +153,12 @@ void preprocessing_table_delete(preprocessing_table_t* t)
     for (unsigned i = 0; i < t->capacity; ++i)
     {
         free(t->key[i]);
-        pp_token_delete_all(t->value[i]);
+        pp_token_delete_all(t->v_repl_list[i]);
+        vector_deep_delete(t->v_id_list[i], free);
     }
     free(t->key);
-    free(t->value);
+    free(t->v_repl_list);
+    free(t->v_id_list);
 }
 
 void state_delete(preprocessing_state_t* state)
@@ -241,7 +250,9 @@ static preprocessing_token_t* expand_if_possible(preprocessing_state_t* state, p
 {
     if (!token || token->type != PPT_IDENTIFIER)
         return NULL;
-    preprocessing_token_t* tokens = preprocessing_table_get(state->table, token->identifier);
+    preprocessing_token_t* tokens = NULL;
+    vector_t* id_list = NULL;
+    preprocessing_table_get(state->table, token->identifier, &tokens, &id_list);
     if (!tokens)
         return NULL;
     preprocessing_token_t* start = NULL;
@@ -387,6 +398,16 @@ pp_status_code_t preprocess_include_line(preprocessing_state_t* state, preproces
     return found_status;
 }
 
+pp_status_code_t preprocess_define_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
+{
+    init_preprocess;
+    
+    // pass "define"
+    advance_token;
+
+
+}
+
 pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preprocessing_token_t** tokens, pp_request_code_t req)
 {
     init_preprocess;
@@ -395,6 +416,8 @@ pp_status_code_t preprocess_control_line(preprocessing_state_t* state, preproces
     preprocessing_token_t* hash = token;
     advance_token;
     if (is_identifier(token, "include") && preprocess_include_line(state, &token, EXPECTED) == ABORT)
+        return fail_status;
+    if (is_identifier(token, "define") && preprocess_define_line(state, &token, EXPECTED) == ABORT)
         return fail_status;
     remove_preprocessor_directive(hash);
     return found_status;
@@ -461,7 +484,7 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     tmp->type = PPT_PP_NUMBER;
     tmp->row = tmp->col = 0;
     tmp->pp_number = strdup("1");
-    preprocessing_table_add(state->table, "__STDC__", tmp, tmp);
+    preprocessing_table_add(state->table, "__STDC__", tmp, tmp, NULL);
     preprocessing_token_t* ts = *tokens;
     pp_status_code_t code = preprocess_preprocessing_file(state, &ts, EXPECTED);
     state_delete(state);

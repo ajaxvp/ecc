@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#include "cc.h"
+
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
 const bool debug_m = true;
@@ -154,6 +156,32 @@ char* get_directory_path(char* path)
     char* dir = strdup(dirname(fullpath));
     free(fullpath);
     return dir;
+
+    #elif defined(_WIN32) || defined(__CYGWIN__)
+
+    return NULL;
+
+    #else
+
+    return NULL;
+
+    #endif
+}
+
+// m determines whether or not the filename uses an internal buffer (overwritten with successive calls) or gets malloc'd
+char* get_file_name(char* path, bool m)
+{
+    static char result[LINUX_MAX_PATH_LENGTH];
+
+    if (!path)
+        return m ? strdup("") : (result[0] = '\0', result);
+
+    #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+    char* fullpath = realpath(path, NULL);
+    char* name = m ? strdup(basename(fullpath)) : strncpy(result, basename(fullpath), LINUX_MAX_PATH_LENGTH);
+    free(fullpath);
+    return name;
 
     #elif defined(_WIN32) || defined(__CYGWIN__)
 

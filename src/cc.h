@@ -27,6 +27,7 @@
 #define SYMBOL_TABLE_FOR_ENTRIES_END }
 
 #define MAX_ERROR_LENGTH 512
+#define LINUX_MAX_PATH_LENGTH 4096
 
 #define LEXER_TOKEN_KEYWORD 0
 #define LEXER_TOKEN_IDENTIFIER 1
@@ -1104,7 +1105,7 @@ extern const char* LEXER_TOKEN_NAMES[8];
 extern const char* C_TYPE_CLASS_NAMES[30];
 extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
-extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[1];
+extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
 
 /* lex.c */
 preprocessing_token_t* lex_new(FILE* file, bool dump_error);
@@ -1242,6 +1243,7 @@ bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
 void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
 char* get_directory_path(char* path);
+char* get_file_name(char* path, bool m);
 
 /* from somewhere */
 bool in_debug(void);
