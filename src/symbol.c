@@ -77,6 +77,31 @@ syntax_component_t* symbol_get_scope(symbol_t* sy)
     return NULL;
 }
 
+bool scope_is_block(syntax_component_t* scope)
+{
+    if (!scope) return false;
+    return scope->type == SC_COMPOUND_STATEMENT ||
+            scope->type == SC_IF_STATEMENT ||
+            scope->type == SC_WHILE_STATEMENT ||
+            scope->type == SC_FOR_STATEMENT ||
+            scope->type == SC_DO_STATEMENT ||
+            scope->type == SC_SWITCH_STATEMENT;
+}
+
+storage_duration_t symbol_get_storage_duration(symbol_t* sy)
+{
+    syntax_component_t* scope = symbol_get_scope(sy);
+    if (!scope) return SD_UNKNOWN;
+    if (scope_is_block(scope))
+    {
+        vector_t* declspecs = syntax_get_declspecs(sy->declarer);
+        if (!declspecs) return SD_UNKNOWN;
+        if (!syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_STATIC))
+            return SD_AUTOMATIC;
+    }
+    return SD_STATIC;
+}
+
 // whether or not the given symbol is in scope at syn
 bool symbol_in_scope(symbol_t* sy, syntax_component_t* syn)
 {
@@ -128,6 +153,11 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
     }
     else
         printer("(unknown)");
+    printer(", locator: ");
+    if (sy->loc)
+        locator_print(sy->loc, printer);
+    else
+        printer("(unlocated)");
     printer(" }");
 }
 
@@ -135,6 +165,7 @@ void symbol_delete(symbol_t* sy)
 {
     if (!sy) return;
     type_delete(sy->type);
+    locator_delete(sy->loc);
     free(sy);
 }
 
@@ -274,7 +305,10 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
         }
         c_namespace_t* sns = syntax_get_namespace(sylist->declarer);
         if (count && symbol_in_scope(sylist, id) && (!ns || (ns->class == sns->class && type_is_compatible(ns->struct_union_type, sns->struct_union_type))))
+        {
             ++(*count);
+            found = sylist;
+        }
         free(sns);
     }
     return found;

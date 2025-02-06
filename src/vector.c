@@ -32,22 +32,12 @@ void* vector_get(vector_t* v, unsigned index)
 {
     if (index < 0 || index >= v->size)
         return NULL;
-    return v
-    ->
-    data
-    [
-        index
-    ];
+    return v->data[index];
 }
 
 int vector_contains(vector_t* v, void* el, int (*c)(void*, void*))
 {
-    for (unsigned i = 0; i < v->size; ++i)
-    {
-        if (!c(v->data[i], el))
-            return i;
-    }
-    return -1;
+    return contains(v->data, v->size, el, c);
 }
 
 vector_t* vector_deep_copy(vector_t* v, void* (*copy_member)(void*))

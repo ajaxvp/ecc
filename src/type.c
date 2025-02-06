@@ -435,6 +435,17 @@ c_type_t* integer_promotions(c_type_t* ct)
     return type_copy(ct);
 }
 
+// recursively strips the qualifiers of a type
+c_type_t* strip_qualifiers(c_type_t* ct)
+{
+    if (!ct) return NULL;
+    ct = type_copy(ct);
+    ct->qualifiers = 0;
+    for (c_type_t* d = ct->derived_from; d; d = d->derived_from)
+        d->qualifiers = 0;
+    return ct;
+}
+
 c_type_class_t retain_type_domain(c_type_class_t old, c_type_class_t new_real)
 {
     if (old == CTC_FLOAT_COMPLEX ||
@@ -585,6 +596,71 @@ c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2)
     }
     type_delete(conv_t1);
     return conv_t2;
+}
+
+// returns -1 if size is unknown
+long long type_size(c_type_t* ct)
+{
+    if (!ct) return -1;
+    switch (ct->class)
+    {
+        case CTC_BOOL:
+        case CTC_CHAR:
+        case CTC_SIGNED_CHAR:
+        case CTC_UNSIGNED_CHAR:
+            return 1;
+        case CTC_SHORT_INT:
+        case CTC_UNSIGNED_SHORT_INT:
+            return 2;
+        case CTC_INT:
+        case CTC_UNSIGNED_INT:
+        case CTC_FLOAT:
+        case CTC_FLOAT_IMAGINARY:
+        case CTC_ENUMERATED:
+            return 4;
+        case CTC_LONG_INT:
+        case CTC_UNSIGNED_LONG_INT:
+        case CTC_LONG_LONG_INT:
+        case CTC_UNSIGNED_LONG_LONG_INT:
+        case CTC_DOUBLE:
+        case CTC_FLOAT_COMPLEX:
+        case CTC_DOUBLE_IMAGINARY:
+            return 8;
+        case CTC_LONG_DOUBLE:
+        case CTC_DOUBLE_COMPLEX:
+        case CTC_LONG_DOUBLE_IMAGINARY:
+            return 16;
+        case CTC_LONG_DOUBLE_COMPLEX:
+            return 32;
+        case CTC_POINTER:
+        // technically any type you'd have to deal with the "size" of an object with function type
+        // is if you're dealing with a function designator, which gets converted to a pointer anyways
+        // but for safety this is here anyway
+        case CTC_FUNCTION:
+            return 8;
+        case CTC_ARRAY:
+        {
+            c_type_class_t c = CTC_ERROR;
+            long long length = evaluate_constant_expression(ct->array.length_expression, &c, CE_INTEGER);
+            if (c == CTC_ERROR)
+                return -1;
+            return length * type_size(ct->derived_from);
+        }
+        case CTC_STRUCTURE:
+        case CTC_UNION:
+        {
+            long long size = 0;
+            VECTOR_FOR(c_type_t*, mct, ct->struct_union.member_types)
+                size += type_size(mct);
+            return size + (STRUCT_UNION_ALIGNMENT - (size % STRUCT_UNION_ALIGNMENT));
+        }
+        case CTC_VOID:
+        case CTC_ERROR:
+        case CTC_LABEL:
+            return 0;
+        default:
+            return -1;
+    }
 }
 
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))

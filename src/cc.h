@@ -6,9 +6,6 @@
 
 #define debug in_debug()
 
-#define terminate(fmt, ...) { errorf(fmt, ## __VA_ARGS__); exit(1); }
-#define numargs(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
-
 // these macros are used in circumstances where an error was produced by something that wasn't expected to error.
 // for instance, if there was a mistake with an earlier stage like parsing, this might get thrown.
 #define report_return { printf("bad (%d)\n", __LINE__); return; }
@@ -27,55 +24,32 @@
 #define SYMBOL_TABLE_FOR_ENTRIES_END }
 
 #define MAX_ERROR_LENGTH 512
+#define MAX_STRINGIFIED_INTEGER_LENGTH 30
 #define LINUX_MAX_PATH_LENGTH 4096
 
-#define LEXER_TOKEN_KEYWORD 0
-#define LEXER_TOKEN_IDENTIFIER 1
-#define LEXER_TOKEN_OPERATOR 2
-#define LEXER_TOKEN_SEPARATOR 3
-#define LEXER_TOKEN_INTEGER_CONSTANT 4
-#define LEXER_TOKEN_FLOATING_CONSTANT 5
-#define LEXER_TOKEN_CHARACTER_CONSTANT 6
-#define LEXER_TOKEN_STRING_CONSTANT 7
+#define STACKFRAME_ALIGNMENT 16
+#define STRUCT_UNION_ALIGNMENT 8
 
-#define KEYWORDS_LEN 37
-#define KEYWORD_AUTO 0
-#define KEYWORD_BREAK 1
-#define KEYWORD_CASE 2
-#define KEYWORD_CHAR 3
-#define KEYWORD_CONST 4
-#define KEYWORD_CONTINUE 5
-#define KEYWORD_DEFAULT 6
-#define KEYWORD_DO 7
-#define KEYWORD_DOUBLE 8
-#define KEYWORD_ELSE 9
-#define KEYWORD_ENUM 10
-#define KEYWORD_EXTERN 11
-#define KEYWORD_FLOAT 12
-#define KEYWORD_FOR 13
-#define KEYWORD_GOTO 14
-#define KEYWORD_IF 15
-#define KEYWORD_INLINE 16
-#define KEYWORD_INT 17
-#define KEYWORD_LONG 18
-#define KEYWORD_REGISTER 19
-#define KEYWORD_RESTRICT 20
-#define KEYWORD_RETURN 21
-#define KEYWORD_SHORT 22
-#define KEYWORD_SIGNED 23
-#define KEYWORD_SIZEOF 24
-#define KEYWORD_STATIC 25
-#define KEYWORD_STRUCT 26
-#define KEYWORD_SWITCH 27
-#define KEYWORD_TYPEDEF 28
-#define KEYWORD_UNION 29
-#define KEYWORD_UNSIGNED 30
-#define KEYWORD_VOID 31
-#define KEYWORD_VOLATILE 32
-#define KEYWORD_WHILE 33
-#define KEYWORD_BOOL 34
-#define KEYWORD_COMPLEX 35
-#define KEYWORD_IMAGINARY 36
+#define BOOL_MAX (unsigned char) 0xff
+#define CHAR_MAX (signed char) 0x7f
+#define SIGNED_CHAR_MAX (signed char) 0x7f
+#define UNSIGNED_CHAR_MAX (unsigned char) 0xff
+#define SHORT_INT_MAX (short) 0x7fff
+#define UNSIGNED_SHORT_INT_MAX (unsigned short) 0xffff
+#define INT_MAX 0x7fffffff
+#define UNSIGNED_INT_MAX 0xffffffffU
+#define LONG_INT_MAX 0x7fffffffffffffffL
+#define UNSIGNED_LONG_INT_MAX 0xffffffffffffffffUL
+#define LONG_LONG_INT_MAX 0x7fffffffffffffffLL
+#define UNSIGNED_LONG_LONG_INT_MAX 0xffffffffffffffffULL
+
+#define C_TYPE_SIZE_T CTC_UNSIGNED_LONG_INT
+#define C_TYPE_PTRSIZE_T CTC_LONG_INT
+#define C_TYPE_WCHAR_T CTC_INT
+
+typedef unsigned long long regid_t;
+
+#define INVALID_VREGID ((regid_t) (0))
 
 typedef enum c_keyword
 {
@@ -200,7 +174,8 @@ typedef enum token_type
     T_FLOATING_CONSTANT,
     T_CHARACTER_CONSTANT,
     T_STRING_LITERAL,
-    T_PUNCTUATOR
+    T_PUNCTUATOR,
+    T_NO_ELEMENTS
 } token_type_t;
 
 typedef enum c_type_class
@@ -243,6 +218,8 @@ typedef struct analysis_error analysis_error_t;
 typedef struct syntax_component_t syntax_component_t;
 typedef struct preprocessing_token preprocessing_token_t;
 typedef struct token token_t;
+typedef struct ir_insn ir_insn_t;
+typedef struct x86_insn x86_insn_t;
 
 typedef struct preprocessing_token
 {
@@ -334,8 +311,8 @@ typedef struct token
         // T_STRING_LITERAL
         struct
         {
-            char* value;
-            bool wide;
+            char* value_reg;
+            int* value_wide;
         } string_literal;
 
         // T_PUNCTUATOR
@@ -343,19 +320,11 @@ typedef struct token
     };
 } token_t;
 
-typedef struct lexer_token_t
+typedef struct tokenizing_settings
 {
-    unsigned type;
-    unsigned row, col;
-    union
-    {
-        unsigned keyword_id;
-        char* string_value;
-        unsigned operator_id;
-        unsigned separator_id;
-    };
-    struct lexer_token_t* next;
-} lexer_token_t;
+    char* filepath;
+    char* error;
+} tokenizing_settings_t;
 
 typedef struct buffer_t
 {
@@ -378,23 +347,6 @@ typedef enum constant_expression_type
     CE_ARITHMETIC,
     CE_ADDRESS
 } constant_expression_type_t;
-
-#define BOOL_MAX (unsigned char) 0xff
-#define CHAR_MAX (signed char) 0x7f
-#define SIGNED_CHAR_MAX (signed char) 0x7f
-#define UNSIGNED_CHAR_MAX (unsigned char) 0xff
-#define SHORT_INT_MAX (short) 0x7fff
-#define UNSIGNED_SHORT_INT_MAX (unsigned short) 0xffff
-#define INT_MAX 0x7fffffff
-#define UNSIGNED_INT_MAX 0xffffffffU
-#define LONG_INT_MAX 0x7fffffffffffffffL
-#define UNSIGNED_LONG_INT_MAX 0xffffffffffffffffUL
-#define LONG_LONG_INT_MAX 0x7fffffffffffffffLL
-#define UNSIGNED_LONG_LONG_INT_MAX 0xffffffffffffffffULL
-
-#define C_TYPE_SIZE_T CTC_UNSIGNED_LONG_INT
-#define C_TYPE_PTRSIZE_T CTC_LONG_INT
-#define C_TYPE_WCHAR_T CTC_INT
 
 typedef struct c_type c_type_t;
 
@@ -431,12 +383,160 @@ typedef struct c_type
     };
 } c_type_t;
 
-typedef enum storage_duration
+typedef enum locator_type
 {
-    AUTOMATIC,
-    STATIC,
-    ALLOCATED
-} storage_duration_t;
+    L_OFFSET = 0,
+    L_LABEL,
+    L_ARRAY
+} locator_type_t;
+
+typedef struct locator
+{
+    locator_type_t type;
+    union
+    {
+        long long stack_offset;
+        char* label;
+        struct
+        {
+            regid_t base_reg;
+            regid_t offset_reg;
+            int scale;
+        } array;
+    };
+} locator_t;
+
+typedef enum ir_insn_type
+{
+    II_UNKNOWN = 0,
+    II_LABEL,
+    II_LOAD_OBJECT,
+    II_LOAD_ICONST,
+    II_RETURN,
+    II_STORE_ADDRESS,
+    II_SUBSCRIPT,
+    II_ADDITION,
+    II_JUMP,
+    II_JUMP_IF_ZERO,
+    II_FUNCTION_CALL,
+    II_ENTER,
+    II_LEAVE,
+
+    // LOW-LEVEL INSTRUCTIONS
+    II_RETAIN,
+    II_RESTORE,
+
+    II_NO_ELEMENTS
+} ir_insn_type_t;
+
+typedef struct ir_insn ir_insn_t;
+
+typedef struct ir_insn
+{
+    ir_insn_type_t type;
+    c_type_t* ctype;
+    regid_t result;
+    locator_t* loc;
+    ir_insn_t* prev;
+    ir_insn_t* next;
+    union
+    {
+        char* label;
+        unsigned long long load_iconst_value;
+        struct
+        {
+            locator_t* dest;
+            regid_t src;
+        } store_address;
+        regid_t return_reg;
+        struct
+        {
+            regid_t lhs;
+            regid_t rhs;
+        } bexpr;
+        struct
+        {
+            regid_t condition;
+            char* label;
+        } cjmp;
+        char* jmp_label;
+        struct
+        {
+            regid_t calling;
+            regid_t* regargs;
+            size_t noargs;
+        } function_call;
+        long long enter_stackalloc;
+        regid_t retain_reg;
+        regid_t restore_reg;
+    };
+} ir_insn_t;
+
+typedef enum x86_operand_type
+{
+    X86OP_REGISTER,
+    X86OP_PTR_REGISTER,
+    X86OP_DEREF_REGISTER,
+    X86OP_ARRAY,
+    X86OP_LABEL,
+    X86OP_LABEL_REF,
+    X86OP_IMMEDIATE
+} x86_operand_type_t;
+
+typedef struct x86_operand
+{
+    x86_operand_type_t type;
+    union
+    {
+        regid_t reg;
+        struct
+        {
+            regid_t reg;
+            long long offset;
+        } deref_reg;
+        struct
+        {
+            regid_t reg_base;
+            regid_t reg_offset;
+            long long scale;
+        } array;
+        char* label;
+        unsigned long long immediate;
+    };
+} x86_operand_t;
+
+typedef enum x86_insn_size
+{
+    X86SZ_BYTE,
+    X86SZ_WORD,
+    X86SZ_DWORD,
+    X86SZ_QWORD
+} x86_insn_size_t;
+
+typedef enum x86_insn_type
+{
+    X86I_UNKNOWN,
+    X86I_LABEL,
+    X86I_MOV,
+    X86I_LEA,
+    X86I_CALL,
+    X86I_PUSH,
+    X86I_POP,
+    X86I_ADD,
+    X86I_SUB,
+    X86I_LEAVE,
+    X86I_RET
+} x86_insn_type_t;
+
+typedef struct x86_insn
+{
+    x86_insn_type_t type;
+    x86_insn_size_t size;
+    x86_operand_t* op1;
+    x86_operand_t* op2;
+    x86_operand_t* op3;
+    x86_insn_t* next;
+} x86_insn_t;
 
 typedef enum c_namespace_class
 {
@@ -448,6 +548,21 @@ typedef enum c_namespace_class
     NSC_UNION_MEMBER,
     NSC_ORDINARY
 } c_namespace_class_t;
+
+typedef enum linkage
+{
+    LK_EXTERNAL,
+    LK_INTERNAL,
+    LK_NONE
+} linkage_t;
+
+typedef enum storage_duration
+{
+    SD_UNKNOWN,
+    SD_AUTOMATIC,
+    SD_STATIC,
+    SD_ALLOCATED
+} storage_duration_t;
 
 typedef struct c_namespace
 {
@@ -625,6 +740,8 @@ typedef struct syntax_component_t
 {
     syntax_component_type_t type;
     c_type_t* ctype;
+    ir_insn_t* code;
+    regid_t result_register;
     unsigned row, col;
     struct syntax_component_t* parent;
     union
@@ -644,6 +761,7 @@ typedef struct syntax_component_t
             struct syntax_component_t* fdef_declarator; // SC_DECLARATOR
             vector_t* fdef_knr_declarations; // <syntax_component_t> (SC_DECLARATION)
             struct syntax_component_t* fdef_body; // SC_COMPOUND_STATEMENT
+            long long fdef_stackframe_size;
         };
 
         // SC_DECLARATION - decl
@@ -714,12 +832,26 @@ typedef struct syntax_component_t
         // SC_TYPEDEF_NAME
         char* id;
 
-        // con (general constant)
-        // SC_STRING_LITERAL
-        // SC_FLOATING_CONSTANT
-        // SC_INTEGER_CONSTANT
-        // SC_CHARACTER_CONSTANT
-        char* con;
+        // SC_STRING_LITERAL - strl
+        struct
+        {
+            char* strl_reg;
+            int* strl_wide;
+            struct syntax_component_t* strl_length; // SC_INTEGER_CONSTANT
+        };
+
+        // SC_CHARACTER_CONSTANT - charc
+        struct
+        {
+            int charc_value;
+            bool charc_wide;
+        };
+
+        // SC_FLOATING_CONSTANT - floc
+        long double floc;
+
+        // SC_INTEGER_CONSTANT - intc
+        unsigned long long intc;
 
         // SC_DECLARATOR - declr
         struct
@@ -998,6 +1130,7 @@ typedef struct symbol_t
 {
     syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
     c_type_t* type;
+    locator_t* loc;
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
 } symbol_t;
 
@@ -1104,29 +1237,26 @@ extern const char* BOOL_NAMES[2];
 extern const char* LEXER_TOKEN_NAMES[8];
 extern const char* C_TYPE_CLASS_NAMES[30];
 extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
+extern const char* TOKEN_NAMES[T_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
 
 /* lex.c */
-preprocessing_token_t* lex_new(FILE* file, bool dump_error);
+preprocessing_token_t* lex(FILE* file, bool dump_error);
 void pp_token_delete(preprocessing_token_t* token);
 void pp_token_delete_all(preprocessing_token_t* tokens);
 void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...));
 preprocessing_token_t* pp_token_copy(preprocessing_token_t* token);
 preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preprocessing_token_t* end);
-
-// old
-lexer_token_t* lex(FILE* file);
-void lex_delete(lexer_token_t* start);
-void print_token(lexer_token_t* tok, int (*printer)(const char* fmt, ...));
-bool is_assignment_operator_token(lexer_token_t* tok);
-bool is_unary_operator_token(lexer_token_t* tok);
+void pp_token_normal_print_range(preprocessing_token_t* token, preprocessing_token_t* end, int (*printer)(const char* fmt, ...));
 
 /* preprocess.c */
 bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settings);
+void charconvert(preprocessing_token_t* tokens);
+void strlitconcat(preprocessing_token_t* tokens);
 
 /* parse.c */
-syntax_component_t* parse(lexer_token_t* toks);
+syntax_component_t* parse(token_t* toks);
 
 /* traverse.c */
 syntax_traverser_t* traverse_init(syntax_component_t* tlu, size_t size);
@@ -1148,6 +1278,8 @@ bool emit(syntax_component_t* unit, FILE* out);
 /* symbol.c */
 symbol_t* symbol_init(syntax_component_t* declarer);
 syntax_component_t* symbol_get_scope(symbol_t* sy);
+bool scope_is_block(syntax_component_t* scope);
+storage_duration_t symbol_get_storage_duration(symbol_t* sy);
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...));
 void symbol_delete(symbol_t* sy);
 symbol_table_t* symbol_table_init(void);
@@ -1182,13 +1314,15 @@ syntax_component_t* syntax_get_declarator_function_definition(syntax_component_t
 syntax_component_t* syntax_get_declarator_declaration(syntax_component_t* declr);
 syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr);
 syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn);
+syntax_component_t* syntax_get_function_definition(syntax_component_t* syn);
 c_namespace_t* syntax_get_namespace(syntax_component_t* id);
 c_namespace_t get_basic_namespace(c_namespace_class_t nsc);
 void find_typedef(syntax_component_t** declaration_ref, syntax_component_t** declarator_ref, syntax_component_t* unit, char* identifier);
 void print_syntax(syntax_component_t* s, int (*printer)(const char* fmt, ...));
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type);
 void free_syntax(syntax_component_t* syn, syntax_component_t* tlu);
-unsigned long long process_integer_constant(syntax_component_t* syn, c_type_class_t* class);
+unsigned long long process_integer_constant(char* con, c_type_class_t* class);
+long double process_floating_constant(char* con, c_type_class_t* class);
 unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constant_expression_type_t cexpr_type);
 unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
 
@@ -1197,6 +1331,7 @@ c_type_t* make_basic_type(c_type_class_t class);
 c_type_t* integer_promotions(c_type_t* ct);
 void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
+long long type_size(c_type_t* ct);
 void type_delete(c_type_t* ct);
 c_type_t* type_compose(c_type_t* t1, c_type_t* t2);
 bool type_is_compatible(c_type_t* t1, c_type_t* t2);
@@ -1228,6 +1363,7 @@ bool type_is_scalar(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));
 c_type_t* type_copy(c_type_t* ct);
+c_type_t* strip_qualifiers(c_type_t* ct);
 #define type_is_qualified(ct) (ct ? ((ct)->qualifiers != 0) : false)
 
 /* util.c */
@@ -1235,6 +1371,8 @@ c_type_t* type_copy(c_type_t* ct);
 #define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
 
 char* strdup(const char* str);
+int* strdup_wide(const int* str);
+int* strdup_widen(const char* str);
 bool contains_substr(char* str, char* substr);
 bool streq(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
@@ -1244,6 +1382,48 @@ void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
 char* get_directory_path(char* path);
 char* get_file_name(char* path, bool m);
+int contains(void** array, unsigned length, void* el, int (*c)(void*, void*));
+
+int quickbuffer_printf(const char* fmt, ...);
+void quickbuffer_setup(size_t size);
+void quickbuffer_release(void);
+char* quickbuffer(void);
+
+int hexadecimal_digit_value(int c);
+unsigned get_universal_character_hex_value(char* unichar, size_t length);
+unsigned get_universal_character_utf8_encoding(unsigned value);
+
+/* tokenize.c */
+
+void token_delete(token_t* token);
+void token_delete_all(token_t* token);
+void token_print(token_t* token, int (*printer)(const char* fmt, ...));
+token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* settings);
+
+/* linearize.c */
+
+locator_t* locator_copy(locator_t* loc);
+void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...));
+void locator_delete(locator_t* loc);
+void insn_delete(ir_insn_t* insn);
+void insn_delete_all(ir_insn_t* insn);
+void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
+void insn_clike_print_all(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
+ir_insn_t* linearize(syntax_component_t* tlu);
+
+/* allocate.c */
+
+void allocate(ir_insn_t* insns, regid_t (*procregmap)(long long), size_t count);
+
+/* x86gen.c */
+
+regid_t x86procregmap(long long index);
+
+void x86_write_all(x86_insn_t* insns, FILE* file);
+void x86_write(x86_insn_t* insn, FILE* file);
+void x86_insn_delete(x86_insn_t* insn);
+void x86_insn_delete_all(x86_insn_t* insns);
+x86_insn_t* x86_generate(ir_insn_t* insns);
 
 /* from somewhere */
 bool in_debug(void);

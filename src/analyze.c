@@ -253,32 +253,6 @@ static void enforce_6_7_para_2(syntax_traverser_t* trav, syntax_component_t* syn
     ADD_ERROR(syn, "a declaration must declare an identifier, struct/union/enum tag, or an enumeration constant");
 }
 
-// void type_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
-// {
-//     // ISO: 6.4.4.2 (4)
-//     if (contains_substr(syn->con, "f") ||
-//         contains_substr(syn->con, "F"))
-//         syn->ctype = make_basic_type(CTC_FLOAT);
-//     else if (contains_substr(syn->con, "L") ||
-//         contains_substr(syn->con, "l"))
-//         syn->ctype = make_basic_type(CTC_LONG_DOUBLE);
-//     else
-//         syn->ctype = make_basic_type(CTC_DOUBLE);
-// }
-
-void type_string_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
-{
-    
-}
-
-void type_character_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
-{
-    if (strlen(syn->con) > 0 && syn->con[0] == 'L')
-        syn->ctype = make_basic_type(C_TYPE_WCHAR_T);
-    else
-        syn->ctype = make_basic_type(CTC_INT);
-}
-
 void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     bool pass = false;
@@ -373,7 +347,14 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
 
     if (pass && called_type->derived_from->function.param_types)
     {
-        if (called_type->derived_from->function.param_types->size != syn->fcallexpr_args->size)
+        if (called_type->derived_from->function.variadic && syn->fcallexpr_args->size < called_type->derived_from->function.param_types->size)
+        {
+            // ISO: ?
+            ADD_ERROR(syn, "function to be called expected %u or more argument(s), got %u",
+                called_type->derived_from->function.param_types->size,
+                syn->fcallexpr_args->size);
+        }
+        else if (!called_type->derived_from->function.variadic && called_type->derived_from->function.param_types->size != syn->fcallexpr_args->size)
         {
             // ISO: 6.5.2.2 (2)
             ADD_ERROR(syn, "function to be called expected %u argument(s), got %u",
@@ -386,9 +367,15 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
             VECTOR_FOR(syntax_component_t*, rhs, syn->fcallexpr_args)
             {
                 c_type_t* tlhs = vector_get(called_type->derived_from->function.param_types, i);
+                if (!tlhs) // variadic arguments aren't going to have a type attached to them
+                    break;
                 if (!can_assign(tlhs, rhs->ctype, rhs))
                 {
                     // ISO: 6.5.2.2 (2)
+                    type_humanized_print(tlhs, printf);
+                    printf("\n");
+                    type_humanized_print(rhs->ctype, printf);
+                    printf("\n");
                     ADD_ERROR(rhs, "invalid type of argument for this function call");
                     pass = false;
                 }
@@ -1054,6 +1041,36 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         // declaring
         if (sy->declarer == syn)
         {
+            // TODO: need to do a more thorough check here of *what* should be allocated and not
+            storage_duration_t dur = symbol_get_storage_duration(sy);
+            if (dur == SD_AUTOMATIC)
+            {
+                sy->loc = calloc(1, sizeof *sy->loc);
+                sy->loc->type = L_OFFSET;
+                syntax_component_t* fdef = syntax_get_function_definition(syn);
+                if (!fdef) report_return;
+                long long size = type_size(sy->type);
+                if (size == -1) report_return;
+                sy->loc->stack_offset = fdef->fdef_stackframe_size -= size;
+            }
+            else if (dur == SD_STATIC)
+            {
+                sy->loc = calloc(1, sizeof *sy->loc);
+                sy->loc->type = L_LABEL;
+                if (scope_is_block(symbol_get_scope(sy)))
+                {
+                    symbol_t* sylist = symbol_table_get_all(SYMBOL_TABLE, sy->declarer->id);
+                    long long idx = 0;
+                    for (; sylist && sylist->declarer != syn; sylist = sylist->next, ++idx);
+                    if (!sylist) report_return;
+                    size_t length = strlen(syn->id) + MAX_STRINGIFIED_INTEGER_LENGTH + 2;
+                    char* label = malloc(length);
+                    snprintf(label, length, "%s.%lld", syn->id, idx);
+                    sy->loc->label = label;
+                }
+                else
+                    sy->loc->label = strdup(syn->id);
+            }
             if (syntax_is_tentative_definition(syn))
             {
                 vector_t* declspecs = syntax_get_declspecs(syn);
@@ -1085,13 +1102,6 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         syn->ctype = make_basic_type(CTC_ERROR);
     }
     namespace_delete(ns);
-}
-
-void analyze_integer_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
-{
-    c_type_class_t c = CTC_ERROR;
-    process_integer_constant(syn, &c);
-    syn->ctype = make_basic_type(c);
 }
 
 static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1251,6 +1261,8 @@ void analyze_function_definition_after(syntax_traverser_t* trav, syntax_componen
     enforce_6_9_1_para_5(trav, syn);
     enforce_6_9_1_para_6(trav, syn);
     enforce_main_prototype(trav, syn);
+    // align stackframe
+    syn->fdef_stackframe_size = syn->fdef_stackframe_size + (STACKFRAME_ALIGNMENT - (syn->fdef_stackframe_size % STACKFRAME_ALIGNMENT));
 }
 
 void analyze_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1352,7 +1364,6 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_DEREFERENCE_MEMBER_EXPRESSION] = analyze_dereference_member_expression_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = analyze_function_call_expression_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = analyze_subscript_expression_after;
-    trav->after[SC_INTEGER_CONSTANT] = analyze_integer_constant_after;
     trav->after[SC_IDENTIFIER] = analyze_identifier_after;
 
     // statements

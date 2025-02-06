@@ -386,6 +386,16 @@ const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS] = {
     "PPT_WHITESPACE"
 };
 
+const char* TOKEN_NAMES[T_NO_ELEMENTS] = {
+    "T_KEYWORD",
+    "T_IDENTIFIER",
+    "T_INTEGER_CONSTANT",
+    "T_FLOATING_CONSTANT",
+    "T_CHARACTER_CONSTANT",
+    "T_STRING_LITERAL",
+    "T_PUNCTUATOR"
+};
+
 const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS] = {
     "[",
     "]",

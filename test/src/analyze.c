@@ -7,7 +7,7 @@
 
 static bool tanalyze(char* tlu_str)
 {
-    lexer_token_t* tokens = testutils_tokenize(tlu_str);
+    token_t* tokens = testutils_tokenize(tlu_str);
     syntax_component_t* tlu = parse(tokens);
     if (test_debug) print_syntax(tlu, printf);
     if (!tlu)

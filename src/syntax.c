@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "cc.h"
 
@@ -215,6 +216,12 @@ syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr)
 syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
 {
     for (; syn && syn->type != SC_TRANSLATION_UNIT; syn = syn->parent);
+    return syn;
+}
+
+syntax_component_t* syntax_get_function_definition(syntax_component_t* syn)
+{
+    for (; syn && syn->type != SC_FUNCTION_DEFINITION; syn = syn->parent);
     return syn;
 }
 
@@ -653,6 +660,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SC_FUNCTION_DEFINITION:
         {
             ps(sty("function definition") "\n");
+            pf("stackframe size: %lld\n", s->fdef_stackframe_size);
             pf("declaration specifiers:\n");
             print_vector_indented(s->fdef_declaration_specifiers, next_indent, printer);
             pf("declarator:\n");
@@ -744,7 +752,7 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
 
         case SC_INTEGER_CONSTANT:
         {
-            ps("integer constant: %s\n", s->con);
+            ps("integer constant (ULL): %llu\n", s->intc);
             break;
         }
 
@@ -953,6 +961,25 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             pf("length expression:\n");
             print_syntax_indented(s->abadeclr_length_expression, next_indent, printer);
             pf("unspecified size: %s\n", BOOL_NAMES[s->abadeclr_unspecified_size]);
+            break;
+        }
+
+        case SC_FUNCTION_CALL_EXPRESSION:
+        {
+            ps(sty("function call expression") "\n");
+            pf("calling expression:\n");
+            print_syntax_indented(s->fcallexpr_expression, next_indent, printer);
+            pf("arguments:\n");
+            print_vector_indented(s->fcallexpr_args, next_indent, printer);
+            break;
+        }
+
+        case SC_STRING_LITERAL:
+        {
+            if (s->strl_reg)
+                ps("string literal: \"%s\"\n", s->strl_reg)
+            else
+                ps("string literal: \"%ls\"\n", s->strl_wide)
             break;
         }
 
@@ -1205,11 +1232,9 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             break;
         }
         case SC_STRING_LITERAL:
-        case SC_FLOATING_CONSTANT:
-        case SC_INTEGER_CONSTANT:
-        case SC_CHARACTER_CONSTANT:
         {
-            free(syn->con);
+            free(syn->strl_reg);
+            free(syn->strl_wide);
             break;
         }
         case SC_IF_STATEMENT:
@@ -1295,6 +1320,9 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         case SC_STORAGE_CLASS_SPECIFIER:
         case SC_BREAK_STATEMENT:
         case SC_CONTINUE_STATEMENT:
+        case SC_INTEGER_CONSTANT:
+        case SC_FLOATING_CONSTANT:
+        case SC_CHARACTER_CONSTANT:
             break;
         default:
         {
@@ -1304,6 +1332,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         }
     }
     type_delete(syn->ctype);
+    insn_delete_all(syn->code);
     free(syn);
 }
 
@@ -1414,9 +1443,8 @@ unsigned long long constexpr_cast_type(unsigned long long value, c_type_class_t 
     return r;
 }
 
-unsigned long long process_integer_constant(syntax_component_t* syn, c_type_class_t* class)
+unsigned long long process_integer_constant(char* con, c_type_class_t* class)
 {
-    char* con = syn->con;
     int radix = 10;
     if (starts_with_ignore_case(con, "0x"))
     {
@@ -1428,7 +1456,14 @@ unsigned long long process_integer_constant(syntax_component_t* syn, c_type_clas
         radix = 8;
         ++con;
     }
-    unsigned long long full = strtoull(con, NULL, radix);
+    char* end = NULL;
+    unsigned long long full = strtoull(con, &end, radix);
+    if (errno == ERANGE || !end || *end)
+    {
+        errno = 0;
+        *class = CTC_ERROR;
+        return 0ULL;
+    }
     if (ends_with_ignore_case(con, "ull") ||
         ends_with_ignore_case(con, "llu"))
     {
@@ -1528,6 +1563,28 @@ unsigned long long process_integer_constant(syntax_component_t* syn, c_type_clas
         return (long long) full;
     return full;
 }
+
+long double process_floating_constant(char* con, c_type_class_t* class)
+{
+    char* end = NULL;
+    long double value = strtof(con, &end);
+    if (errno == ERANGE || !end || *end)
+    {
+        errno = 0;
+        *class = CTC_ERROR;
+        return 0.0L;
+    }
+
+    if (ends_with_ignore_case(con, "f"))
+        *class = CTC_FLOAT;
+    else if (ends_with_ignore_case(con, "l"))
+        *class = CTC_LONG_DOUBLE;
+    else
+        *class = CTC_DOUBLE;
+    
+    return value;
+}
+
 // temp expression til i figure out errors here
 #define do_something(syn, error) (void) (error)
 
@@ -1701,7 +1758,8 @@ unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type
         // }
 
         case SC_INTEGER_CONSTANT:
-            r = process_integer_constant(expr, class);
+            r = expr->intc;
+            *class = expr->ctype->class;
             break;
 
         // ISO: 6.6 (3)

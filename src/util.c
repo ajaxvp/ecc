@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdarg.h>
+#include <wchar.h>
 
 #include "cc.h"
 
@@ -27,6 +29,27 @@ char* strdup(const char* str)
     char* dup = malloc(len + 1);
     dup[len] = '\0';
     strncpy(dup, str, len + 1);
+    return dup;
+}
+
+// identical malloc'd copy widened to int
+int* strdup_widen(const char* str)
+{
+    size_t len = strlen(str);
+    int* dup = malloc(sizeof(int) * (len + 1));
+    dup[len] = '\0';
+    for (size_t i = 0; i < len; ++i)
+        dup[i] = (int) str[i];
+    return dup;
+}
+
+int* strdup_wide(const int* str)
+{
+    size_t len = wcslen(str);
+    int* dup = malloc(sizeof(int) * (len + 1));
+    dup[len] = '\0';
+    for (size_t i = 0; i < len; ++i)
+        dup[i] = str[i];
     return dup;
 }
 
@@ -192,4 +215,86 @@ char* get_file_name(char* path, bool m)
     return NULL;
 
     #endif
+}
+
+// returns index if contains, otherwise -1
+int contains(void** array, unsigned length, void* el, int (*c)(void*, void*))
+{
+    for (unsigned i = 0; i < length; ++i)
+    {
+        if (!c(array[i], el))
+            return i;
+    }
+    return -1;
+}
+
+char* qb = NULL;
+size_t qb_size = 0;
+size_t qb_offset = 0;
+
+int quickbuffer_printf(const char* fmt, ...)
+{
+    if (!qb) return -1;
+    va_list args;
+    va_start(args, fmt);
+    int i = qb_offset += vsnprintf(qb + qb_offset, qb_size - qb_offset, fmt, args);
+    va_end(args);
+    return i;
+}
+
+void quickbuffer_setup(size_t size)
+{
+    qb = malloc(qb_size = size);
+    qb_offset = 0;
+}
+
+void quickbuffer_release(void)
+{
+    free(qb);
+    qb = NULL;
+    qb_size = 0;
+    qb_offset = 0;
+}
+
+char* quickbuffer(void)
+{
+    return qb;
+}
+
+// gets the actual value hex value for a char 0-9 or A-F or a-f
+int hexadecimal_digit_value(int c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return (c - 'A') + 10;
+    if (c >= 'a' && c <= 'f')
+        return (c - 'a') + 10;
+    return -1;
+}
+
+// expects a string of form "\uXXXX" or "\uXXXXXXXX"
+// length should be either 6 or 10
+unsigned get_universal_character_hex_value(char* unichar, size_t length)
+{
+    long long value = 0;
+    for (int i = 0; i < (length == 6 ? 4 : 8); ++i)
+        value = (value << 4) | hexadecimal_digit_value(unichar[i + 2]);
+    return value;
+}
+
+unsigned get_universal_character_utf8_encoding(unsigned value)
+{
+    if (value < 0x80)
+        return value;
+    unsigned first = (value & 0xF) | (((value >> 4) & 0x3) << 4) | (0x2 << 6);
+    if (value < 0x800)
+        return first | (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x3 << 14);
+    unsigned second = (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x2 << 14);
+    if (value < 0x10000)
+        return first | second | (0xE << 20) | (((value >> 12) & 0xF) << 16);
+    unsigned third = ((value >> 12) & 0xF) << 16 | (((value >> 16) & 0x3) << 20) | (0x2 << 22);
+    if (value < 0x110000)
+        return first | second | third | (0xF << 28) | (((value >> 18) & 0x3) << 24) | (((value >> 20) & 0x1) << 26);
+    return 0;
 }

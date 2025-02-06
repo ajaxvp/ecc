@@ -8,17 +8,15 @@
 
 the code for this project is developed to match the specifications of ISO/IEC 9899:1999, otherwise known as the C99 standard
 
-SEVEN PHASES OF THIS COMPILER:
-
-LEXER - lex(file): take a text source file and split it into manageable tokens to work with in future stages
-PREPROCESSOR - preprocess(tokens): take in a sequence of tokens and give back a new sequence of tokens with macros expanded
-PARSER - parse(tokens): take the preprocessed tokens and arrange them into a tree structure
-TYPER - type(tree): takes the tree and types all of the symbols associated with it
-STATIC ANALYZER - analyze(tree): takes the tree and catches errors in the semantics of it, along with typing expressions
-(NOT WRITTEN) LINEARIZER - linearize(tree): takes the tree and converts it into a list of assembly instructions/macros/labels
-(NOT WRITTEN) ALLOCATOR - allocate(list): takes the linearized code and properly allocates its register usage
-
-once all of these steps are done, it will take the list and dump it into the output file
+STD C TRANSLATION PHASES -> FUNCTIONS IN THIS PROJECT:
+ - translation phase 1: lex
+ - translation phase 2: lex
+ - translation phase 3: lex
+ - translation phase 4: preprocess
+ - translation phase 5: charconvert
+ - translation phase 6: strlitconcat
+ - translation phase 7: tokenize, parse, type, analyze, linearize, allocate
+ - translation phase 8: (handled externally by linker)
 
 */
 
@@ -32,7 +30,7 @@ int main(int argc, char** argv)
     }
     FILE* file = fopen(argv[1], "r");
 
-    preprocessing_token_t* tokens = lex_new(file, true);
+    preprocessing_token_t* tokens = lex(file, true);
     if (!tokens) return 1;
 
     printf("<<lexer output>>\n");
@@ -60,39 +58,74 @@ int main(int argc, char** argv)
         printf("\n");
     }
 
-    // syntax_component_t* tlu = parse(tokens);
-    // if (!tlu) return 1;
+    charconvert(tokens);
+    strlitconcat(tokens);
 
-    // printf("<<parser output>>\n");
-    // print_syntax(tlu, printf);
+    tokenizing_settings_t tk_settings;
+    tk_settings.filepath = argv[1];
+    char tok_error[MAX_ERROR_LENGTH];
+    tk_settings.error = tok_error;
+    tk_settings.error[0] = '\0';
 
-    // printf("<<symbol table>>\n");
-    // symbol_table_print(tlu->tlu_st, printf);
+    token_t* ts = tokenize(tokens, &tk_settings);
+    if (tk_settings.error[0])
+    {
+        printf("%s", tk_settings.error);
+        return 1;
+    }
 
-    // analysis_error_t* type_errors = type(tlu);
-    // if (type_errors)
-    // {
-    //     dump_errors(type_errors);
-    //     if (error_list_size(type_errors, false) > 0)
-    //         return 1;
-    // }
-
-    // printf("<<typed symbol table>>\n");
-    // symbol_table_print(tlu->tlu_st, printf);
-
-    // analysis_error_t* errors = analyze(tlu);
-    // if (errors)
-    // {
-    //     dump_errors(errors);
-    //     if (error_list_size(errors, false) > 0)
-    //         return 1;
-    // }
-
-    // printf("<<typed syntax tree>>\n");
-    // print_syntax(tlu, printf);
-
-    // fclose(file);
-    // free_syntax(tlu, tlu);
     pp_token_delete_all(tokens);
+
+    printf("<<tokenizer output>>\n");
+    for (token_t* t = ts; t; t = t->next)
+    {
+        token_print(t, printf);
+        printf("\n");
+    }
+
+    syntax_component_t* tlu = parse(ts);
+    if (!tlu) return 1;
+
+    analysis_error_t* type_errors = type(tlu);
+    if (type_errors)
+    {
+        dump_errors(type_errors);
+        if (error_list_size(type_errors, false) > 0)
+            return 1;
+    }
+
+    analysis_error_t* errors = analyze(tlu);
+    if (errors)
+    {
+        dump_errors(errors);
+        if (error_list_size(errors, false) > 0)
+            return 1;
+    }
+
+    printf("<<typed syntax tree>>\n");
+    print_syntax(tlu, printf);
+
+    printf("<<symbol table>>\n");
+    symbol_table_print(tlu->tlu_st, printf);
+
+    ir_insn_t* insns = linearize(tlu);
+    printf("<<linear IR>>\n");
+    insn_clike_print_all(insns, printf);
+
+    allocate(insns, x86procregmap, 9);
+
+    printf("<<allocated linear IR>>\n");
+    insn_clike_print_all(insns, printf);
+
+    x86_insn_t* x86_insns = x86_generate(insns);
+
+    printf("<<x86 assembly code>>\n");
+    x86_write_all(x86_insns, stdout);
+
+    fclose(file);
+    x86_insn_delete_all(x86_insns);
+    insn_delete_all(insns);
+    free_syntax(tlu, tlu);
+    token_delete_all(ts);
     return 0;
 }

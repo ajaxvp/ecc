@@ -42,6 +42,28 @@ static int read_impl(lex_state_t* state)
     }
     else
         ++state->col;
+    
+    if (state->cursor + 2 < state->length &&
+        state->data[state->cursor] == '?' &&
+        state->data[state->cursor + 1] == '?')
+    {
+        #define trigraph_select(c, d) \
+            case c: return state->col += 2, state->cursor += 3, d;
+        switch (state->data[state->cursor + 2])
+        {
+            trigraph_select('=', '#')
+            trigraph_select('(', '[')
+            trigraph_select('/', '\\')
+            trigraph_select(')', ']')
+            trigraph_select('\'', '^')
+            trigraph_select('<', '{')
+            trigraph_select('!', '|')
+            trigraph_select('>', '}')
+            trigraph_select('-', '~')
+            default: break;
+        }
+        #undef trigraph_select
+    }
 
     return state->data[state->cursor++];
 }
@@ -63,6 +85,23 @@ static bool unread_impl(lex_state_t* state)
         return false;
     }
     int c = state->data[--state->cursor];
+    if (state->cursor >= 2 &&
+        state->data[state->cursor - 1] == '?' &&
+        state->data[state->cursor - 2] == '?' &&
+        (c == '=' ||
+        c == '(' ||
+        c == '/' ||
+        c == ')' ||
+        c == '\'' ||
+        c == '<' ||
+        c == '!' ||
+        c == '>' ||
+        c == '-'))
+    {
+        state->cursor -= 2;
+        state->col -= 2;
+    }
+
     if (c == '\n' && state->cursor >= 1 && state->data[state->cursor - 1] == '\\')
         --state->cursor;
     if (state->cursor >= 1 && state->data[state->cursor - 1] == '\n')
@@ -94,7 +133,7 @@ static preprocessing_token_t* add_token(preprocessing_token_t* head, preprocessi
 
 static bool in_source_charset(int c)
 {
-    return true; // all characters are in the source charset! :)
+    return c < 128;
 }
 
 static bool is_nondigit(int c)
@@ -122,18 +161,6 @@ static bool is_hexadecimal_digit(int c)
 static bool is_whitespace(int c)
 {
     return c == ' ' || c == '\t' || c == '\v' || c == '\n' || c == '\f';
-}
-
-// gets the actual value hex value for a char 0-9 or A-F or a-f
-int hexadecimal_digit_value(int c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'A' && c <= 'F')
-        return (c - 'A') + 10;
-    if (c >= 'a' && c <= 'f')
-        return (c - 'a') + 10;
-    return -1;
 }
 
 void pp_token_delete(preprocessing_token_t* token)
@@ -223,6 +250,51 @@ void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt
             break;
     }
     printer(" }");
+}
+
+void pp_token_normal_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...))
+{
+    switch (token->type)
+    {
+        case PPT_HEADER_NAME:
+        {
+            if (token->header_name.quote_delimited)
+                printer("\"%s\"", token->header_name.name);
+            else
+                printer("<%s>", token->header_name.name);
+            break;
+        }
+        case PPT_IDENTIFIER:
+            printer("%s", token->identifier);
+            break;
+        case PPT_PP_NUMBER:
+            printer("%s", token->pp_number);
+            break;
+        case PPT_CHARACTER_CONSTANT:
+            printer("%s%s", token->character_constant.wide ? "L" : "", token->character_constant.value);
+            break;
+        case PPT_STRING_LITERAL:
+            printer("%s\"%s\"", token->string_literal.wide ? "L" : "", token->string_literal.value);
+            break;
+        case PPT_PUNCTUATOR:
+            printer("%s", PUNCTUATOR_STRING_REPRS[token->punctuator]);
+            break;
+        case PPT_OTHER:
+            printer("%c", token->other);
+            break;
+        case PPT_WHITESPACE:
+            printer("%s", token->whitespace);
+            break;
+        default:
+            break;
+    }
+}
+
+// print how code would normally be written from token (inclusive) to end (exclusive) or if end is NULL, till the end
+void pp_token_normal_print_range(preprocessing_token_t* token, preprocessing_token_t* end, int (*printer)(const char* fmt, ...))
+{
+    for (; token && token != end; token = token->next)
+        pp_token_normal_print(token, printer);
 }
 
 // does not recursively copy if in a linked list structure
@@ -359,32 +431,6 @@ preprocessing_token_t* lex_header_name(lex_state_t* state)
     return token;
 }
 
-// expects a string of form "\uXXXX" or "\uXXXXXXXX"
-unsigned get_universal_character_hex_value(char* unichar)
-{
-    size_t length = strlen(unichar);
-    long long value = 0;
-    for (int i = 0; i < (length == 6 ? 4 : 8); ++i)
-        value = (value << 4) | hexadecimal_digit_value(unichar[i + 2]);
-    return value;
-}
-
-unsigned get_universal_character_utf8_encoding(unsigned value)
-{
-    if (value < 0x80)
-        return value;
-    unsigned first = (value & 0xF) | (((value >> 4) & 0x3) << 4) | (0x2 << 6);
-    if (value < 0x800)
-        return first | (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x3 << 14);
-    unsigned second = (((value >> 6) & 0x3) << 8) | (((value >> 8) & 0xF) << 10) | (0x2 << 14);
-    if (value < 0x10000)
-        return first | second | (0xE << 20) | (((value >> 12) & 0xF) << 16);
-    unsigned third = ((value >> 12) & 0xF) << 16 | (((value >> 16) & 0x3) << 20) | (0x2 << 22);
-    if (value < 0x110000)
-        return first | second | third | (0xF << 28) | (((value >> 18) & 0x3) << 24) | (((value >> 20) & 0x1) << 26);
-    return 0;
-}
-
 // gives back a string of form "\uXXXX" or "\UXXXXXXXX"
 char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
 {
@@ -429,7 +475,7 @@ char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
         }
     }
     char* unichar = buffer_export(buf);
-    unsigned value = get_universal_character_hex_value(unichar);
+    unsigned value = get_universal_character_hex_value(unichar, strlen(unichar));
     buffer_delete(buf);
     if ((value < 0x00A0U && value != 0x0024U && value != 0x0040U && value != 0x0060U) || (value >= 0xD800U && value <= 0xDFFFU))
     {
@@ -875,7 +921,7 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
     {
         read;
         single_check('=', P_MODULO_ASSIGNMENT)
-        single_check('>', P_DIGRAPH_RIGHT_BRACE)
+        single_check('>', P_RIGHT_BRACE)
         if (peek == ':')
         {
             read;
@@ -885,14 +931,14 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
                 if (peek == ':')
                 {
                     read;
-                    token->punctuator = P_DIGRAPH_DOUBLE_HASH;
+                    token->punctuator = P_DOUBLE_HASH;
                     cleanup_lex_pass;
                     return token;
                 }
                 else
                     unread;
             }
-            token->punctuator = P_DIGRAPH_HASH;
+            token->punctuator = P_HASH;
             cleanup_lex_pass;
             return token;
         }
@@ -906,8 +952,8 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
     {
         read;
         single_check('=', P_LESS_EQUAL)
-        single_check('%', P_DIGRAPH_LEFT_BRACE)
-        single_check(':', P_DIGRAPH_LEFT_BRACKET)
+        single_check('%', P_LEFT_BRACE)
+        single_check(':', P_LEFT_BRACKET)
         if (peek == '<')
         {
             read;
@@ -970,12 +1016,10 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
         return token;
     }
 
-    single_check('?', P_QUESTION_MARK)
-
     if (peek == ':')
     {
         read;
-        single_check('>', P_DIGRAPH_RIGHT_BRACKET)
+        single_check('>', P_RIGHT_BRACKET)
         token->punctuator = P_COLON;
         cleanup_lex_pass;
         return token;
@@ -1105,7 +1149,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
     return NULL;
 }
 
-preprocessing_token_t* lex_new(FILE* file, bool dump_error)
+preprocessing_token_t* lex(FILE* file, bool dump_error)
 {
     lex_state_t* state = calloc(1, sizeof *state);
 

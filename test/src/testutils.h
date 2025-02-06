@@ -3,6 +3,6 @@
 
 #include "../../src/cc.h"
 
-lexer_token_t* testutils_tokenize(char* tlu);
+token_t* testutils_tokenize(char* tlu);
 
 #endif
