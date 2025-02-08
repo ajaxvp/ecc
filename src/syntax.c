@@ -225,6 +225,21 @@ syntax_component_t* syntax_get_function_definition(syntax_component_t* syn)
     return syn;
 }
 
+bool syntax_is_assignment_expression(syntax_component_type_t type)
+{
+    return type == SC_ASSIGNMENT_EXPRESSION ||
+        type == SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION ||
+        type == SC_DIVISION_ASSIGNMENT_EXPRESSION ||
+        type == SC_MODULAR_ASSIGNMENT_EXPRESSION ||
+        type == SC_ADDITION_ASSIGNMENT_EXPRESSION ||
+        type == SC_SUBTRACTION_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_AND_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_OR_ASSIGNMENT_EXPRESSION ||
+        type == SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION;
+}
+
 void namespace_delete(c_namespace_t* ns)
 {
     if (!ns) return;
@@ -298,6 +313,12 @@ bool syntax_is_lvalue(syntax_component_t* syn)
     return syntax_is_expression_type(syn->type) &&
         (type_is_object_type(syn->ctype) ||
         (!type_is_complete(syn->ctype) && syn->ctype->class != CTC_VOID));
+}
+
+linkage_t syntax_get_linkage(syntax_component_t* syn)
+{
+    // TODO
+    return LK_NONE;
 }
 
 bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type)

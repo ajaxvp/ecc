@@ -3,8 +3,6 @@
 
 #include "cc.h"
 
-#define REG_ARRAY_LENGTH 3
-
 /*
 
 for each instruction:
@@ -27,45 +25,6 @@ for each instruction:
 
 */
 
-vector_t* get_registers(ir_insn_t* insn)
-{
-    if (!insn) return NULL;
-    vector_t* v = vector_init();
-    #define ADD(x) vector_add(v, (x))
-    switch (insn->type)
-    {
-        case II_FUNCTION_CALL:
-            ADD(&insn->function_call.calling);
-            for (size_t i = 0; i < insn->function_call.noargs; ++i)
-                ADD(insn->function_call.regargs + i);
-            break;
-        case II_RETURN:
-            ADD(&insn->return_reg);
-            break;
-        case II_STORE_ADDRESS:
-            ADD(&insn->store_address.src);
-            break;
-        case II_SUBSCRIPT:
-        case II_ADDITION:
-            ADD(&insn->bexpr.lhs);
-            ADD(&insn->bexpr.rhs);
-            break;
-        case II_JUMP_IF_ZERO:
-            ADD(&insn->cjmp.condition);
-            break;
-        case II_RETAIN:
-            ADD(&insn->retain_reg);
-            break;
-        case II_RESTORE:
-            ADD(&insn->restore_reg);
-            break;
-        default:
-            break;
-    }
-    #undef ADD
-    return v;
-}
-
 regid_t find_physical_register(regid_t vreg, regid_t* regmap, size_t count)
 {
     for (size_t i = 0; i < count; ++i)
@@ -82,15 +41,15 @@ void gather_vreg_info(regid_t vreg, ir_insn_t* insn, ir_insn_t* end, ir_insn_t**
     *proc_arg_index = -1;
     for (; insn && insn != end; insn = insn->next)
     {
-        vector_t* regs = get_registers(insn);
-        VECTOR_FOR(regid_t*, reg, regs)
+        for (size_t i = 0; i < insn->noops; ++i)
         {
-            if (*reg != vreg) continue;
+            ir_insn_operand_t* op = insn->ops[i];
+            if (op->type != IIOP_VIRTUAL_REGISTER) continue;
+            if (op->vreg != vreg) continue;
             *expiry = insn;
-            if (insn->type == II_FUNCTION_CALL && i > 0)
-                *proc_arg_index = i - 1;
+            if (insn->type == II_FUNCTION_CALL && i > 1)
+                *proc_arg_index = i - 2;
         }
-        vector_delete(regs);
     }
 }
 
@@ -130,10 +89,14 @@ void allocate_region(ir_insn_t* insns, ir_insn_t* end, regid_t (*procregmap)(lon
         if (insn->type == II_RETAIN || insn->type == II_RESTORE)
             continue;
         // replace all non-resulting virt. registers with their phys. mapping
-        vector_t* regs = get_registers(insn);
-        VECTOR_FOR(regid_t*, reg, regs)
-            *reg = find_physical_register(*reg, regmap, count);
-        vector_delete(regs);
+        for (size_t i = 0; i < insn->noops; ++i)
+        {
+            ir_insn_operand_t* op = insn->ops[i];
+            if (op->type != IIOP_VIRTUAL_REGISTER) continue;
+            if (op->result) continue;
+            op->type = IIOP_PHYSICAL_REGISTER;
+            op->preg = find_physical_register(op->vreg, regmap, count);
+        }
         // release any register mappings that expire on this instruction
         for (size_t i = 0; i < count; ++i)
         {
@@ -144,23 +107,24 @@ void allocate_region(ir_insn_t* insns, ir_insn_t* end, regid_t (*procregmap)(lon
             }
         }
         // if there is no resulting virt. register, don't mess with it
-        if (insn->result == INVALID_VREGID)
+        if (insn->noops < 1)
             continue;
+        if (!insn->ops[0]->result)
+            continue;
+        if (insn->ops[0]->type != IIOP_VIRTUAL_REGISTER)
+            continue;
+        ir_insn_operand_t* result = insn->ops[0];
         ir_insn_t* expiry = insn;
         long long proc_arg_index = -1;
-        gather_vreg_info(insn->result, insn, end, &expiry, &proc_arg_index);
+        gather_vreg_info(result->vreg, insn, end, &expiry, &proc_arg_index);
         regid_t preg = INVALID_VREGID;
         if (proc_arg_index != -1)
         {
             preg = procregmap(proc_arg_index);
             if (regmap[preg - 1] != INVALID_VREGID)
             {
-                ir_insn_t* retain = calloc(1, sizeof *retain);
-                retain->type = II_RETAIN;
-                retain->retain_reg = preg;
-                ir_insn_t* restore = calloc(1, sizeof *restore);
-                restore->type = II_RESTORE;
-                restore->restore_reg = preg;
+                ir_insn_t* retain = make_1op(II_RETAIN, NULL, make_preg_insn_operand(preg, false));
+                ir_insn_t* restore = make_1op(II_RESTORE, NULL, make_preg_insn_operand(preg, false));
                 insert_insn_before(insn, retain);
                 insert_insn_after(expiry, restore);
             }
@@ -173,9 +137,10 @@ void allocate_region(ir_insn_t* insns, ir_insn_t* end, regid_t (*procregmap)(lon
             }
         if (preg == INVALID_VREGID)
             report_return;
-        regmap[preg - 1] = insn->result;
+        regmap[preg - 1] = result->vreg;
         insnmap[preg - 1] = expiry;
-        insn->result = preg;
+        result->type = IIOP_PHYSICAL_REGISTER;
+        result->preg = preg;
     }
 
     free(regmap);

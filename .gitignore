@@ -63,6 +63,9 @@ ignored
 # Build folder
 build
 
+# Libraries folder
+link
+
 # Build executable
 cc
 

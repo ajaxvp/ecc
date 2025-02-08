@@ -2160,7 +2160,7 @@ syntax_component_t* parse_actual_assignment_expression(token_t** tokens, parse_r
     init_parse;
     init_syn(SC_UNKNOWN);
     parse_status_code_t uexpr_stat = UNKNOWN_STATUS;
-    syn->bexpr_lhs = parse_unary_expression(&token, EXPECTED, &uexpr_stat, tlu, next_depth, parent);
+    syn->bexpr_lhs = parse_unary_expression(&token, EXPECTED, &uexpr_stat, tlu, next_depth, syn);
     if (uexpr_stat == ABORT)
     {
         fail_status;

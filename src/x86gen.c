@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "cc.h"
 
@@ -99,6 +100,13 @@ const char* X86_REG8_MAP[] = {
     "bpl"
 };
 
+typedef struct x86_gen_state
+{
+    long long active_stackalloc;
+    x86_insn_t* active_function;
+    symbol_table_t* st;
+} x86_gen_state_t;
+
 const char* register_name(regid_t reg, x86_insn_size_t size)
 {
     switch (size)
@@ -109,6 +117,12 @@ const char* register_name(regid_t reg, x86_insn_size_t size)
         case X86SZ_QWORD: return X86_REG64_MAP[reg - 1];
         default: return "badreg";
     }
+}
+
+void x86_gen_state_delete(x86_gen_state_t* state)
+{
+    if (!state) return;
+    free(state);
 }
 
 // maps procedure argument indices to their corresponding physical registers
@@ -154,6 +168,15 @@ void x86_insn_delete_all(x86_insn_t* insns)
     if (!insns) return;
     x86_insn_delete_all(insns->next);
     x86_insn_delete(insns);
+}
+
+// location next
+// location insn next
+void insert_x86_insn_after(x86_insn_t* insn, x86_insn_t* location)
+{
+    if (!insn || !location) return;
+    insn->next = location->next;
+    location->next = insn;
 }
 
 char x86_operand_size_character(x86_insn_size_t size)
@@ -244,6 +267,11 @@ void x86_write(x86_insn_t* insn, FILE* file)
             fprintf(file, INDENT "call ");
             x86_operand_write(insn->op1, X86SZ_QWORD, file);
             break;
+
+        case X86I_JMP:
+            fprintf(file, INDENT "jmp ");
+            x86_operand_write(insn->op1, X86SZ_QWORD, file);
+            break;
         
         case X86I_PUSH: USUAL_1OP("push")
 
@@ -312,7 +340,7 @@ x86_operand_t* make_operand_deref_register(regid_t reg, long long offset)
     return op;
 }
 
-x86_operand_t* make_operand_immediate(long long immediate)
+x86_operand_t* make_operand_immediate(unsigned long long immediate)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_IMMEDIATE);
     op->immediate = immediate;
@@ -344,6 +372,62 @@ x86_operand_t* locator_to_operand(locator_t* loc)
     }
 }
 
+x86_operand_t* ir_operand_to_operand(c_type_t* ctype, ir_insn_operand_t* iop, x86_gen_state_t* state)
+{
+    if (!iop) return NULL;
+    switch (iop->type)
+    {
+        case IIOP_IDENTIFIER:
+        {
+            symbol_t* sy = iop->id_symbol;
+            locator_t* loc = NULL;
+            if (!(loc = sy->loc))
+            {
+                storage_duration_t dur = symbol_get_storage_duration(sy);
+                if (dur == SD_STATIC)
+                {
+                    loc = calloc(1, sizeof *loc);
+                    loc->type = L_LABEL;
+                    if (scope_is_block(symbol_get_scope(sy)))
+                    {
+                        symbol_t* sylist = symbol_table_get_all(state->st, sy->declarer->id);
+                        long long idx = 0;
+                        for (; sylist && sylist->declarer != sy->declarer; sylist = sylist->next, ++idx);
+                        if (!sylist) report_return_value(NULL);
+                        size_t length = strlen(sy->declarer->id) + MAX_STRINGIFIED_INTEGER_LENGTH + 2;
+                        char* label = malloc(length);
+                        snprintf(label, length, "%s.%lld", sy->declarer->id, idx);
+                        loc->label = label;
+                    }
+                    else
+                        loc->label = strdup(sy->declarer->id);
+                }
+                else if (dur == SD_AUTOMATIC)
+                {
+                    loc = calloc(1, sizeof *loc);
+                    loc->type = L_OFFSET;
+                    loc->stack_offset = state->active_stackalloc -= type_size(ctype);
+                }
+                else
+                    report_return_value(NULL);
+                sy->loc = loc;
+            }
+            return locator_to_operand(loc);
+        }
+        case IIOP_IMMEDIATE:
+            return make_operand_immediate(iop->immediate);
+        case IIOP_FLOAT:
+            // TODO
+            return NULL;
+        case IIOP_LABEL:
+            return make_operand_label_ref(iop->label);
+        case IIOP_PHYSICAL_REGISTER:
+            return make_operand_register(iop->preg);
+        default:
+            return NULL;
+    }
+}
+
 x86_insn_t* make_basic_x86_insn(x86_insn_type_t type)
 {
     x86_insn_t* insn = calloc(1, sizeof *insn);
@@ -351,32 +435,22 @@ x86_insn_t* make_basic_x86_insn(x86_insn_type_t type)
     return insn;
 }
 
-x86_insn_t* x86_generate_label(ir_insn_t* insn)
+x86_insn_t* x86_generate_local_label(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* x86_insn = make_basic_x86_insn(X86I_LABEL);
-    x86_insn->op1 = make_operand_label(insn->label);
+    x86_insn->op1 = make_operand_label(insn->ops[0]->label);
     return x86_insn;
 }
 
-x86_insn_t* x86_generate_enter(ir_insn_t* insn)
+x86_insn_t* x86_generate_function_label(ir_insn_t* insn, x86_gen_state_t* state)
 {
-    x86_insn_t* push = make_basic_x86_insn(X86I_PUSH);
-    push->size = X86SZ_QWORD;
-    push->op1 = make_operand_register(X86R_RBP);
-    x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
-    mov->size = X86SZ_QWORD;
-    mov->op1 = make_operand_register(X86R_RSP);
-    mov->op2 = make_operand_register(X86R_RBP);
-    x86_insn_t* sub = make_basic_x86_insn(X86I_SUB);
-    sub->size = X86SZ_QWORD;
-    sub->op1 = make_operand_immediate(insn->enter_stackalloc);
-    sub->op2 = make_operand_register(X86R_RSP);
-    push->next = mov;
-    mov->next = sub;
-    return push;
+    x86_insn_t* fl = make_basic_x86_insn(X86I_LABEL);
+    fl->op1 = make_operand_label(insn->ops[0]->label);
+    state->active_function = fl;
+    return fl;
 }
 
-x86_insn_t* x86_generate_leave(ir_insn_t* insn)
+x86_insn_t* x86_generate_leave(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* lv = make_basic_x86_insn(X86I_LEAVE);
     x86_insn_t* ret = make_basic_x86_insn(X86I_RET);
@@ -384,103 +458,170 @@ x86_insn_t* x86_generate_leave(ir_insn_t* insn)
     return lv;
 }
 
-x86_insn_t* x86_generate_load_object(ir_insn_t* insn)
+// type _r = id; | type _r = iconst;
+x86_insn_t* x86_generate_load(ir_insn_t* insn, x86_gen_state_t* state)
 {
-    x86_insn_t* ld = make_basic_x86_insn(insn->ctype->class == CTC_POINTER && insn->ctype->derived_from->class == CTC_FUNCTION ? X86I_LEA : X86I_MOV);
-    ld->size = c_type_to_x86_operand_size(insn->ctype);
-    ld->op1 = locator_to_operand(insn->loc);
-    ld->op2 = make_operand_register(insn->result);
+    bool loadaddr = (insn->ctype->class == CTC_POINTER && insn->ctype->derived_from->class == CTC_FUNCTION) ||
+        insn->ctype->class == CTC_ARRAY ||
+        insn->ref;
+    x86_insn_t* ld = make_basic_x86_insn(loadaddr ? X86I_LEA : X86I_MOV);
+    ld->size = loadaddr ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
+    ld->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+    ld->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
     return ld;
 }
 
-x86_insn_t* x86_generate_load_iconst(ir_insn_t* insn)
-{
-    x86_insn_t* ld = make_basic_x86_insn(X86I_MOV);
-    ld->size = c_type_to_x86_operand_size(insn->ctype);
-    ld->op1 = make_operand_immediate(insn->load_iconst_value);
-    ld->op2 = make_operand_register(insn->result);
-    return ld;
-}
-
-x86_insn_t* x86_generate_function_call(ir_insn_t* insn)
+x86_insn_t* x86_generate_function_call(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* cl = make_basic_x86_insn(X86I_CALL);
-    cl->op1 = make_operand_ptr_register(insn->function_call.calling);
-    if (insn->result != X86R_RAX)
+    switch (insn->ops[1]->type)
+    {
+        case IIOP_PHYSICAL_REGISTER:
+            cl->op1 = make_operand_ptr_register(insn->ops[1]->preg);
+            break;
+        case IIOP_LABEL:
+            cl->op1 = make_operand_label(insn->ops[1]->label);
+            break;
+        default: report_return_value(NULL);
+    }
+    if (insn->ops[0]->type != IIOP_PHYSICAL_REGISTER || insn->ops[0]->preg != X86R_RAX)
     {
         x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
         mov->size = c_type_to_x86_operand_size(insn->ctype);
         mov->op1 = make_operand_register(X86R_RAX);
-        mov->op2 = make_operand_register(insn->result);
+        mov->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
         cl->next = mov;
     }
     return cl;
 }
 
-x86_insn_t* x86_generate_return(ir_insn_t* insn)
+x86_insn_t* x86_generate_return(ir_insn_t* insn, x86_gen_state_t* state)
 {
-    if (insn->return_reg == X86R_RAX)
+    // no need to move to return value register if it's already there
+    if (insn->ops[0]->type == IIOP_PHYSICAL_REGISTER && insn->ops[0]->preg == X86R_RAX)
         return NULL;
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = c_type_to_x86_operand_size(insn->ctype);
-    mov->op1 = make_operand_register(insn->return_reg);
+    mov->op1 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
     mov->op2 = make_operand_register(X86R_RAX);
     return mov;
 }
 
-x86_insn_t* x86_generate_addition(ir_insn_t* insn)
+x86_insn_t* x86_generate_subscript(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    x86_insn_t* ld = make_basic_x86_insn(insn->ref ? X86I_LEA : X86I_MOV);
+    ld->size = insn->ref ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
+    ld->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
+    if (insn->ops[1]->type != IIOP_PHYSICAL_REGISTER || insn->ops[2]->type != IIOP_PHYSICAL_REGISTER)
+        report_return_value(NULL);
+    ld->op1 = make_operand_array(insn->ops[1]->preg, insn->ops[2]->preg, type_size(insn->ctype));
+    return ld;
+}
+
+x86_insn_t* x86_generate_addition(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* add = make_basic_x86_insn(X86I_ADD);
     add->size = c_type_to_x86_operand_size(insn->ctype);
-    add->op2 = make_operand_register(insn->bexpr.lhs);
-    add->op1 = make_operand_register(insn->bexpr.rhs);
-    if (insn->bexpr.lhs != insn->result)
+    add->op2 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+    add->op1 = ir_operand_to_operand(insn->ctype, insn->ops[2], state);
+    if (!insn_operand_equals(insn->ops[1], insn->ops[0]))
     {
         x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
         mov->size = c_type_to_x86_operand_size(insn->ctype);
-        mov->op1 = make_operand_register(insn->bexpr.lhs);
-        mov->op2 = make_operand_register(insn->result);
+        mov->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+        mov->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
         add->next = mov;
     }
     return add;
 }
 
-x86_insn_t* x86_generate_store_address(ir_insn_t* insn)
+x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = c_type_to_x86_operand_size(insn->ctype);
-    mov->op1 = make_operand_register(insn->store_address.src);
-    mov->op2 = locator_to_operand(insn->store_address.dest);
-    if (insn->store_address.src != insn->result)
+    mov->op1 = ir_operand_to_operand(insn->ctype, insn->ops[2], state);
+    switch (insn->ops[1]->type)
+    {
+        case IIOP_PHYSICAL_REGISTER:
+            mov->op2 = make_operand_deref_register(insn->ops[1]->preg, 0);
+            break;
+        case IIOP_LABEL:
+            mov->op2 = make_operand_label_ref(insn->ops[1]->label);
+            break;
+        case IIOP_IDENTIFIER:
+            mov->op2 = make_operand_deref_register(X86R_RBP, insn->ops[1]->id_symbol->loc->stack_offset);
+            break;
+        default: report_return_value(NULL);
+    }
+    if (!insn_operand_equals(insn->ops[1], insn->ops[0]))
     {
         x86_insn_t* mov2 = make_basic_x86_insn(X86I_MOV);
         mov2->size = c_type_to_x86_operand_size(insn->ctype);
-        mov2->op1 = make_operand_register(insn->store_address.src);
-        mov2->op2 = make_operand_register(insn->result);
+        mov2->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+        mov2->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
         mov->next = mov2;
     }
     return mov;
 }
 
-x86_insn_t* x86_generate(ir_insn_t* insns)
+x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
 {
+    x86_insn_t* push = make_basic_x86_insn(X86I_PUSH);
+    push->size = X86SZ_QWORD;
+    push->op1 = make_operand_register(X86R_RBP);
+    insert_x86_insn_after(push, state->active_function);
+    x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
+    mov->size = X86SZ_QWORD;
+    mov->op1 = make_operand_register(X86R_RSP);
+    mov->op2 = make_operand_register(X86R_RBP);
+    insert_x86_insn_after(mov, push);
+    if (state->active_stackalloc)
+    {
+        state->active_stackalloc = abs(state->active_stackalloc);
+        x86_insn_t* sub = make_basic_x86_insn(X86I_SUB);
+        sub->size = X86SZ_QWORD;
+        sub->op1 = make_operand_immediate(ALIGN(state->active_stackalloc, STACKFRAME_ALIGNMENT));
+        sub->op2 = make_operand_register(X86R_RSP);
+        insert_x86_insn_after(sub, mov);
+        mov = sub;
+    }
+    state->active_function = NULL;
+    state->active_stackalloc = 0;
+    return NULL;
+}
+
+x86_insn_t* x86_generate_jump(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    x86_insn_t* jmp = make_basic_x86_insn(X86I_JMP);
+    if (insn->ops[0]->type != IIOP_LABEL)
+        report_return_value(NULL);
+    jmp->op1 = make_operand_label(insn->ops[0]->label);
+    return jmp;
+}
+
+x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)
+{
+    x86_gen_state_t* state = calloc(1, sizeof *state);
+    state->st = st;
     x86_insn_t* dummy = make_basic_x86_insn(X86I_UNKNOWN);
     x86_insn_t* curr = dummy;
     x86_insn_t* next = NULL;
-    #define ADD(f) ((next = f(insns)) ? (curr = curr->next = next) : NULL)
+    #define ADD(f) ((next = f(insns, state)) ? (curr = curr->next = next) : NULL)
     for (; insns; insns = insns->next)
     {
         switch (insns->type)
         {
-            case II_LABEL: ADD(x86_generate_label); break;
-            case II_ENTER: ADD(x86_generate_enter); break;
+            case II_FUNCTION_LABEL: ADD(x86_generate_function_label); break;
+            case II_LOCAL_LABEL: ADD(x86_generate_local_label); break;
             case II_LEAVE: ADD(x86_generate_leave); break;
-            case II_LOAD_OBJECT: ADD(x86_generate_load_object); break;
-            case II_LOAD_ICONST: ADD(x86_generate_load_iconst); break;
+            case II_LOAD: ADD(x86_generate_load); break;
             case II_FUNCTION_CALL: ADD(x86_generate_function_call); break;
             case II_RETURN: ADD(x86_generate_return); break;
             case II_ADDITION: ADD(x86_generate_addition); break;
             case II_STORE_ADDRESS: ADD(x86_generate_store_address); break;
+            case II_SUBSCRIPT: ADD(x86_generate_subscript); break;
+            case II_ENDPROC: ADD(x86_generate_endproc); break;
+            case II_JUMP: ADD(x86_generate_jump); break;
             default:
                 break;
         }
@@ -488,5 +629,6 @@ x86_insn_t* x86_generate(ir_insn_t* insns)
     }
     x86_insn_t* head = dummy->next;
     x86_insn_delete(dummy);
+    x86_gen_state_delete(state);
     return head;
 }

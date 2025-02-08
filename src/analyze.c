@@ -1041,36 +1041,6 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         // declaring
         if (sy->declarer == syn)
         {
-            // TODO: need to do a more thorough check here of *what* should be allocated and not
-            storage_duration_t dur = symbol_get_storage_duration(sy);
-            if (dur == SD_AUTOMATIC)
-            {
-                sy->loc = calloc(1, sizeof *sy->loc);
-                sy->loc->type = L_OFFSET;
-                syntax_component_t* fdef = syntax_get_function_definition(syn);
-                if (!fdef) report_return;
-                long long size = type_size(sy->type);
-                if (size == -1) report_return;
-                sy->loc->stack_offset = fdef->fdef_stackframe_size -= size;
-            }
-            else if (dur == SD_STATIC)
-            {
-                sy->loc = calloc(1, sizeof *sy->loc);
-                sy->loc->type = L_LABEL;
-                if (scope_is_block(symbol_get_scope(sy)))
-                {
-                    symbol_t* sylist = symbol_table_get_all(SYMBOL_TABLE, sy->declarer->id);
-                    long long idx = 0;
-                    for (; sylist && sylist->declarer != syn; sylist = sylist->next, ++idx);
-                    if (!sylist) report_return;
-                    size_t length = strlen(syn->id) + MAX_STRINGIFIED_INTEGER_LENGTH + 2;
-                    char* label = malloc(length);
-                    snprintf(label, length, "%s.%lld", syn->id, idx);
-                    sy->loc->label = label;
-                }
-                else
-                    sy->loc->label = strdup(syn->id);
-            }
             if (syntax_is_tentative_definition(syn))
             {
                 vector_t* declspecs = syntax_get_declspecs(syn);

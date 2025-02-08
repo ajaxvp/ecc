@@ -29,6 +29,7 @@
 
 #define STACKFRAME_ALIGNMENT 16
 #define STRUCT_UNION_ALIGNMENT 8
+#define ALIGN(x, req) ((x) + ((req) - ((x) % (req))))
 
 #define BOOL_MAX (unsigned char) 0xff
 #define CHAR_MAX (signed char) 0x7f
@@ -220,6 +221,7 @@ typedef struct preprocessing_token preprocessing_token_t;
 typedef struct token token_t;
 typedef struct ir_insn ir_insn_t;
 typedef struct x86_insn x86_insn_t;
+typedef struct symbol_t symbol_t;
 
 typedef struct preprocessing_token
 {
@@ -390,6 +392,13 @@ typedef enum locator_type
     L_ARRAY
 } locator_type_t;
 
+typedef enum linkage
+{
+    LK_EXTERNAL,
+    LK_INTERNAL,
+    LK_NONE
+} linkage_t;
+
 typedef struct locator
 {
     locator_type_t type;
@@ -406,12 +415,37 @@ typedef struct locator
     };
 } locator_t;
 
+typedef enum ir_insn_operand_type
+{
+    IIOP_VIRTUAL_REGISTER,
+    IIOP_PHYSICAL_REGISTER,
+    IIOP_IDENTIFIER,
+    IIOP_LABEL,
+    IIOP_IMMEDIATE,
+    IIOP_FLOAT
+} ir_insn_operand_type_t;
+
+typedef struct ir_insn_operand
+{
+    ir_insn_operand_type_t type;
+    bool result;
+    union
+    {
+        regid_t vreg;
+        regid_t preg;
+        symbol_t* id_symbol;
+        unsigned long long immediate;
+        long double fl;
+        char* label;
+    };
+} ir_insn_operand_t;
+
 typedef enum ir_insn_type
 {
     II_UNKNOWN = 0,
-    II_LABEL,
-    II_LOAD_OBJECT,
-    II_LOAD_ICONST,
+    II_FUNCTION_LABEL,
+    II_LOCAL_LABEL,
+    II_LOAD,
     II_RETURN,
     II_STORE_ADDRESS,
     II_SUBSCRIPT,
@@ -419,8 +453,8 @@ typedef enum ir_insn_type
     II_JUMP,
     II_JUMP_IF_ZERO,
     II_FUNCTION_CALL,
-    II_ENTER,
     II_LEAVE,
+    II_ENDPROC,
 
     // LOW-LEVEL INSTRUCTIONS
     II_RETAIN,
@@ -434,42 +468,24 @@ typedef struct ir_insn ir_insn_t;
 typedef struct ir_insn
 {
     ir_insn_type_t type;
+    ir_insn_t* function_label;
+    bool ref;
     c_type_t* ctype;
-    regid_t result;
-    locator_t* loc;
+    size_t noops;
+    ir_insn_operand_t** ops;
     ir_insn_t* prev;
     ir_insn_t* next;
     union
     {
-        char* label;
-        unsigned long long load_iconst_value;
         struct
         {
-            locator_t* dest;
-            regid_t src;
-        } store_address;
-        regid_t return_reg;
-        struct
-        {
-            regid_t lhs;
-            regid_t rhs;
-        } bexpr;
-        struct
-        {
-            regid_t condition;
-            char* label;
-        } cjmp;
-        char* jmp_label;
-        struct
-        {
-            regid_t calling;
-            regid_t* regargs;
-            size_t noargs;
-        } function_call;
-        long long enter_stackalloc;
-        regid_t retain_reg;
-        regid_t restore_reg;
-    };
+            size_t noparams;
+            symbol_t** params;
+            bool knr;
+            bool ellipsis;
+            linkage_t linkage;
+        } function_label;
+    } metadata;
 } ir_insn_t;
 
 typedef enum x86_operand_type
@@ -525,7 +541,8 @@ typedef enum x86_insn_type
     X86I_ADD,
     X86I_SUB,
     X86I_LEAVE,
-    X86I_RET
+    X86I_RET,
+    X86I_JMP
 } x86_insn_type_t;
 
 typedef struct x86_insn
@@ -548,13 +565,6 @@ typedef enum c_namespace_class
     NSC_UNION_MEMBER,
     NSC_ORDINARY
 } c_namespace_class_t;
-
-typedef enum linkage
-{
-    LK_EXTERNAL,
-    LK_INTERNAL,
-    LK_NONE
-} linkage_t;
 
 typedef enum storage_duration
 {
@@ -1301,6 +1311,7 @@ bool syntax_is_expression_type(syntax_component_type_t type);
 bool syntax_is_abstract_declarator_type(syntax_component_type_t type);
 bool syntax_is_typedef_name(syntax_component_t* id);
 bool syntax_is_lvalue(syntax_component_t* syn);
+linkage_t syntax_get_linkage(syntax_component_t* syn);
 bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type);
 bool syntax_is_vla(syntax_component_t* declr);
 bool syntax_is_known_size_array(syntax_component_t* declr);
@@ -1325,6 +1336,7 @@ unsigned long long process_integer_constant(char* con, c_type_class_t* class);
 long double process_floating_constant(char* con, c_type_class_t* class);
 unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constant_expression_type_t cexpr_type);
 unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
+bool syntax_is_assignment_expression(syntax_component_type_t type);
 
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
@@ -1410,6 +1422,9 @@ void insn_delete_all(ir_insn_t* insn);
 void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
 void insn_clike_print_all(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
 ir_insn_t* linearize(syntax_component_t* tlu);
+ir_insn_operand_t* make_preg_insn_operand(regid_t preg, bool result);
+ir_insn_t* make_1op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operand_t* op);
+bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2);
 
 /* allocate.c */
 
@@ -1423,7 +1438,7 @@ void x86_write_all(x86_insn_t* insns, FILE* file);
 void x86_write(x86_insn_t* insn, FILE* file);
 void x86_insn_delete(x86_insn_t* insn);
 void x86_insn_delete_all(x86_insn_t* insns);
-x86_insn_t* x86_generate(ir_insn_t* insns);
+x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st);
 
 /* from somewhere */
 bool in_debug(void);

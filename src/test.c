@@ -117,14 +117,13 @@ int main(int argc, char** argv)
     printf("<<allocated linear IR>>\n");
     insn_clike_print_all(insns, printf);
 
-    x86_insn_t* x86_insns = x86_generate(insns);
+    x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
 
     printf("<<x86 assembly code>>\n");
     x86_write_all(x86_insns, stdout);
 
     fclose(file);
     x86_insn_delete_all(x86_insns);
-    insn_delete_all(insns);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
     return 0;
