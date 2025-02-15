@@ -4,6 +4,10 @@
 
 #include "cc.h"
 
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
+#define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 3
+
 typedef enum x86_register
 {
     X86R_RAX = 1,
@@ -103,8 +107,13 @@ const char* X86_REG8_MAP[] = {
 typedef struct x86_gen_state
 {
     long long active_stackalloc;
+    unsigned long long next_constant_local_label;
+    ir_insn_t* active_function_ir;
     x86_insn_t* active_function;
     symbol_table_t* st;
+    x86_insn_t* data_start;
+    x86_insn_t* rodata_start;
+    x86_insn_t* text_start;
 } x86_gen_state_t;
 
 const char* register_name(regid_t reg, x86_insn_size_t size)
@@ -148,6 +157,12 @@ void x86_operand_delete(x86_operand_t* op)
         case X86OP_LABEL:
             free(op->label);
             break;
+        case X86OP_TEXT:
+            free(op->text);
+            break;
+        case X86OP_STRING:
+            free(op->string);
+            break;
         default:
             break;
     }
@@ -177,6 +192,12 @@ void insert_x86_insn_after(x86_insn_t* insn, x86_insn_t* location)
     if (!insn || !location) return;
     insn->next = location->next;
     location->next = insn;
+}
+
+void insert_x86_insn_rodata(x86_insn_t* insn, x86_gen_state_t* state)
+{
+    if (!insn || !state) return;
+    insert_x86_insn_after(insn, state->rodata_start);
 }
 
 char x86_operand_size_character(x86_insn_size_t size)
@@ -226,6 +247,12 @@ void x86_operand_write(x86_operand_t* op, x86_insn_size_t size, FILE* file)
         case X86OP_LABEL:
             fprintf(file, "%s", op->label);
             break;
+        case X86OP_TEXT:
+            fprintf(file, "%s", op->text);
+            break;
+        case X86OP_STRING:
+            fprintf(file, "\"%s\"", op->string);
+            break;
         case X86OP_LABEL_REF:
             fprintf(file, "%s(%%rip)", op->label);
             break;
@@ -272,6 +299,11 @@ void x86_write(x86_insn_t* insn, FILE* file)
             fprintf(file, INDENT "jmp ");
             x86_operand_write(insn->op1, X86SZ_QWORD, file);
             break;
+
+        case X86I_JE:
+            fprintf(file, INDENT "je ");
+            x86_operand_write(insn->op1, X86SZ_QWORD, file);
+            break;
         
         case X86I_PUSH: USUAL_1OP("push")
 
@@ -279,6 +311,7 @@ void x86_write(x86_insn_t* insn, FILE* file)
         case X86I_LEA: USUAL_2OP("lea")
         case X86I_ADD: USUAL_2OP("add")
         case X86I_SUB: USUAL_2OP("sub")
+        case X86I_CMP: USUAL_2OP("cmp")
 
         op1:
             x86_operand_write(insn->op1, insn->size, file);
@@ -288,6 +321,29 @@ void x86_write(x86_insn_t* insn, FILE* file)
             x86_operand_write(insn->op1, insn->size, file);
             fprintf(file, ", ");
             x86_operand_write(insn->op2, insn->size, file);
+            break;
+        
+        case X86I_GLOBL:
+            fprintf(file, INDENT ".globl ");
+            x86_operand_write(insn->op1, insn->size, file);
+            break;
+        
+        case X86I_DATA:
+            fprintf(file, INDENT ".data");
+            break;
+        
+        case X86I_TEXT:
+            fprintf(file, INDENT ".text");
+            break;
+        
+        case X86I_SECTION:
+            fprintf(file, INDENT ".section ");
+            x86_operand_write(insn->op1, insn->size, file);
+            break;
+        
+        case X86I_STRING:
+            fprintf(file, INDENT ".string ");
+            x86_operand_write(insn->op1, insn->size, file);
             break;
 
         default:
@@ -315,6 +371,13 @@ x86_operand_t* make_operand_label_ref(char* label)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_LABEL_REF);
     op->label = strdup(label);
+    return op;
+}
+
+x86_operand_t* make_operand_string(char* string)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_STRING);
+    op->string = strdup(string);
     return op;
 }
 
@@ -372,6 +435,14 @@ x86_operand_t* locator_to_operand(locator_t* loc)
     }
 }
 
+char* next_constant_local_label(x86_gen_state_t* state, char* buffer)
+{
+    snprintf(buffer, MAX_CONSTANT_LOCAL_LABEL_LENGTH + 1, ".LC%llu", state->next_constant_local_label++);
+    return buffer;
+}
+
+x86_insn_t* make_basic_x86_insn(x86_insn_type_t type);
+
 x86_operand_t* ir_operand_to_operand(c_type_t* ctype, ir_insn_operand_t* iop, x86_gen_state_t* state)
 {
     if (!iop) return NULL;
@@ -419,6 +490,22 @@ x86_operand_t* ir_operand_to_operand(c_type_t* ctype, ir_insn_operand_t* iop, x8
         case IIOP_FLOAT:
             // TODO
             return NULL;
+        case IIOP_STRING_LITERAL:
+        {
+            x86_insn_t* label = make_basic_x86_insn(X86I_LABEL);
+            char buffer[MAX_CONSTANT_LOCAL_LABEL_LENGTH + 1];
+            label->op1 = make_operand_label(next_constant_local_label(state, buffer));
+            insert_x86_insn_rodata(label, state);
+            if (iop->string_literal.normal)
+            {
+                x86_insn_t* string = make_basic_x86_insn(X86I_STRING);
+                string->op1 = make_operand_string(iop->string_literal.normal);
+                insert_x86_insn_after(string, label);
+            }
+            // TODO: handle wide strings
+            // else
+            return make_operand_label_ref(buffer);
+        }
         case IIOP_LABEL:
             return make_operand_label_ref(iop->label);
         case IIOP_PHYSICAL_REGISTER:
@@ -446,7 +533,17 @@ x86_insn_t* x86_generate_function_label(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* fl = make_basic_x86_insn(X86I_LABEL);
     fl->op1 = make_operand_label(insn->ops[0]->label);
+    state->active_function_ir = insn;
     state->active_function = fl;
+    size_t noparams = state->active_function_ir->metadata.function_label.noparams;
+    for (size_t i = 0; i < min(noparams, 6); ++i)
+    {
+        symbol_t* sy = state->active_function_ir->metadata.function_label.params[i];
+        if (!sy) continue;
+        ir_insn_operand_t* op = make_identifier_insn_operand(sy);
+        x86_operand_delete(ir_operand_to_operand(sy->type, op, state));
+        insn_operand_delete(op);
+    }
     return fl;
 }
 
@@ -479,8 +576,8 @@ x86_insn_t* x86_generate_function_call(ir_insn_t* insn, x86_gen_state_t* state)
         case IIOP_PHYSICAL_REGISTER:
             cl->op1 = make_operand_ptr_register(insn->ops[1]->preg);
             break;
-        case IIOP_LABEL:
-            cl->op1 = make_operand_label(insn->ops[1]->label);
+        case IIOP_IDENTIFIER:
+            cl->op1 = make_operand_label(insn->ops[1]->id_symbol->declarer->id);
             break;
         default: report_return_value(NULL);
     }
@@ -518,9 +615,9 @@ x86_insn_t* x86_generate_subscript(ir_insn_t* insn, x86_gen_state_t* state)
     return ld;
 }
 
-x86_insn_t* x86_generate_addition(ir_insn_t* insn, x86_gen_state_t* state)
+x86_insn_t* x86_generate_binop(x86_insn_type_t type, ir_insn_t* insn, x86_gen_state_t* state)
 {
-    x86_insn_t* add = make_basic_x86_insn(X86I_ADD);
+    x86_insn_t* add = make_basic_x86_insn(type);
     add->size = c_type_to_x86_operand_size(insn->ctype);
     add->op2 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
     add->op1 = ir_operand_to_operand(insn->ctype, insn->ops[2], state);
@@ -533,6 +630,16 @@ x86_insn_t* x86_generate_addition(ir_insn_t* insn, x86_gen_state_t* state)
         add->next = mov;
     }
     return add;
+}
+
+x86_insn_t* x86_generate_addition(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    return x86_generate_binop(X86I_ADD, insn, state);
+}
+
+x86_insn_t* x86_generate_subtraction(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    return x86_generate_binop(X86I_SUB, insn, state);
 }
 
 x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
@@ -553,11 +660,11 @@ x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
             break;
         default: report_return_value(NULL);
     }
-    if (!insn_operand_equals(insn->ops[1], insn->ops[0]))
+    if (!insn_operand_equals(insn->ops[2], insn->ops[0]))
     {
         x86_insn_t* mov2 = make_basic_x86_insn(X86I_MOV);
         mov2->size = c_type_to_x86_operand_size(insn->ctype);
-        mov2->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+        mov2->op1 = ir_operand_to_operand(insn->ctype, insn->ops[2], state);
         mov2->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
         mov->next = mov2;
     }
@@ -566,10 +673,18 @@ x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
 
 x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
 {
+    x86_insn_t* root = state->active_function;
+    if (state->active_function_ir->metadata.function_label.linkage == LK_EXTERNAL)
+    {
+        x86_insn_t* globl = make_basic_x86_insn(X86I_GLOBL);
+        globl->op1 = make_operand_label(state->active_function->op1->label);
+        insert_x86_insn_after(globl, root);
+        root = globl;
+    }
     x86_insn_t* push = make_basic_x86_insn(X86I_PUSH);
     push->size = X86SZ_QWORD;
     push->op1 = make_operand_register(X86R_RBP);
-    insert_x86_insn_after(push, state->active_function);
+    insert_x86_insn_after(push, root);
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = X86SZ_QWORD;
     mov->op1 = make_operand_register(X86R_RSP);
@@ -585,7 +700,21 @@ x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
         insert_x86_insn_after(sub, mov);
         mov = sub;
     }
+    size_t noparams = state->active_function_ir->metadata.function_label.noparams;
+    long long offset = 0;
+    for (size_t i = 0; i < min(noparams, 6); ++i)
+    {
+        symbol_t* sy = state->active_function_ir->metadata.function_label.params[i];
+        if (!sy) continue;
+        x86_insn_t* spill = make_basic_x86_insn(X86I_MOV);
+        spill->size = c_type_to_x86_operand_size(sy->type);
+        spill->op1 = make_operand_register(x86procregmap(i));
+        spill->op2 = make_operand_deref_register(X86R_RBP, offset -= type_size(sy->type));
+        insert_x86_insn_after(spill, mov);
+        mov = spill;
+    }
     state->active_function = NULL;
+    state->active_function_ir = NULL;
     state->active_stackalloc = 0;
     return NULL;
 }
@@ -599,12 +728,35 @@ x86_insn_t* x86_generate_jump(ir_insn_t* insn, x86_gen_state_t* state)
     return jmp;
 }
 
+x86_insn_t* x86_generate_jump_if_zero(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
+    cmp->size = c_type_to_x86_operand_size(insn->ctype);
+    cmp->op1 = make_operand_immediate(0);
+    cmp->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
+    x86_insn_t* jmp = make_basic_x86_insn(X86I_JE);
+    if (insn->ops[1]->type != IIOP_LABEL)
+        report_return_value(NULL);
+    jmp->op1 = make_operand_label(insn->ops[1]->label);
+    cmp->next = jmp;
+    return cmp;
+}
+
 x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)
 {
     x86_gen_state_t* state = calloc(1, sizeof *state);
     state->st = st;
-    x86_insn_t* dummy = make_basic_x86_insn(X86I_UNKNOWN);
-    x86_insn_t* curr = dummy;
+    x86_insn_t* head = make_basic_x86_insn(X86I_DATA);
+    x86_insn_t* curr = head;
+    state->data_start = curr;
+    x86_insn_t* rodata = make_basic_x86_insn(X86I_SECTION);
+    rodata->op1 = make_basic_x86_operand(X86OP_TEXT);
+    rodata->op1->text = strdup(".rodata");
+    curr = curr->next = rodata;
+    state->rodata_start = curr;
+    x86_insn_t* text = make_basic_x86_insn(X86I_TEXT);
+    curr = curr->next = text;
+    state->text_start = curr;
     x86_insn_t* next = NULL;
     #define ADD(f) ((next = f(insns, state)) ? (curr = curr->next = next) : NULL)
     for (; insns; insns = insns->next)
@@ -618,17 +770,18 @@ x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)
             case II_FUNCTION_CALL: ADD(x86_generate_function_call); break;
             case II_RETURN: ADD(x86_generate_return); break;
             case II_ADDITION: ADD(x86_generate_addition); break;
+            case II_SUBTRACTION: ADD(x86_generate_subtraction); break;
             case II_STORE_ADDRESS: ADD(x86_generate_store_address); break;
             case II_SUBSCRIPT: ADD(x86_generate_subscript); break;
             case II_ENDPROC: ADD(x86_generate_endproc); break;
             case II_JUMP: ADD(x86_generate_jump); break;
+            case II_JUMP_IF_ZERO: ADD(x86_generate_jump_if_zero); break;
             default:
+                warnf("no x86 code generator built for a linear IR instruction\n");
                 break;
         }
         for (; curr->next; curr = curr->next);
     }
-    x86_insn_t* head = dummy->next;
-    x86_insn_delete(dummy);
     x86_gen_state_delete(state);
     return head;
 }

@@ -328,6 +328,13 @@ typedef struct tokenizing_settings
     char* error;
 } tokenizing_settings_t;
 
+typedef struct allocator_options
+{
+    size_t no_volatile;
+    size_t no_nonvolatile;
+    regid_t (*procregmap)(long long);
+} allocator_options_t;
+
 typedef struct buffer_t
 {
     char* data;
@@ -422,7 +429,8 @@ typedef enum ir_insn_operand_type
     IIOP_IDENTIFIER,
     IIOP_LABEL,
     IIOP_IMMEDIATE,
-    IIOP_FLOAT
+    IIOP_FLOAT,
+    IIOP_STRING_LITERAL
 } ir_insn_operand_type_t;
 
 typedef struct ir_insn_operand
@@ -437,6 +445,12 @@ typedef struct ir_insn_operand
         unsigned long long immediate;
         long double fl;
         char* label;
+        struct
+        {
+            char* normal;
+            int* wide;
+            unsigned long long length;
+        } string_literal;
     };
 } ir_insn_operand_t;
 
@@ -450,6 +464,7 @@ typedef enum ir_insn_type
     II_STORE_ADDRESS,
     II_SUBSCRIPT,
     II_ADDITION,
+    II_SUBTRACTION,
     II_JUMP,
     II_JUMP_IF_ZERO,
     II_FUNCTION_CALL,
@@ -496,7 +511,9 @@ typedef enum x86_operand_type
     X86OP_ARRAY,
     X86OP_LABEL,
     X86OP_LABEL_REF,
-    X86OP_IMMEDIATE
+    X86OP_IMMEDIATE,
+    X86OP_TEXT,
+    X86OP_STRING
 } x86_operand_type_t;
 
 typedef struct x86_operand
@@ -517,6 +534,8 @@ typedef struct x86_operand
             long long scale;
         } array;
         char* label;
+        char* text;
+        char* string;
         unsigned long long immediate;
     };
 } x86_operand_t;
@@ -542,7 +561,16 @@ typedef enum x86_insn_type
     X86I_SUB,
     X86I_LEAVE,
     X86I_RET,
-    X86I_JMP
+    X86I_JMP,
+    X86I_JE,
+    X86I_CMP,
+
+    /* directives */
+    X86I_GLOBL,
+    X86I_STRING,
+    X86I_TEXT,
+    X86I_DATA,
+    X86I_SECTION
 } x86_insn_type_t;
 
 typedef struct x86_insn
@@ -554,6 +582,11 @@ typedef struct x86_insn
     x86_operand_t* op3;
     x86_insn_t* next;
 } x86_insn_t;
+
+typedef struct ir_opt_options
+{
+    bool inline_fcalls;
+} ir_opt_options_t;
 
 typedef enum c_namespace_class
 {
@@ -1250,6 +1283,7 @@ extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
 extern const char* TOKEN_NAMES[T_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
+extern const char* IR_INSN_NAMES[II_NO_ELEMENTS];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
@@ -1290,6 +1324,7 @@ symbol_t* symbol_init(syntax_component_t* declarer);
 syntax_component_t* symbol_get_scope(symbol_t* sy);
 bool scope_is_block(syntax_component_t* scope);
 storage_duration_t symbol_get_storage_duration(symbol_t* sy);
+linkage_t symbol_get_linkage(symbol_t* sy);
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...));
 void symbol_delete(symbol_t* sy);
 symbol_table_t* symbol_table_init(void);
@@ -1311,12 +1346,12 @@ bool syntax_is_expression_type(syntax_component_type_t type);
 bool syntax_is_abstract_declarator_type(syntax_component_type_t type);
 bool syntax_is_typedef_name(syntax_component_t* id);
 bool syntax_is_lvalue(syntax_component_t* syn);
-linkage_t syntax_get_linkage(syntax_component_t* syn);
 bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type);
 bool syntax_is_vla(syntax_component_t* declr);
 bool syntax_is_known_size_array(syntax_component_t* declr);
 bool syntax_is_modifiable_lvalue(syntax_component_t* syn);
 bool syntax_is_tentative_definition(syntax_component_t* id);
+bool syntax_has_initializer(syntax_component_t* id);
 size_t syntax_no_specifiers(vector_t* declspecs, syntax_component_type_t type);
 void namespace_delete(c_namespace_t* ns);
 vector_t* syntax_get_declspecs(syntax_component_t* id);
@@ -1419,16 +1454,28 @@ void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...));
 void locator_delete(locator_t* loc);
 void insn_delete(ir_insn_t* insn);
 void insn_delete_all(ir_insn_t* insn);
+void insert_ir_insn_before(ir_insn_t* location, ir_insn_t* inserting);
+void insert_ir_insn_after(ir_insn_t* location, ir_insn_t* inserting);
+void remove_ir_insn(ir_insn_t* insn);
 void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
 void insn_clike_print_all(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
 ir_insn_t* linearize(syntax_component_t* tlu);
 ir_insn_operand_t* make_preg_insn_operand(regid_t preg, bool result);
-ir_insn_t* make_1op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operand_t* op);
+ir_insn_operand_t* make_identifier_insn_operand(symbol_t* sy);
+void insn_operand_delete(ir_insn_operand_t* op);
+ir_insn_t* make_1op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op);
+ir_insn_t* make_2op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2);
+
 bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2);
+
+/* iropt.c */
+
+ir_opt_options_t* ir_opt_profile_basic(void);
+void ir_optimize(ir_insn_t* insns, ir_opt_options_t* options);
 
 /* allocate.c */
 
-void allocate(ir_insn_t* insns, regid_t (*procregmap)(long long), size_t count);
+void allocate(ir_insn_t* insns, allocator_options_t* options);
 
 /* x86gen.c */
 

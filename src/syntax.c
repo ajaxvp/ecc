@@ -10,6 +10,7 @@
 
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type)
 {
+    if (!specifiers) return false;
     for (unsigned i = 0; i < specifiers->size; ++i)
     {
         syntax_component_t* specifier = vector_get(specifiers, i);
@@ -41,13 +42,13 @@ bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type,
 
 size_t syntax_no_specifiers(vector_t* declspecs, syntax_component_type_t type)
 {
-    size_t i = 0;
+    size_t j = 0;
     VECTOR_FOR(syntax_component_t*, declspec, declspecs)
     {
         if (declspec->type != type) continue;
-        ++i;
+        ++j;
     }
-    return i;
+    return j;
 }
 
 // SC_STATEMENT = SC_LABELED_STATEMENT | SC_COMPOUND_STATEMENT | SC_EXPRESSION_STATEMENT | SC_SELECTION_STATEMENT | SC_ITERATION_STATEMENT | SC_JUMP_STATEMENT
@@ -315,15 +316,9 @@ bool syntax_is_lvalue(syntax_component_t* syn)
         (!type_is_complete(syn->ctype) && syn->ctype->class != CTC_VOID));
 }
 
-linkage_t syntax_get_linkage(syntax_component_t* syn)
-{
-    // TODO
-    return LK_NONE;
-}
-
 bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type)
 {
-    c_type_class_t c = CTC_ERROR;;
+    c_type_class_t c = CTC_ERROR;
     evaluate_constant_expression(expr, &c, ce_type);
     return c != CTC_ERROR;
 }
@@ -470,6 +465,24 @@ bool syntax_is_tentative_definition(syntax_component_t* id)
         if (declspec->type == SC_STORAGE_CLASS_SPECIFIER && declspec->scs != SCS_STATIC)
             return false;
     }
+    return true;
+}
+
+bool syntax_has_initializer(syntax_component_t* id)
+{
+    syntax_component_t* tlu = syntax_get_translation_unit(id);
+    if (!tlu)
+        return false;
+    symbol_t* sy = symbol_table_get_syn_id(tlu->tlu_st, id);
+    if (!sy)
+        return false;
+    syntax_component_t* ideclr = syntax_get_full_declarator(id);
+    if (!ideclr)
+        return false;
+    if (ideclr->type != SC_INIT_DECLARATOR)
+        return false;
+    if (!ideclr->ideclr_initializer)
+        return false;
     return true;
 }
 

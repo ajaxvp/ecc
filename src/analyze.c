@@ -136,6 +136,13 @@ UNRESOLVED ISO SPECIFICATION REQUIREMENTS
 6.5.15 (3)
 6.5.15 (6)
 6.5.16.1 (3): this one is interesting, idk if there are things to resolve for it
+6.7 (4)
+6.7 (7)
+6.7.1 (6)
+6.8.4.2 (2)
+6.8.4.2 (3)
+6.8.4.2 (5)
+6.8.6.1 (1)
 
 */
 
@@ -199,6 +206,7 @@ RESOLVED ISO SPECIFICATION REQUIREMENTS
 6.5.16.2 (2)
 6.5.17 (2)
 6.7 (2)
+6.7.1 (2)
 6.7.2 (2)
 6.8.1 (2)
 6.8.1 (3)
@@ -1041,6 +1049,24 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         // declaring
         if (sy->declarer == syn)
         {
+            linkage_t lk = symbol_get_linkage(sy);
+            syntax_component_t* scope = symbol_get_scope(sy);
+            if (lk == LK_NONE && count > 1)
+                // TODO: something to think about here: tags...
+                // ISO: 6.7 (3)
+                ADD_ERROR(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
+            if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && syntax_has_initializer(syn) && scope_is_block(scope))
+                // ISO: 6.7.8 (5)
+                ADD_ERROR(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
+            syntax_component_t* decl = NULL;
+            if ((decl = syntax_get_declarator_declaration(syn)) &&
+                scope_is_block(scope) &&
+                sy->type->class == CTC_FUNCTION &&
+                !syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_EXTERN) &&
+                syntax_no_specifiers(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER) > 0)
+                // NOTE: GCC on -std=c99 -pedantic-errors does not complain about typedef (which seems fine semantically, but appears to break this rule)
+                // ISO: 6.7.1 (5)
+                ADD_ERROR(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
             if (syntax_is_tentative_definition(syn))
             {
                 vector_t* declspecs = syntax_get_declspecs(syn);
@@ -1053,7 +1079,6 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
             }
             if (sy->type->class == CTC_LABEL && !first && count > 1)
             {
-                syntax_component_t* scope = symbol_get_scope(sy);
                 if (!scope) report_return;
                 if (scope->type != SC_FUNCTION_DEFINITION) report_return;
                 syntax_component_t* func_id = syntax_get_declarator_identifier(scope->fdef_declarator);
@@ -1192,7 +1217,9 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
     // ^ this is another requirement specified by this paragraph, and i'm not exactly sure what it entails tbh
 }
 
-static void enforce_main_prototype(syntax_traverser_t* trav, syntax_component_t* syn)
+// doesn't enforced main to be defined (that's the linker's job)
+// looks at the prototype (or lack thereof) of the function and determines whether it is valid or not
+static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* id = syntax_get_declarator_identifier(syn->fdef_declarator);
     if (!id) report_return;
@@ -1205,21 +1232,32 @@ static void enforce_main_prototype(syntax_traverser_t* trav, syntax_component_t*
     c_type_t* ct = sy->type;
     if (ct->derived_from->class != CTC_INT)
         ADD_ERROR(syn, "'main' should have an int return type");
-    // TODO: check for (void), (int argc, char** argv), or (int argc, char* argv[])
-    // bool good_prototype = false;
-    // if (syn->fdef_declarator && syn->fdef_declarator->fdeclr_parameter_declarations)
-    // {
-    //     vector_t* pdecls = syn->fdef_declarator->fdeclr_parameter_declarations;
-    //     if (pdecls->size == 1)
-    //     {
-    //         syntax_component_t* pdecl = vector_get(pdecls, 0);
-            
-    //     }
-    // }
-    // else
-    //     good_prototype = true;
-    // if (!good_prototype)
-    //     ADD_ERROR(syn, "function prototype for 'main' should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
+    // check for (void), (int, char**), or (int, char*[]), or no prototype
+    bool good_prototype = false;
+    if (ct->function.param_types)
+    {
+        // enforce (void)
+        if (ct->function.param_types->size == 1)
+        {
+            c_type_t* pt = vector_get(ct->function.param_types, 0);
+            if (pt->class == CTC_VOID)
+                good_prototype = true;
+        }
+        // enforce (int, char**) or (int, char*[])
+        else if (ct->function.param_types->size == 2)
+        {
+            c_type_t* pt0 = vector_get(ct->function.param_types, 0);
+            c_type_t* pt1 = vector_get(ct->function.param_types, 1);
+            if (pt0->class == CTC_INT && ((pt1->class == CTC_POINTER || pt1->class == CTC_ARRAY) &&
+                pt1->derived_from->class == CTC_POINTER &&
+                pt1->derived_from->derived_from->class == CTC_CHAR))
+                good_prototype = true;
+        }
+    }
+    else
+        good_prototype = true;
+    if (!good_prototype)
+        ADD_ERROR(syn, "function prototype for 'main', if any, should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
 }
 
 void analyze_function_definition_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1230,14 +1268,33 @@ void analyze_function_definition_after(syntax_traverser_t* trav, syntax_componen
     enforce_6_9_1_para_4(trav, syn);
     enforce_6_9_1_para_5(trav, syn);
     enforce_6_9_1_para_6(trav, syn);
-    enforce_main_prototype(trav, syn);
+    enforce_main_definition(trav, syn);
     // align stackframe
     syn->fdef_stackframe_size = syn->fdef_stackframe_size + (STACKFRAME_ALIGNMENT - (syn->fdef_stackframe_size % STACKFRAME_ALIGNMENT));
+}
+
+void enforce_6_7_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    bool found = false;
+    VECTOR_FOR(syntax_component_t*, declspec, syn->decl_declaration_specifiers)
+    {
+        if (declspec->type == SC_STORAGE_CLASS_SPECIFIER)
+        {
+            if (found)
+            {
+                // ISO: 6.7.1 (2)
+                ADD_ERROR(syn, "only one storage class specifier allowed in declaration");
+                break;
+            }
+            found = true;
+        }
+    }
 }
 
 void analyze_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     enforce_6_7_para_2(trav, syn);
+    enforce_6_7_1_para_2(trav, syn);
     enforce_6_9_para_2(trav, syn);
 }
 
@@ -1261,6 +1318,102 @@ void enforce_6_8_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
 void analyze_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     enforce_6_8_1_para_2(trav, syn);
+}
+
+void analyze_if_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!type_is_scalar(syn->ifstmt_condition->ctype))
+        // ISO: 6.8.4.1 (1)
+        ADD_ERROR(syn->ifstmt_condition, "controlling expression of an if statement must be of scalar type");
+}
+
+void analyze_switch_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!type_is_integer(syn->swstmt_condition->ctype))
+        // ISO: 6.8.4.2 (1)
+        ADD_ERROR(syn->swstmt_condition, "controlling expression of a switch statement must be of integer type");
+}
+
+void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* controlling = NULL;
+    switch (syn->type)
+    {
+        case SC_WHILE_STATEMENT:
+            controlling = syn->whstmt_condition;
+            break;
+        case SC_DO_STATEMENT:
+            controlling = syn->dostmt_condition;
+            break;
+        case SC_FOR_STATEMENT:
+            controlling = syn->forstmt_condition;
+            if (syn->forstmt_init && syn->forstmt_init->type == SC_DECLARATION)
+            {
+                syntax_component_t* decl = syn->forstmt_init;
+                bool bad = false;
+                VECTOR_FOR(syntax_component_t*, declspec, decl->decl_declaration_specifiers)
+                {
+                    if (declspec->type != SC_STORAGE_CLASS_SPECIFIER) continue;
+                    if (declspec->scs == SCS_AUTO) continue;
+                    if (declspec->scs == SCS_REGISTER) continue;
+                    bad = true;
+                    break;
+                }
+                if (bad)
+                    // ISO: 6.8.5 (3)
+                    ADD_ERROR(decl, "for loop initializing declaration may only have storage class specifiers of 'auto' or 'register'");
+            }
+            break;
+        default:
+            report_return;
+    }
+    if (controlling && !type_is_scalar(controlling->ctype))
+        // ISO: 6.8.5 (2)
+        ADD_ERROR(controlling, "controlling expression of a loop must be of scalar type");
+}
+
+void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* loop = syn;
+    for (; loop && loop->type != SC_FOR_STATEMENT && loop->type != SC_WHILE_STATEMENT && loop->type != SC_DO_STATEMENT; loop = loop->parent);
+    if (!loop)
+        // ISO: 6.8.6.2 (1)
+        ADD_ERROR(syn, "continue statements are only allowed within loops");
+}
+
+void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* parent = syn;
+    for (; parent &&
+        parent->type != SC_FOR_STATEMENT &&
+        parent->type != SC_WHILE_STATEMENT &&
+        parent->type != SC_DO_STATEMENT &&
+        parent->type != SC_SWITCH_STATEMENT; parent = parent->parent);
+    if (!parent)
+        // ISO: 6.8.6.3 (1)
+        ADD_ERROR(syn, "break statements are only allowed within loops and switch statements");
+}
+
+void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* fdef = syntax_get_function_definition(syn);
+    if (!fdef) report_return;
+    syntax_component_t* id = syntax_get_declarator_identifier(fdef->fdef_declarator);
+    if (!id) report_return;
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+    if (!sy) report_return;
+    if (!sy->type) report_return;
+    if (sy->type->derived_from->class == CTC_VOID && syn->retstmt_expression)
+        // ISO: 6.8.6.4 (1)
+        ADD_ERROR(syn, "return values are not allowed for return statements if their function has a void return type");
+    if (sy->type->derived_from->class != CTC_VOID && !syn->retstmt_expression)
+        // ISO: 6.8.6.4 (1)
+        ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
+}
+
+void analyze_struct_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    
 }
 
 /*
@@ -1338,6 +1491,15 @@ analysis_error_t* analyze(syntax_component_t* tlu)
 
     // statements
     trav->after[SC_LABELED_STATEMENT] = analyze_labeled_statement_after;
+    trav->after[SC_IF_STATEMENT] = analyze_if_statement_after;
+    trav->after[SC_FOR_STATEMENT] = analyze_iteration_statement_after;
+    trav->after[SC_DO_STATEMENT] = analyze_iteration_statement_after;
+    trav->after[SC_WHILE_STATEMENT] = analyze_iteration_statement_after;
+    trav->after[SC_CONTINUE_STATEMENT] = analyze_continue_statement_after;
+    trav->after[SC_RETURN_STATEMENT] = analyze_return_statement_after;
+
+    // declarations
+    trav->after[SC_STRUCT_DECLARATION] = analyze_struct_declaration_after;
 
     traverse(trav);
     analysis_error_t* errors = ANALYSIS_TRAVERSER->errors;

@@ -1,6 +1,6 @@
 #include "cc.h"
 
-const char* KEYWORDS[37] = {
+const char* KEYWORDS[KW_ELEMENTS] = {
     "auto",
     "break",
     "case",
@@ -40,7 +40,7 @@ const char* KEYWORDS[37] = {
     "_Imaginary"
 };
 
-const char* SYNTAX_COMPONENT_NAMES[95] = {
+const char* SYNTAX_COMPONENT_NAMES[SC_NO_ELEMENTS] = {
     "SC_UNKNOWN", // unk
     "SC_ERROR", // err
     "SC_TRANSLATION_UNIT", // tlu
@@ -136,6 +136,24 @@ const char* SYNTAX_COMPONENT_NAMES[95] = {
     "SC_BITWISE_AND_ASSIGNMENT_EXPRESSION",
     "SC_BITWISE_OR_ASSIGNMENT_EXPRESSION",
     "SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION"
+};
+
+const char* IR_INSN_NAMES[II_NO_ELEMENTS] = {
+    "II_UNKNOWN",
+    "II_FUNCTION_LABEL",
+    "II_LOCAL_LABEL",
+    "II_LOAD",
+    "II_RETURN",
+    "II_STORE_ADDRESS",
+    "II_SUBSCRIPT",
+    "II_ADDITION",
+    "II_JUMP",
+    "II_JUMP_IF_ZERO",
+    "II_FUNCTION_CALL",
+    "II_LEAVE",
+    "II_ENDPROC",
+    "II_RETAIN",
+    "II_RESTORE"
 };
 
 const char* C_TYPE_CLASS_NAMES[30] = {

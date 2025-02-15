@@ -76,3 +76,7 @@ help.h
 # Temporary files
 temp.c
 test/temp.c
+
+# Executable testing
+pt.sh
+prgmtest

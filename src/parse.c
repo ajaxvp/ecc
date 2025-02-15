@@ -655,24 +655,13 @@ vector_t* parse_declaration_specifiers(token_t** tokens, parse_request_code_t re
 {
     init_parse;
     vector_t* declaration_specifiers = vector_init();
-    bool has_scs = false;
     for (;;)
     {
         parse_status_code_t scs_stat = UNKNOWN_STATUS;
         syntax_component_t* scs = parse_storage_class_specifier(&token, OPTIONAL, &scs_stat, tlu, next_depth, parent);
         if (scs_stat == FOUND)
         {
-            if (has_scs)
-            {
-                // ISO: 6.7.1 (2)
-                fail_parse(token, "only one storage class specifier allowed in declaration");
-                VECTOR_FOR(syntax_component_t*, s, declaration_specifiers)
-                    free_syntax(s, tlu);
-                vector_delete(declaration_specifiers);
-                return NULL;
-            }
             vector_add(declaration_specifiers, scs);
-            has_scs = true;
             continue;
         }
         parse_status_code_t ts_stat = UNKNOWN_STATUS;

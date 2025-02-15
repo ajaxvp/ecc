@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include "cc.h"
 
@@ -89,168 +90,6 @@ void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...))
     }
 }
 
-/*
-
-II_LOAD_OBJECT:
-    type _r = obj;
-where
-    type is the type of the object
-    r is the next available virtual register
-    obj is the identifier of the object to load
-notes:
-    after the instruction, r contains the value of obj.
-    after the instruction, r has an address associated with the value stored in it.
-        if the object is stored on the stack, the address is:
-            offset(obj)(%rbp)
-        where off is the offset of the object on the stack
-        if the object is stored globally, the address is:
-            obj(%rip)
-        where obj is the identifier of the object loaded
-rough x86 equivalent:
-    movX address(obj), %r
-    leaX address(obj), %r (for arrays, structs)
-
-II_LOAD_ICONST:
-    type _r = con;
-where
-    type is the type of the constant
-    r is the next available virtual register
-    con is an integer constant
-notes:
-    after the instruction, r contains the value of con.
-rough x86 equivalent:
-    movX $con, %r
-
-II_LOAD_SUBSCRIPT:
-    type _r = _rA[_rB];
-where
-    type is the type of the result of the subscript
-    r is the next available virtual register
-    rA is the register that contains the array/pointer to subscript
-    rB is the register that contains the index
-notes:
-    after the instruction, r contains the value of the subscription of the pointer in rA with the index in rB
-    after the instruction, r has an address associated with the value stored in it.
-        the address is: %rA, %rB, sizeof(type)
-rough x86 equivalent:
-    movX (%rA, %rB, sizeof(type)), %r
-
-II_LOAD_DEREFERENCE:
-    type _r = *_rA;
-notes:
-    after the instruction, r has an address associated with the value stored in it.
-        the address is: %rA
-
-II_LOAD_MEMBER:
-    type _r = _rA._rB;
-notes:
-    after the instruction, r has an address associated with the value stored in it.
-        the address is: offset(%rB)(%rA)
-
-II_LOAD_STRING_LITERAL:
-    type _r = str;
-rough x86 equivalent:
-    leaq str(%rip), %r
-    after the instruction, r has an address associated with the value stored in it.
-        the address is: str(%rip)
-
-II_LOAD_REFERENCE:
-    type _r = &_rA;
-where
-    type is pointer to T if the type of rA has type T
-    r is the next available virtual register
-    rA is the register that contains the object to reference
-notes:
-    rA must have an address associated with it in order to reference
-    after the instruction, r contains the address to the object in rA
-    for clarification: r does NOT have an address associated with it
-rough x86 equivalent:
-    movX (address), %r
-
-II_STORE_ADDRESS
-    type _r := _rA = _rB;
-where
-    type is the type of the object represented by rA
-    rA is the register representing the left hand object
-    rB is the register with the value to be copied to the object on the left hand side
-notes:
-    rA must have an address associated with it
-    after the instruction, the object represented by rA contains the value stored in rB
-rough x86 equivalent:
-    movX %rB, (address(%rA))
-
-int main(void)
-{
-    int x[3];
-    int *p = &x[0];
-    *p = 3;
-    return 0;
-}
-
-int main(void)
-{
-    int *_1 := p;       [II_LOAD_OBJECT]            -> movq -20(%rbp), %r1
-    int _2[3] := x;     [II_LOAD_OBJECT]            -> leaq -4(%rbp), %r2
-    int _3 := 0;        [II_LOAD_ICONST]            -> movl $0, %e3
-    int _4 := _2[_3];   [II_LOAD_SUBSCRIPT]         -> movl (%r2, %r3, 4), %e4
-    int *_5 := &_4;     [II_LOAD_REFERENCE]         -> leaq (%r2, %r3, 4), %r5
-    int _6 := _1 = _5;  [II_STORE_ADDRESS]          -> movq %r5, -20(%rbp); movq %r5, %r6
-    int *_7 := p;       [II_LOAD_OBJECT]            -> movq -20(%rbp), %r7
-    int _8 := *_7;      [II_LOAD_DEREFERENCE]       -> movl (%r7), %e8
-    int _9 := 3;        [II_LOAD_ICONST]            -> movl $3, %e9
-    int _10 := _8 = _9; [II_STORE_ADDRESS]          -> movl %e9, (%r7); movl %e9, %e10
-    int _11 := 0;       [II_LOAD_ICONST]            -> movl $0, %e11
-    return _11;         [II_RETURN]                 -> jmp .Rmain
-}
-
-int main(void)
-{
-    struct point
-    {
-        struct j
-        {
-            int x;
-        } fart;
-        int y;
-    } p;
-    p.fart.x = 3;
-}
-
-main:                               [II_LABEL]              -> main:
-    struct point _1 := local[0];    [II_LOAD_OBJECT]        -> leaq (%rbp), %r1
-    struct j _2 := _1.fart;         [II_LOAD_MEMBER]        -> leaq (%r1), %r2
-    int _3 = _2.x;                  [II_LOAD_MEMBER]        -> leaq (%r2), %r3
-    int _4 := 3;                    [II_LOAD_ICONST]        -> movl $3, %e4
-    int _5 := _2 = _4;              [II_STORE_ADDRESS]      -> movl %e4, (%r2); movl %e4, %e5
-
-int main(void)
-{
-    return 2;
-}
-
-main:               [II_LABEL]          ->
-    int _1 := 2;    [II_LOAD_ICONST]    -> 
-    return _1;      [II_RETURN]
-
-sum:
-    enter 16;
-    int _1 := a;
-    int _2 := b;
-    int _3 := _1 + _2;
-    return _3; (int)
-    leave;
-    leave;
-main:
-    enter 16;
-    pointer to function(int, int) returning int _8 := sum;
-    int _10 := 3;
-    int _9 := 4;
-    int _11 := _8(_9, _10);
-    int _12 := local[-4] = _11;
-    leave;
-
-*/
-
 void insn_operand_delete(ir_insn_operand_t* op)
 {
     if (!op) return;
@@ -291,6 +130,13 @@ ir_insn_operand_t* insn_operand_copy(ir_insn_operand_t* op)
         case IIOP_FLOAT:
             n->fl = op->fl;
             break;
+        case IIOP_STRING_LITERAL:
+            n->string_literal.length = op->string_literal.length;
+            if (op->string_literal.normal)
+                n->string_literal.normal = strdup(op->string_literal.normal);
+            else
+                n->string_literal.wide = strdup_wide(op->string_literal.wide);
+            break;
     }
     return n;
 }
@@ -317,6 +163,18 @@ bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2)
             return op1->id_symbol == op2->id_symbol;
         case IIOP_FLOAT:
             return op1->fl == op2->fl;
+        case IIOP_STRING_LITERAL:
+            if (op1->string_literal.length != op2->string_literal.length)
+                return false;
+            if (op1->string_literal.normal && op2->string_literal.wide)
+                return false;
+            if (op1->string_literal.wide && op2->string_literal.normal)
+                return false;
+            if (op1->string_literal.normal && strcmp(op1->string_literal.normal, op2->string_literal.normal))
+                return false;
+            if (op1->string_literal.wide && wcscmp(op1->string_literal.wide, op2->string_literal.wide))
+                return false;
+            return true;
         default:
             return false;
     }
@@ -344,6 +202,17 @@ void insn_operand_print(ir_insn_operand_t* op, int (*printer)(const char* fmt, .
             break;
         case IIOP_FLOAT:
             printer("%lf", op->fl);
+            break;
+        case IIOP_STRING_LITERAL:
+            if (op->string_literal.normal)
+            {
+                printer("\"");
+                repr_print(op->string_literal.normal, printer);
+                printer("\"");
+            }
+            else
+                // TODO
+                printer("(wide string literal)");
             break;
     }
 }
@@ -403,6 +272,39 @@ void insn_delete_all(ir_insn_t* insn)
     insn_delete(insn);
 }
 
+// prev inserting location next
+void insert_ir_insn_before(ir_insn_t* location, ir_insn_t* inserting)
+{
+    if (!location || !inserting) return;
+    inserting->prev = location->prev;
+    inserting->next = location;
+    if (location->prev)
+        location->prev->next = inserting;
+    location->prev = inserting;
+}
+
+// prev location inserting next
+void insert_ir_insn_after(ir_insn_t* location, ir_insn_t* inserting)
+{
+    if (!location || !inserting) return;
+    inserting->next = location->next;
+    inserting->prev = location;
+    if (location->next)
+        location->next->prev = inserting;
+    location->next = inserting;
+}
+
+// prev insn next
+void remove_ir_insn(ir_insn_t* insn)
+{
+    if (!insn) return;
+    if (insn->prev)
+        insn->prev->next = insn->next;
+    if (insn->next)
+        insn->next->prev = insn->prev;
+    insn_delete(insn);
+}
+
 void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
 {
     if (!insn)
@@ -415,6 +317,18 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
     #define SPACE printer(" ")
     #define WALRUS printer(" := ")
     #define SEMICOLON_END printer(";")
+    #define GENERIC_BINOP_CASE(t, operator) \
+        case t: \
+            INDENT_START; \
+            type_humanized_print(insn->ctype, printer); \
+            SPACE; \
+            insn_operand_print(insn->ops[0], printer); \
+            WALRUS; \
+            insn_operand_print(insn->ops[1], printer); \
+            printer(operator); \
+            insn_operand_print(insn->ops[2], printer); \
+            SEMICOLON_END; \
+            break;
     switch (insn->type)
     {
         case II_LOAD:
@@ -454,17 +368,8 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             insn_operand_print(insn->ops[0], printer);
             SEMICOLON_END;
             break;
-        case II_ADDITION:
-            INDENT_START;
-            type_humanized_print(insn->ctype, printer);
-            SPACE;
-            insn_operand_print(insn->ops[0], printer);
-            WALRUS;
-            insn_operand_print(insn->ops[1], printer);
-            printer(" + ");
-            insn_operand_print(insn->ops[2], printer);
-            SEMICOLON_END;
-            break;
+        GENERIC_BINOP_CASE(II_ADDITION, " + ")
+        GENERIC_BINOP_CASE(II_SUBTRACTION, " - ")
         case II_SUBSCRIPT:
             INDENT_START;
             REF_IF_NEEDED;
@@ -539,6 +444,7 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
     #undef SPACE
     #undef WALRUS
     #undef REF_IF_NEEDED
+    #undef GENERIC_BINOP_CASE
 }
 
 void insn_clike_print_all(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
@@ -584,6 +490,24 @@ ir_insn_operand_t* make_immediate_insn_operand(unsigned long long immediate)
     return op;
 }
 
+ir_insn_operand_t* make_string_literal_insn_operand(char* literal, unsigned long long length)
+{
+    ir_insn_operand_t* op = calloc(1, sizeof *op);
+    op->type = IIOP_STRING_LITERAL;
+    op->string_literal.normal = strdup(literal);
+    op->string_literal.length = length;
+    return op;
+}
+
+ir_insn_operand_t* make_wide_string_literal_insn_operand(int* literal, unsigned long long length)
+{
+    ir_insn_operand_t* op = calloc(1, sizeof *op);
+    op->type = IIOP_STRING_LITERAL;
+    op->string_literal.wide = strdup_wide(literal);
+    op->string_literal.length = length;
+    return op;
+}
+
 ir_insn_operand_t* make_identifier_insn_operand(symbol_t* sy)
 {
     ir_insn_operand_t* op = calloc(1, sizeof *op);
@@ -613,7 +537,7 @@ ir_insn_t* make_basic_insn(ir_insn_type_t type, size_t noops)
     return insn;
 }
 
-ir_insn_t* make_1op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operand_t* op)
+ir_insn_t* make_1op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op)
 {
     ir_insn_t* insn = make_basic_insn(type, 1);
     insn->ctype = type_copy(ctype);
@@ -621,7 +545,7 @@ ir_insn_t* make_1op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operan
     return insn;
 }
 
-ir_insn_t* make_2op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2)
+ir_insn_t* make_2op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2)
 {
     ir_insn_t* insn = make_basic_insn(type, 2);
     insn->ctype = type_copy(ctype);
@@ -630,7 +554,7 @@ ir_insn_t* make_2op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operan
     return insn;
 }
 
-ir_insn_t* make_3op(ir_insn_operand_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2, ir_insn_operand_t* op3)
+ir_insn_t* make_3op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2, ir_insn_operand_t* op3)
 {
     ir_insn_t* insn = make_basic_insn(type, 3);
     insn->ctype = type_copy(ctype);
@@ -660,7 +584,7 @@ ir_insn_t* make_function_label_insn(syntax_traverser_t* trav, syntax_component_t
     insn->ops[0] = make_label_insn_operand(id->id);
     insn->metadata.function_label.ellipsis = fdeclr->fdeclr_ellipsis;
     insn->metadata.function_label.knr = fdeclr->fdeclr_parameter_declarations == NULL;
-    insn->metadata.function_label.linkage = syntax_get_linkage(syn);
+    insn->metadata.function_label.linkage = symbol_get_linkage(sy);
     if (insn->metadata.function_label.knr && syn->fdef_knr_declarations->size)
     {
         insn->metadata.function_label.noparams = syn->fdef_knr_declarations->size;
@@ -684,11 +608,11 @@ ir_insn_t* make_function_label_insn(syntax_traverser_t* trav, syntax_component_t
     {
         insn->metadata.function_label.noparams = fdeclr->fdeclr_parameter_declarations->size;
         insn->metadata.function_label.params = calloc(insn->metadata.function_label.noparams, sizeof(symbol_t*));
-        VECTOR_FOR(syntax_component_t*, pdecl, syn->fdeclr_parameter_declarations)
+        VECTOR_FOR(syntax_component_t*, pdecl, fdeclr->fdeclr_parameter_declarations)
         {
             syntax_component_t* paramid = syntax_get_declarator_identifier(pdecl->pdecl_declr);
             if (!paramid) continue;
-            insn->metadata.function_label.params[i++] = symbol_table_get_syn_id(SYMBOL_TABLE, paramid);
+            insn->metadata.function_label.params[i] = symbol_table_get_syn_id(SYMBOL_TABLE, paramid);
         }
     }
     return insn;
@@ -760,7 +684,8 @@ void linearize_function_definition_after(syntax_traverser_t* trav, syntax_compon
     LINEARIZING_TRAVERSER->function_label = NULL;
     if (!syn->fdef_declarator) report_return;
     COPY_CODE(syn->fdef_body);
-    ADD_CODE(make_basic_insn, II_LEAVE, 0);
+    if (!code || code->type != II_LEAVE)
+        ADD_CODE(make_basic_insn, II_LEAVE, 0);
     ADD_CODE(make_basic_insn, II_ENDPROC, 0);
     FINALIZE_LINEARIZE;
 }
@@ -815,6 +740,17 @@ void linearize_integer_constant_after(syntax_traverser_t* trav, syntax_component
     FINALIZE_LINEARIZE;
 }
 
+void linearize_string_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    syn->result_register = MAKE_REGISTER;
+    if (syn->strl_reg)
+        ADD_CODE(make_2op, II_LOAD, syn->ctype, make_vreg_insn_operand(syn->result_register, true), make_string_literal_insn_operand(syn->strl_reg, syn->strl_length->intc));
+    else
+        ADD_CODE(make_2op, II_LOAD, syn->ctype, make_vreg_insn_operand(syn->result_register, true), make_wide_string_literal_insn_operand(syn->strl_wide, syn->strl_length->intc));
+    FINALIZE_LINEARIZE;
+}
+
 void linearize_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
@@ -841,8 +777,8 @@ void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_component_
     if (syn->ideclr_initializer)
     {
         syn->result_register = MAKE_REGISTER;
-        COPY_CODE(syn->ideclr_declarator);
         COPY_CODE(syn->ideclr_initializer);
+        COPY_CODE(syn->ideclr_declarator);
         ADD_CODE(make_3op, II_STORE_ADDRESS, syn->ideclr_declarator->ctype,
             make_vreg_insn_operand(syn->result_register, true),
             make_vreg_insn_operand(syn->ideclr_declarator->result_register, false),
@@ -854,8 +790,8 @@ void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_component_
 void linearize_assignment_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    COPY_CODE(syn->bexpr_lhs);
     COPY_CODE(syn->bexpr_rhs);
+    COPY_CODE(syn->bexpr_lhs);
     syn->result_register = MAKE_REGISTER;
     ADD_CODE(make_3op, II_STORE_ADDRESS, syn->ctype,
         make_vreg_insn_operand(syn->result_register, true),
@@ -876,8 +812,8 @@ static ir_insn_type_t binary_expression_type_map(syntax_component_type_t type)
 {
     switch (type)
     {
-        case SC_ADDITION_EXPRESSION:
-            return II_ADDITION;
+        case SC_ADDITION_EXPRESSION: return II_ADDITION;
+        case SC_SUBTRACTION_EXPRESSION: return II_SUBTRACTION;
         default:
             report_return_value(II_UNKNOWN);
     }
@@ -934,7 +870,7 @@ void linearize_if_statement_after(syntax_traverser_t* trav, syntax_component_t* 
     // jump if zero to else
     char* else_label = make_local_label(trav);
     char* end_label = make_local_label(trav);
-    ADD_CODE(make_2op, II_JUMP_IF_ZERO, NULL, make_vreg_insn_operand(syn->ifstmt_condition->result_register, false), make_label_insn_operand(else_label));
+    ADD_CODE(make_2op, II_JUMP_IF_ZERO, syn->ifstmt_condition->ctype, make_vreg_insn_operand(syn->ifstmt_condition->result_register, false), make_label_insn_operand(else_label));
     // if body
     COPY_CODE(syn->ifstmt_body);
     if (syn->ifstmt_else)
@@ -959,7 +895,6 @@ void linearize_if_statement_after(syntax_traverser_t* trav, syntax_component_t* 
 void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    COPY_CODE(syn->fcallexpr_expression);
     long long noargs = syn->fcallexpr_args->size;
     ir_insn_operand_t** args = calloc(noargs + 2, sizeof(ir_insn_operand_t*));
     args[0] = make_vreg_insn_operand(syn->result_register = MAKE_REGISTER, true);
@@ -970,8 +905,14 @@ void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_c
         COPY_CODE(arg);
         args[i + 2] = make_vreg_insn_operand(arg->result_register, false);
     }
+    COPY_CODE(syn->fcallexpr_expression);
     ADD_CODE(make_function_call_insn, syn->ctype, args, noargs + 2);
     FINALIZE_LINEARIZE;
+}
+
+void linearize_default_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    warnf("no linearization procedure built for syntax elements of type %s\n", SYNTAX_COMPONENT_NAMES[syn->type]);
 }
 
 ir_insn_t* linearize(syntax_component_t* tlu)
@@ -987,15 +928,19 @@ ir_insn_t* linearize(syntax_component_t* tlu)
     trav->after[SC_EXPRESSION_STATEMENT] = linearize_expression_statement_after;
     trav->after[SC_EXPRESSION] = linearize_expression_after;
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
+    trav->after[SC_STRING_LITERAL] = linearize_string_literal_after;
     trav->after[SC_IDENTIFIER] = linearize_identifier_after;
     trav->after[SC_INIT_DECLARATOR] = linearize_init_declarator_after;
     trav->after[SC_ARRAY_DECLARATOR] = linearize_array_declarator_after;
     trav->after[SC_DECLARATION] = linearize_declaration_after;
     trav->after[SC_ADDITION_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_SUBTRACTION_EXPRESSION] = linearize_binary_expression_after;
     trav->after[SC_ASSIGNMENT_EXPRESSION] = linearize_assignment_expression_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = linearize_subscript_expression_after;
     trav->after[SC_IF_STATEMENT] = linearize_if_statement_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = linearize_function_call_expression_after;
+
+    trav->default_after = linearize_default_after;
 
     traverse(trav);
     traverse_delete(trav);

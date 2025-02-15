@@ -88,6 +88,11 @@ bool scope_is_block(syntax_component_t* scope)
             scope->type == SC_SWITCH_STATEMENT;
 }
 
+bool scope_is_file(syntax_component_t* scope)
+{
+    return scope && scope->type == SC_TRANSLATION_UNIT;
+}
+
 storage_duration_t symbol_get_storage_duration(symbol_t* sy)
 {
     syntax_component_t* scope = symbol_get_scope(sy);
@@ -100,6 +105,17 @@ storage_duration_t symbol_get_storage_duration(symbol_t* sy)
             return SD_AUTOMATIC;
     }
     return SD_STATIC;
+}
+
+linkage_t symbol_get_linkage(symbol_t* sy)
+{
+    vector_t* declspecs = syntax_get_declspecs(sy->declarer);
+    syntax_component_t* scope = symbol_get_scope(sy);
+    if (syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_EXTERN))
+        return LK_EXTERNAL;
+    if (syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_STATIC))
+        return scope_is_block(scope) ? LK_NONE : LK_INTERNAL;
+    return scope_is_file(scope) ? LK_EXTERNAL : LK_NONE;
 }
 
 // whether or not the given symbol is in scope at syn

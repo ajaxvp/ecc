@@ -112,7 +112,16 @@ int main(int argc, char** argv)
     printf("<<linear IR>>\n");
     insn_clike_print_all(insns, printf);
 
-    allocate(insns, x86procregmap, 9);
+    ir_optimize(insns, ir_opt_profile_basic());
+    printf("<<optimized linear IR>>\n");
+    insn_clike_print_all(insns, printf);
+
+    allocator_options_t alloc_options;
+    alloc_options.procregmap = x86procregmap;
+    alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
+    alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
+
+    allocate(insns, &alloc_options);
 
     printf("<<allocated linear IR>>\n");
     insn_clike_print_all(insns, printf);
@@ -121,6 +130,11 @@ int main(int argc, char** argv)
 
     printf("<<x86 assembly code>>\n");
     x86_write_all(x86_insns, stdout);
+
+    FILE* out = fopen("prgmtest.s", "w");
+    x86_write_all(x86_insns, out);
+    fclose(out);
+    printf("assembly written to prgmtest.s\n");
 
     fclose(file);
     x86_insn_delete_all(x86_insns);
