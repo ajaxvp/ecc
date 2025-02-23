@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 vector_t* vector_init(void)
 {

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 typedef struct lex_state
 {
@@ -14,6 +14,7 @@ typedef struct lex_state
     int counter;
     char* error;
     int include_condition;
+    bool found;
     preprocessing_token_t* prev;
 } lex_state_t;
 
@@ -396,8 +397,8 @@ typedef preprocessing_token_t* (*lex_function)(lex_state_t* state);
     p != EOF ? unread_impl(state) : false;
 #define cleanup_retreat jump(o)
 #define cleanup_helper cleanup_retreat
-#define cleanup_lex_fail cleanup_retreat, pp_token_delete(token)
-#define cleanup_lex_pass state->counting ? (cleanup_lex_fail) : (void) 0
+#define cleanup_lex_fail cleanup_retreat, pp_token_delete(token), state->found = false
+#define cleanup_lex_pass state->counting ? (cleanup_retreat, pp_token_delete(token), state->found = true) : (void) 0
 #define read (++state->counter, c = read_impl(state))
 #define unread (--state->counter, unread_impl(state))
 #define peek (p = read_impl(state), p != EOF ? unread_impl(state) : false, p)
@@ -1197,7 +1198,7 @@ preprocessing_token_t* lex(FILE* file, bool dump_error)
         for (unsigned i = 0; i < PPT_NO_ELEMENTS; ++i)
         {
             functions[i](state);
-            counts[i] = state->counter;
+            counts[i] = state->found ? state->counter : 0;
         }
 
         state->counting = false;

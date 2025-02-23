@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 /*
 
@@ -94,6 +94,12 @@ int main(int argc, char** argv)
             return 1;
     }
 
+    printf("<<typed syntax tree>>\n");
+    print_syntax(tlu, printf);
+
+    printf("<<symbol table>>\n");
+    symbol_table_print(tlu->tlu_st, printf);
+
     analysis_error_t* errors = analyze(tlu);
     if (errors)
     {
@@ -112,32 +118,32 @@ int main(int argc, char** argv)
     printf("<<linear IR>>\n");
     insn_clike_print_all(insns, printf);
 
-    ir_optimize(insns, ir_opt_profile_basic());
-    printf("<<optimized linear IR>>\n");
-    insn_clike_print_all(insns, printf);
+    // ir_optimize(insns, ir_opt_profile_basic());
+    // printf("<<optimized linear IR>>\n");
+    // insn_clike_print_all(insns, printf);
 
-    allocator_options_t alloc_options;
-    alloc_options.procregmap = x86procregmap;
-    alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
-    alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
+    // allocator_options_t alloc_options;
+    // alloc_options.procregmap = x86procregmap;
+    // alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
+    // alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
 
-    allocate(insns, &alloc_options);
+    // allocate(insns, &alloc_options);
 
-    printf("<<allocated linear IR>>\n");
-    insn_clike_print_all(insns, printf);
+    // printf("<<allocated linear IR>>\n");
+    // insn_clike_print_all(insns, printf);
 
-    x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
+    // x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
 
-    printf("<<x86 assembly code>>\n");
-    x86_write_all(x86_insns, stdout);
+    // printf("<<x86 assembly code>>\n");
+    // x86_write_all(x86_insns, stdout);
 
-    FILE* out = fopen("prgmtest.s", "w");
-    x86_write_all(x86_insns, out);
-    fclose(out);
-    printf("assembly written to prgmtest.s\n");
+    // FILE* out = fopen("prgmtest.s", "w");
+    // x86_write_all(x86_insns, out);
+    // fclose(out);
+    // printf("assembly written to prgmtest.s\n");
 
     fclose(file);
-    x86_insn_delete_all(x86_insns);
+    //x86_insn_delete_all(x86_insns);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
     return 0;

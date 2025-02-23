@@ -3,7 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define MAX_ERROR_LEN 512
 
@@ -11,6 +11,7 @@ typedef struct analysis_syntax_traverser
 {
     syntax_traverser_t base;
     analysis_error_t* errors;
+    unsigned long long next_compound_literal;
 } analysis_syntax_traverser_t;
 
 analysis_error_t* error_init(syntax_component_t* syn, bool warning, char* fmt, ...)
@@ -73,7 +74,7 @@ void dump_errors(analysis_error_t* errors)
 #define ADD_WARNING(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
 
 // you should assign this to a variable if you plan on using it a lot.
-#define SYMBOL_TABLE (syntax_get_translation_unit(syn)->tlu_st)
+#define SYMBOL_TABLE (trav->tlu->tlu_st)
 
 static bool syntax_is_null_ptr_constant(syntax_component_t* expr, c_type_class_t* class)
 {
@@ -473,6 +474,18 @@ void analyze_member_expression_after(syntax_traverser_t* trav, syntax_component_
     }
     else
         syn->ctype = make_basic_type(CTC_ERROR);
+}
+
+void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __cl(number)(null)
+    char name[len];
+    snprintf(name, len, "__cl%llu", ANALYSIS_TRAVERSER->next_compound_literal);
+    syn->cl_id = strdup(name);
+    symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
+    sy->ns = make_basic_namespace(NSC_ORDINARY);
+    sy->type = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
+    syn->ctype = type_copy(sy->type);
 }
 
 void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1025,78 +1038,184 @@ void enforce_6_9_para_3_clause_1(syntax_traverser_t* trav, syntax_component_t* s
     // TODO
 }
 
+void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
+    syntax_component_t* enumr = sy->declarer->parent;
+    if (!enumr)
+        report_return;
+    // if enumerator has a constant value associated with it, use that value
+    if (enumr->enumr_expression)
+    {
+        constexpr_t* ce = ce_evaluate(enumr->enumr_expression, CE_INTEGER);
+        if (!ce)
+        {
+            // ISO: 6.7.2.2 (2)
+            ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+            constexpr_delete(ce);
+            return;
+        }
+        if (ce->ivalue != (int) ce->ivalue)
+        {
+            // ISO: 6.7.2.2 (2)
+            ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+            constexpr_delete(ce);
+            return;
+        }
+        symbol_init_initializer(sy);
+        vector_add(sy->designations, NULL);
+        vector_add(sy->initial_values, ce);
+        return;
+    }
+    // otherwise...
+    syntax_component_t* enums = enumr->parent;
+    if (!enums)
+        report_return;
+    // find the last enumerator that does have one before the current enum constant
+    int last = -1;
+    int idx = 0;
+    VECTOR_FOR(syntax_component_t*, er, enums->enums_enumerators)
+    {
+        idx = i;
+        if (er == enumr)
+            break;
+        if (er->enumr_expression)
+            last = i;
+    }
+    // if there is no last one, take 0 to be the constant value of the first enum constant (go by placement index)
+    if (last == -1)
+    {
+        symbol_init_initializer(sy);
+        vector_add(sy->designations, NULL);
+        vector_add(sy->initial_values, ce_make_integer(make_basic_type(CTC_INT), idx));
+        return;
+    }
+    // if there is, evaluate it
+    syntax_component_t* last_er = vector_get(enums->enums_enumerators, last);
+    constexpr_t* lce = ce_evaluate(last_er->enumr_expression, CE_INTEGER);
+    if (!lce)
+    {
+        // ISO: 6.7.2.2 (2)
+        ADD_ERROR(last_er->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+        constexpr_delete(lce);
+        return;
+    }
+    if (lce->ivalue != (int) lce->ivalue)
+    {
+        // ISO: 6.7.2.2 (2)
+        ADD_ERROR(last_er->enumr_expression, "enumeration constant value must be representable by type 'int'");
+        constexpr_delete(lce);
+        return;
+    }
+    // make this enum constant have the value of the found enum constant + the distance between the two
+    constexpr_t* ce = ce_make_integer(make_basic_type(CTC_INT), lce->ivalue + (idx - last));
+    constexpr_delete(lce);
+    if (ce->ivalue != (int) ce->ivalue)
+    {
+        // ISO: 6.7.2.2 (2)
+        ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+        constexpr_delete(ce);
+        return;
+    }
+    symbol_init_initializer(sy);
+    vector_add(sy->designations, NULL);
+    vector_add(sy->initial_values, ce);
+}
+
+void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, bool first, size_t dupes)
+{
+    if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
+        analyze_enumeration_constant_after(trav, syn, sy);
+    linkage_t lk = symbol_get_linkage(sy);
+    syntax_component_t* scope = symbol_get_scope(sy);
+    if (lk == LK_NONE && dupes > 1)
+        // TODO: something to think about here: tags...
+        // ISO: 6.7 (3)
+        ADD_ERROR(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
+    if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && syntax_has_initializer(syn) && scope_is_block(scope))
+        // ISO: 6.7.8 (5)
+        ADD_ERROR(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
+    syntax_component_t* decl = NULL;
+    if ((decl = syntax_get_declarator_declaration(syn)) &&
+        scope_is_block(scope) &&
+        sy->type->class == CTC_FUNCTION &&
+        !syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_EXTERN) &&
+        syntax_no_specifiers(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER) > 0)
+        // NOTE: GCC on -std=c99 -pedantic-errors does not complain about typedef (which seems fine semantically, but appears to break this rule)
+        // ISO: 6.7.1 (5)
+        ADD_ERROR(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
+    if (syntax_is_tentative_definition(syn))
+    {
+        vector_t* declspecs = syntax_get_declspecs(syn);
+        if (declspecs && syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_STATIC) &&
+            !type_is_complete(sy->type))
+        {
+            // ISO: 6.9.2 (3)
+            ADD_ERROR(syn, "tentative definitions with internal linkage may not have an incomplete type");
+        }
+    }
+    if (sy->type->class == CTC_LABEL && !first && dupes > 1)
+    {
+        if (!scope) report_return;
+        if (scope->type != SC_FUNCTION_DEFINITION) report_return;
+        syntax_component_t* func_id = syntax_get_declarator_identifier(scope->fdef_declarator);
+        if (!func_id) report_return;
+        // ISO: 6.8.1 (3)
+        ADD_ERROR(syn, "duplicate label name '%s' in function '%s'", syn->id, func_id->id);
+    }
+}
+
+void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
+    syn->ctype = type_copy(sy->type);
+    if (sy->type->class == CTC_FUNCTION && syn->parent &&
+        syn->parent->type != SC_REFERENCE_EXPRESSION &&
+        syn->parent->type != SC_SIZEOF_EXPRESSION &&
+        syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
+    {
+        // ISO: 6.3.2 (4)
+        c_type_t* ptr_type = make_basic_type(CTC_POINTER);
+        ptr_type->derived_from = syn->ctype;
+        syn->ctype = ptr_type;
+    }
+}
+
 void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     c_namespace_t* ns = syntax_get_namespace(syn);
-    if (!ns) report_return;
+    if (!ns)
+    {
+        switch (syn->parent->type)
+        {
+            case SC_DESIGNATION:
+                ADD_ERROR(syn, "cannot find member '%s' for designation", syn->id);
+                break;
+            case SC_MEMBER_EXPRESSION:
+            case SC_DEREFERENCE_MEMBER_EXPRESSION:
+                ADD_ERROR(syn, "struct has no member '%s'", syn->id);
+                break;
+            default:
+                ADD_ERROR(syn, "could not determine name space of identifier '%s'", syn->id);
+                break;
+        }
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
     bool first = false;
     size_t count = 0;
-    symbol_t* sy = symbol_table_count(SYMBOL_TABLE, syn, ns, &count, &first);
-    if (sy)
-    {
-        syn->ctype = type_copy(sy->type);
-        if (sy->type->class == CTC_FUNCTION && syn->parent &&
-            syn->parent->type != SC_REFERENCE_EXPRESSION &&
-            syn->parent->type != SC_SIZEOF_EXPRESSION &&
-            syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
-        {
-            // ISO: 6.3.2 (4)
-            c_type_t* ptr_type = make_basic_type(CTC_POINTER);
-            ptr_type->derived_from = syn->ctype;
-            syn->ctype = ptr_type;
-        }
-
-        // declaring
-        if (sy->declarer == syn)
-        {
-            linkage_t lk = symbol_get_linkage(sy);
-            syntax_component_t* scope = symbol_get_scope(sy);
-            if (lk == LK_NONE && count > 1)
-                // TODO: something to think about here: tags...
-                // ISO: 6.7 (3)
-                ADD_ERROR(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
-            if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && syntax_has_initializer(syn) && scope_is_block(scope))
-                // ISO: 6.7.8 (5)
-                ADD_ERROR(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
-            syntax_component_t* decl = NULL;
-            if ((decl = syntax_get_declarator_declaration(syn)) &&
-                scope_is_block(scope) &&
-                sy->type->class == CTC_FUNCTION &&
-                !syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_EXTERN) &&
-                syntax_no_specifiers(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER) > 0)
-                // NOTE: GCC on -std=c99 -pedantic-errors does not complain about typedef (which seems fine semantically, but appears to break this rule)
-                // ISO: 6.7.1 (5)
-                ADD_ERROR(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
-            if (syntax_is_tentative_definition(syn))
-            {
-                vector_t* declspecs = syntax_get_declspecs(syn);
-                if (declspecs && syntax_has_specifier(declspecs, SC_STORAGE_CLASS_SPECIFIER, SCS_STATIC) &&
-                    !type_is_complete(sy->type))
-                {
-                    // ISO: 6.9.2 (3)
-                    ADD_ERROR(syn, "tentative definitions with internal linkage may not have an incomplete type");
-                }
-            }
-            if (sy->type->class == CTC_LABEL && !first && count > 1)
-            {
-                if (!scope) report_return;
-                if (scope->type != SC_FUNCTION_DEFINITION) report_return;
-                syntax_component_t* func_id = syntax_get_declarator_identifier(scope->fdef_declarator);
-                if (!func_id) report_return;
-                // ISO: 6.8.1 (3)
-                ADD_ERROR(syn, "duplicate label name '%s' in function '%s'", syn->id, func_id->id);
-            }
-        }
-        // designating
-        // else { }
-    }
-    else
+    symbol_table_t* st = SYMBOL_TABLE;
+    symbol_t* sy = symbol_table_count(st, syn, ns, &count, &first);
+    namespace_delete(ns);
+    if (!sy)
     {
         // ISO: 6.5.1 (2)
         ADD_ERROR(syn, "symbol '%s' is not defined in the given context", syn->id);
         syn->ctype = make_basic_type(CTC_ERROR);
+        return;
     }
-    namespace_delete(ns);
+    if (sy->declarer == syn)
+        analyze_declaring_identifier_after(trav, syn, sy, first, count);
+    else
+        analyze_designating_identifier_after(trav, syn, sy);
 }
 
 static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1269,8 +1388,6 @@ void analyze_function_definition_after(syntax_traverser_t* trav, syntax_componen
     enforce_6_9_1_para_5(trav, syn);
     enforce_6_9_1_para_6(trav, syn);
     enforce_main_definition(trav, syn);
-    // align stackframe
-    syn->fdef_stackframe_size = syn->fdef_stackframe_size + (STACKFRAME_ALIGNMENT - (syn->fdef_stackframe_size % STACKFRAME_ALIGNMENT));
 }
 
 void enforce_6_7_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1411,9 +1528,100 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
-void analyze_struct_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
+void analyze_static_initializer_list_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, designation_t* prefix)
 {
-    
+    symbol_init_initializer(sy);
+    VECTOR_FOR(syntax_component_t*, d, syn->inlist_designations)
+    {
+        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
+        if (init->type != SC_INITIALIZER_LIST)
+        {
+            constexpr_t* ce = ce_evaluate(init, CE_ANY);
+            if (!ce)
+            {
+                // ISO: 6.7.8 (4)
+                ADD_ERROR(init, "initializer for object with static storage duration must be constant");
+                return;
+            }
+            designation_t* suffix = syntax_to_designation(d);
+            designation_t* desig = designation_concat(prefix, suffix);
+            designation_delete_all(suffix);
+            vector_add(sy->designations, desig);
+            vector_add(sy->initial_values, ce);
+            continue;
+        }
+        designation_t* desig = syntax_to_designation(d);
+        analyze_static_initializer_list_after(trav, init, sy, desig);
+        designation_delete_all(desig);
+    }
+}
+
+void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* init = syn->ideclr_initializer;
+    if (!init) return;
+    syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
+    if (!id) report_return;
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+    if (!sy) report_return;
+    storage_duration_t sd = symbol_get_storage_duration(sy);
+    if (sd != SD_STATIC) return;
+    if (init->type != SC_INITIALIZER_LIST)
+    {
+        constexpr_t* ce = ce_evaluate(init, CE_ANY);
+        if (!ce)
+        {
+            // ISO: 6.7.8 (4)
+            ADD_ERROR(init, "initializer for object with static storage duration must be constant");
+            return;
+        }
+        symbol_init_initializer(sy);
+        vector_add(sy->designations, NULL);
+        vector_add(sy->initial_values, ce);
+        return;
+    }
+    analyze_static_initializer_list_after(trav, init, sy, NULL);
+}
+
+void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    unsigned count = 0;
+    VECTOR_FOR(syntax_component_t*, sdecl, syn->sus_declarations)
+    {
+        int j = i;
+        count += sdecl->sdecl_declarators->size;
+        VECTOR_FOR(syntax_component_t*, sdeclr, sdecl->sdecl_declarators)
+        {
+            if (!sdeclr) continue;
+            syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
+            if (!id) report_return;
+            symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+            if (!sy) report_return;
+            bool complete = type_is_complete(sy->type);
+            bool flexible = !complete && sy->type->class == CTC_ARRAY && j == syn->sus_declarations->size - 1 &&
+                i == sdecl->sdecl_declarators->size - 1;
+            if (!complete && !flexible)
+            {
+                // ISO: 6.7.2.1 (2)
+                if (sy->type->class == CTC_ARRAY)
+                    ADD_ERROR(sdeclr, "flexible array members are only allowed at the end of a struct or union");
+                else
+                    ADD_ERROR(sdeclr, "incomplete types are not allowed within structs and unions");
+            }
+            if (flexible && syntax_get_enclosing(syn->parent, SC_STRUCT_UNION_SPECIFIER))
+                // ISO: 6.7.2.1 (2)
+                ADD_ERROR(sdeclr, "flexible array members are not permitted at the end of nested structs and unions");
+            if (flexible && count == 1)
+                // ISO: 6.7.2.1 (2)
+                ADD_ERROR(sdeclr, "flexible array members cannot be a part of an otherwise empty struct or union");
+        }
+    }
+}
+
+void analyze_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->sus_declarations)
+        analyze_complete_struct_union_specifier_after(trav, syn);
 }
 
 /*
@@ -1482,7 +1690,8 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_PREFIX_DECREMENT_EXPRESSION] = analyze_inc_dec_expression_after;
     trav->after[SC_POSTFIX_INCREMENT_EXPRESSION] = analyze_inc_dec_expression_after;
     trav->after[SC_POSTFIX_DECREMENT_EXPRESSION] = analyze_inc_dec_expression_after;
-    trav->after[SC_INITIALIZER_LIST_EXPRESSION] = analyze_compound_literal_expression_after;
+    trav->before[SC_COMPOUND_LITERAL] = analyze_compound_literal_expression_before;
+    trav->after[SC_COMPOUND_LITERAL] = analyze_compound_literal_expression_after;
     trav->after[SC_MEMBER_EXPRESSION] = analyze_member_expression_after;
     trav->after[SC_DEREFERENCE_MEMBER_EXPRESSION] = analyze_dereference_member_expression_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = analyze_function_call_expression_after;
@@ -1499,7 +1708,8 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_RETURN_STATEMENT] = analyze_return_statement_after;
 
     // declarations
-    trav->after[SC_STRUCT_DECLARATION] = analyze_struct_declaration_after;
+    trav->after[SC_INIT_DECLARATOR] = analyze_init_declarator_after;
+    trav->after[SC_STRUCT_UNION_SPECIFIER] = analyze_struct_union_specifier_after;
 
     traverse(trav);
     analysis_error_t* errors = ANALYSIS_TRAVERSER->errors;

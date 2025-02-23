@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define init_token(t) \
     token_t* token = calloc(1, sizeof *token); \

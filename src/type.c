@@ -1,10 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
-
-#define report_return { printf("bad (%d)\n", __LINE__); return; }
-#define report_return_value(x) { printf("bad (%d)\n", __LINE__); return (x); }
+#include "ecc.h"
 
 c_type_t* make_basic_type(c_type_class_t class)
 {
@@ -26,7 +23,8 @@ c_type_t* type_copy(c_type_t* ct)
             break;
         case CTC_STRUCTURE:
         case CTC_UNION:
-            nct->struct_union.name = strdup(ct->struct_union.name);
+            if (ct->struct_union.name)
+                nct->struct_union.name = strdup(ct->struct_union.name);
             nct->struct_union.member_names = vector_deep_copy(ct->struct_union.member_names, (void* (*)(void*)) strdup);
             nct->struct_union.member_types = vector_deep_copy(ct->struct_union.member_types, (void* (*)(void*)) type_copy);
             nct->struct_union.member_bitfields = vector_copy(ct->struct_union.member_bitfields);
@@ -36,7 +34,8 @@ c_type_t* type_copy(c_type_t* ct)
             nct->function.variadic = ct->function.variadic;
             break;
         case CTC_ENUMERATED:
-            nct->enumerated.name = strdup(ct->enumerated.name);
+            if (ct->enumerated.name)
+                nct->enumerated.name = strdup(ct->enumerated.name);
             nct->enumerated.constant_names = vector_deep_copy(ct->enumerated.constant_names, (void* (*)(void*)) strdup);
             nct->enumerated.constant_expressions = vector_copy(ct->enumerated.constant_expressions);
             break;
@@ -644,14 +643,26 @@ long long type_size(c_type_t* ct)
             long long length = evaluate_constant_expression(ct->array.length_expression, &c, CE_INTEGER);
             if (c == CTC_ERROR)
                 return -1;
-            return length * type_size(ct->derived_from);
+            long long dsize = type_size(ct->derived_from);
+            if (dsize == -1)
+                return -1;
+            return length * dsize;
         }
         case CTC_STRUCTURE:
         case CTC_UNION:
         {
             long long size = 0;
             VECTOR_FOR(c_type_t*, mct, ct->struct_union.member_types)
-                size += type_size(mct);
+            {
+                long long msize = type_size(mct);
+                if (msize == -1)
+                {
+                    if (i == ct->struct_union.member_types->size - 1 && mct->class == CTC_ARRAY)
+                        continue;
+                    return -1;
+                }
+                size += msize;
+            }
             return size + (STRUCT_UNION_ALIGNMENT - (size % STRUCT_UNION_ALIGNMENT));
         }
         case CTC_VOID:
@@ -670,14 +681,16 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
     switch (ct->class)
     {
         case CTC_ENUMERATED:
-            printer(" %s", ct->enumerated.name);
+            if (ct->enumerated.name)
+                printer(" %s", ct->enumerated.name);
             break;
         case CTC_ARRAY:
             printer(" of ");
             break;
         case CTC_STRUCTURE:
         case CTC_UNION:
-            printer(" %s", ct->struct_union.name);
+            if (ct->struct_union.name)
+                printer(" %s", ct->struct_union.name);
             break;
         case CTC_FUNCTION:
             printer("(");
@@ -730,13 +743,18 @@ void type_delete(c_type_t* ct)
 #define ADD_ERROR(syn, fmt, ...) errors = error_list_add(errors, error_init(syn, false, fmt, ## __VA_ARGS__ ))
 #define ADD_WARNING(syn, fmt, ...) errors = error_list_add(errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
 
-void assign_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy);
-
-void assign_sus_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
+c_namespace_t* make_basic_namespace(c_namespace_class_t class)
 {
-    if (!sy) return;
-    if (sy->type) return;
-    syntax_component_t* sus = sy->declarer->parent;
+    c_namespace_t* ns = calloc(1, sizeof *ns);
+    ns->class = class;
+    return ns;
+}
+
+void assign_type(analysis_error_t* errors, symbol_t* sy);
+
+c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus)
+{
+    symbol_table_t* st = syntax_get_symbol_table(sus);
     c_type_t* ct = calloc(1, sizeof *ct);
     switch (sus->sus_sou)
     {
@@ -755,23 +773,51 @@ void assign_sus_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
             VECTOR_FOR(syntax_component_t*, sdeclr, sdecl->sdecl_declarators)
             {
                 syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
-                if (!id) report_return;
+                if (!id) continue; // TODO: unnamed bitfields (ugh)
 
                 symbol_t* member_sy = symbol_table_get_syn_id(st, id);
-                if (!member_sy) report_return;
+                if (!member_sy) report_return_value(NULL);
 
-                assign_type(errors, st, member_sy);
+                assign_type(errors, member_sy);
 
                 vector_add(ct->struct_union.member_names, strdup(id->id));
                 vector_add(ct->struct_union.member_types, type_copy(member_sy->type));
                 vector_add(ct->struct_union.member_bitfields, sdeclr->sdeclr_bits_expression);
             }
         }
+        {
+            VECTOR_FOR(syntax_component_t*, sdecl, sus->sus_declarations)
+            {
+                VECTOR_FOR(syntax_component_t*, sdeclr, sdecl->sdecl_declarators)
+                {
+                    syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
+                    if (!id) continue; // TODO: unnamed bitfields (ugh)
+    
+                    symbol_t* member_sy = symbol_table_get_syn_id(st, id);
+                    if (!member_sy) report_return_value(NULL);
+    
+                    if (member_sy->ns)
+                        namespace_delete(member_sy->ns);
+                    member_sy->ns = calloc(1, sizeof *member_sy->ns);
+                    member_sy->ns->class = ct->class == CTC_STRUCTURE ? NSC_STRUCT_MEMBER : NSC_UNION_MEMBER;
+                    member_sy->ns->struct_union_type = type_copy(ct);
+                }
+            }
+        }
     }
-    sy->type = ct;
+    return ct;
 }
 
-void assign_es_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
+void assign_sus_type(analysis_error_t* errors, symbol_t* sy)
+{
+    if (!sy) return;
+    if (sy->type) return;
+    syntax_component_t* sus = sy->declarer->parent;
+    sy->type = create_struct_type(errors, sus);
+    sy->ns = make_basic_namespace(sy->type->class == CTC_STRUCTURE ? NSC_STRUCT : NSC_UNION);
+}
+
+void assign_es_type(analysis_error_t* errors, symbol_t* sy)
 {
     if (!sy) return;
     if (sy->type) return;
@@ -795,6 +841,7 @@ void assign_es_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
     }
 
     sy->type = ct;
+    sy->ns = make_basic_namespace(NSC_ENUM);
 }
 
 static bool bts_counter_check(size_t* bts_counter, size_t* check)
@@ -815,7 +862,7 @@ this function's relatively simple despite its long length:
 
 */
 // syn can be any declaration, function definition, or a type name
-static c_type_t* process_declspecs(analysis_error_t* errors, symbol_table_t* st, syntax_component_t* syn)
+static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t* syn)
 {
     vector_t* declspecs;
     switch (syn->type)
@@ -1245,6 +1292,8 @@ static c_type_t* process_declspecs(analysis_error_t* errors, symbol_table_t* st,
         return ct;
     }
 
+    symbol_table_t* st = syntax_get_symbol_table(syn);
+
     // struct/union specifier
     
     zero_check;
@@ -1252,17 +1301,21 @@ static c_type_t* process_declspecs(analysis_error_t* errors, symbol_table_t* st,
     {
         // do a symbol table lookup to get the proper of symbol for the struct, whether
         // that be one created by this struct specifier or a specifier elsewhere
-        c_namespace_t ns = get_basic_namespace(sus->sus_sou == SOU_STRUCT ? NSC_STRUCT : NSC_UNION);
-        symbol_t* struct_sy = symbol_table_lookup(st, sus->sus_id, &ns);
-        if (!struct_sy)
+        if (sus->sus_id)
         {
-            ADD_ERROR(sus, "type '%s %s' is not defined in this context",
-                sus->sus_sou == SOU_STRUCT ? "struct" : "union", sus->sus_id->id);
-            return NULL;
+            c_namespace_t ns = get_basic_namespace(sus->sus_sou == SOU_STRUCT ? NSC_STRUCT : NSC_UNION);
+            symbol_t* struct_sy = symbol_table_lookup(st, sus->sus_id, &ns);
+            if (!struct_sy)
+            {
+                ADD_ERROR(sus, "type '%s %s' is not defined in this context",
+                    sus->sus_sou == SOU_STRUCT ? "struct" : "union", sus->sus_id->id);
+                return NULL;
+            }
+            assign_sus_type(errors, struct_sy);
+            type_delete(ct);
+            return type_copy(struct_sy->type);
         }
-        assign_sus_type(errors, st, struct_sy);
-        type_delete(ct);
-        return type_copy(struct_sy->type);
+        return create_struct_type(errors, sus);
     }
 
     // enum specifier
@@ -1276,7 +1329,7 @@ static c_type_t* process_declspecs(analysis_error_t* errors, symbol_table_t* st,
             ADD_ERROR(sus, "type 'enum %s' is not defined in this context", es->enums_id->id);
             return NULL;
         }
-        assign_es_type(errors, st, enum_sy);
+        assign_es_type(errors, enum_sy);
         type_delete(ct);
         return type_copy(enum_sy->type);
     }
@@ -1303,27 +1356,37 @@ static c_type_t* process_declspecs(analysis_error_t* errors, symbol_table_t* st,
     return NULL;
 }
 
-c_type_t* get_abstract_declarator_type(analysis_error_t* errors, symbol_table_t* st, syntax_component_t* decl, syntax_component_t* abdeclr)
+c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* specifying, syntax_component_t* declr)
 {
-    c_type_t* base = process_declspecs(errors, st, decl);
+    c_type_t* base = process_declspecs(errors, specifying);
 
-    if (!abdeclr)
+    if (!base)
+        return make_basic_type(CTC_ERROR);
+
+    if (!declr)
         return base;
 
-    if (!base) return make_basic_type(CTC_ERROR);
+    declr = syntax_get_full_declarator(declr);
 
-    // ensure we're on the highest abstract declarator
-    abdeclr = syntax_get_full_declarator(abdeclr);
+    if (!declr)
+        report_return_value(NULL);
 
-    while (abdeclr)
+    if (declr->type == SC_INIT_DECLARATOR)
+        declr = declr->ideclr_declarator;
+    else if (declr->type == SC_STRUCT_DECLARATOR)
+        declr = declr->sdeclr_declarator;
+
+    symbol_table_t* st = syntax_get_symbol_table(declr);
+
+    while (declr && declr->type != SC_IDENTIFIER)
     {
-        switch (abdeclr->type)
+        switch (declr->type)
         {
             case SC_ABSTRACT_DECLARATOR:
             {
-                if (abdeclr->abdeclr_pointers && abdeclr->abdeclr_pointers->size)
+                if (declr->abdeclr_pointers && declr->abdeclr_pointers->size)
                 {
-                    VECTOR_FOR(syntax_component_t*, s, abdeclr->abdeclr_pointers)
+                    VECTOR_FOR(syntax_component_t*, s, declr->declr_pointers)
                     {
                         c_type_t* ct = calloc(1, sizeof *ct);
                         ct->class = CTC_POINTER;
@@ -1332,7 +1395,7 @@ c_type_t* get_abstract_declarator_type(analysis_error_t* errors, symbol_table_t*
                         base = ct;
                     }
                 }
-                abdeclr = abdeclr->abdeclr_direct;
+                declr = declr->abdeclr_direct;
                 break;
             }
 
@@ -1340,11 +1403,11 @@ c_type_t* get_abstract_declarator_type(analysis_error_t* errors, symbol_table_t*
             {
                 c_type_t* ct = calloc(1, sizeof *ct);
                 ct->class = CTC_ARRAY;
-                ct->array.length_expression = abdeclr->abadeclr_length_expression;
-                ct->array.unspecified_size = abdeclr->abadeclr_unspecified_size;
+                ct->array.length_expression = declr->abadeclr_length_expression;
+                ct->array.unspecified_size = declr->abadeclr_unspecified_size;
                 ct->derived_from = base;
                 base = ct;
-                abdeclr = abdeclr->abadeclr_direct;
+                declr = declr->abadeclr_direct;
                 break;
             }
 
@@ -1353,15 +1416,15 @@ c_type_t* get_abstract_declarator_type(analysis_error_t* errors, symbol_table_t*
                 c_type_t* ct = calloc(1, sizeof *ct);
                 ct->class = CTC_FUNCTION;
 
-                if (abdeclr->abfdeclr_parameter_declarations)
+                if (declr->abfdeclr_parameter_declarations)
                 {
                     ct->function.param_types = vector_init();
                     // loop over every parameter declaration
-                    VECTOR_FOR(syntax_component_t*, s, abdeclr->abfdeclr_parameter_declarations)
+                    VECTOR_FOR(syntax_component_t*, s, declr->abfdeclr_parameter_declarations)
                     {
                         // if the parameter declarator is abstract, find the type of it
                         if (syntax_is_abstract_declarator_type(s->pdecl_declr->type))
-                            vector_add(ct->function.param_types, get_abstract_declarator_type(errors, st, s, s->pdecl_declr));
+                            vector_add(ct->function.param_types, create_type_with_errors(errors, s, s->pdecl_declr));
                         else
                         {
                             // otherwise, we make sure the identifier-type declarator is typed and we add that type to the vector
@@ -1371,63 +1434,24 @@ c_type_t* get_abstract_declarator_type(analysis_error_t* errors, symbol_table_t*
                             symbol_t* param_sy = symbol_table_get_syn_id(st, id);
                             if (!param_sy) report_return_value(NULL);
 
-                            assign_type(errors, st, param_sy);
+                            assign_type(errors, param_sy);
 
                             vector_add(ct->function.param_types, type_copy(param_sy->type));
                         }
                     }
                 }
-                ct->function.variadic = abdeclr->abfdeclr_ellipsis;
+                ct->function.variadic = declr->abfdeclr_ellipsis;
                 ct->derived_from = base;
                 base = ct;
-                abdeclr = abdeclr->abfdeclr_direct;
+                declr = declr->abfdeclr_direct;
                 break;
             }
-
-            default: report_return_value(NULL);
-        }
-    }
-
-    return base;
-}
-
-void assign_declr_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
-{
-    if (!sy) return;
-    if (sy->type) return;
-
-    syntax_component_t* id = sy->declarer;
-
-    syntax_component_t* full_declr = syntax_get_full_declarator(id);
-
-    // declaration or function definition, since they both have declaration specifiers.
-    syntax_component_t* decl = full_declr->parent;
-
-    c_type_t* base = process_declspecs(errors, st, decl);
-
-    if (!base)
-    {
-        sy->type = make_basic_type(CTC_ERROR);
-        return;
-    }
-
-    // move the init/struct declarators back in if needed
-    if (full_declr->type == SC_INIT_DECLARATOR)
-        full_declr = full_declr->ideclr_declarator;
-    else if (full_declr->type == SC_STRUCT_DECLARATOR)
-        full_declr = full_declr->sdeclr_declarator;
-
-    // loop down to the identifier collecting as many declarators as possible.
-    // assemble them into the type.
-    while (full_declr->type != SC_IDENTIFIER)
-    {
-        switch (full_declr->type)
-        {
+        
             case SC_DECLARATOR:
             {
-                if (full_declr->declr_pointers && full_declr->declr_pointers->size)
+                if (declr->declr_pointers && declr->declr_pointers->size)
                 {
-                    VECTOR_FOR(syntax_component_t*, s, full_declr->declr_pointers)
+                    VECTOR_FOR(syntax_component_t*, s, declr->declr_pointers)
                     {
                         c_type_t* ct = calloc(1, sizeof *ct);
                         ct->class = CTC_POINTER;
@@ -1436,61 +1460,71 @@ void assign_declr_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* s
                         base = ct;
                     }
                 }
-                full_declr = full_declr->declr_direct;
+                declr = declr->declr_direct;
                 break;
             }
+
             case SC_ARRAY_DECLARATOR:
             {
                 c_type_t* ct = calloc(1, sizeof *ct);
                 ct->class = CTC_ARRAY;
-                ct->array.length_expression = full_declr->adeclr_length_expression;
-                ct->array.unspecified_size = full_declr->adeclr_unspecified_size;
+                ct->array.length_expression = declr->adeclr_length_expression;
+                ct->array.unspecified_size = declr->adeclr_unspecified_size;
                 ct->derived_from = base;
                 base = ct;
-                full_declr = full_declr->adeclr_direct;
+                declr = declr->adeclr_direct;
                 break;
             }
+
             case SC_FUNCTION_DECLARATOR:
             {
                 c_type_t* ct = calloc(1, sizeof *ct);
                 ct->class = CTC_FUNCTION;
 
                 // only hand param types if the function uses new-style param declarations
-                if (full_declr->fdeclr_parameter_declarations)
+                if (declr->fdeclr_parameter_declarations)
                 {
                     ct->function.param_types = vector_init();
                     
                     // loop over every parameter declaration
-                    VECTOR_FOR(syntax_component_t*, s, full_declr->fdeclr_parameter_declarations)
+                    VECTOR_FOR(syntax_component_t*, s, declr->fdeclr_parameter_declarations)
                     {
                         // if the parameter declarator is abstract, find the type of it
                         if (!s->pdecl_declr || syntax_is_abstract_declarator_type(s->pdecl_declr->type))
-                            vector_add(ct->function.param_types, get_abstract_declarator_type(errors, st, s, s->pdecl_declr));
+                            vector_add(ct->function.param_types, create_type_with_errors(errors, s, s->pdecl_declr));
                         else
                         {
                             // otherwise, we make sure the identifier-type declarator is typed and we add that type to the vector
                             syntax_component_t* id = syntax_get_declarator_identifier(s->pdecl_declr);
-                            if (!id) report_return;
+                            if (!id) report_return_value(NULL);
 
                             symbol_t* param_sy = symbol_table_get_syn_id(st, id);
-                            if (!param_sy) report_return;
+                            if (!param_sy) report_return_value(NULL);
 
-                            assign_type(errors, st, param_sy);
+                            assign_type(errors, param_sy);
 
                             vector_add(ct->function.param_types, type_copy(param_sy->type));
                         }
                     }
                 }
                 ct->derived_from = base;
-                ct->function.variadic = full_declr->fdeclr_ellipsis;
+                ct->function.variadic = declr->fdeclr_ellipsis;
                 base = ct;
-                full_declr = full_declr->fdeclr_direct;
+                declr = declr->fdeclr_direct;
                 break;
             }
-            default: report_return;
+
+            default:
+                printf("%s\n", SYNTAX_COMPONENT_NAMES[declr->type]);
+                report_return_value(NULL);
         }
     }
-    sy->type = base;
+    return base;
+}
+
+c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr)
+{
+    return create_type_with_errors(NULL, specifying, declr);
 }
 
 /*
@@ -1509,7 +1543,7 @@ identifier created for
 
 */
 
-void assign_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
+void assign_type(analysis_error_t* errors, symbol_t* sy)
 {
     if (!sy) return;
     if (sy->type) return;
@@ -1521,31 +1555,39 @@ void assign_type(analysis_error_t* errors, symbol_table_t* st, symbol_t* sy)
     // struct/union tag identifier
     if (parent->type == SC_STRUCT_UNION_SPECIFIER)
     {
-        assign_sus_type(errors, st, sy);
+        assign_sus_type(errors, sy);
         return;
     }
 
     // enum tag identifier
     if (parent->type == SC_ENUM_SPECIFIER)
     {
-        assign_es_type(errors, st, sy);
+        assign_es_type(errors, sy);
         return;
     }
+
     // enumeration constant identifier
     if (parent->type == SC_ENUMERATOR)
     {
         sy->type = make_basic_type(CTC_INT);
+        sy->ns = make_basic_namespace(NSC_ORDINARY);
         return;
     }
+
     // label identifier
     if (parent->type == SC_LABELED_STATEMENT)
     {
         sy->type = make_basic_type(CTC_LABEL); // fake type for label to avoid null ptr issues
+        sy->ns = make_basic_namespace(NSC_LABEL);
         return;
     }
 
     // declarator identifier
-    assign_declr_type(errors, st, sy);
+    sy->ns = make_basic_namespace(NSC_ORDINARY);
+    syntax_component_t* specifying = syntax_get_full_declarator(id);
+    if (!specifying) report_return;
+    specifying = specifying->parent;
+    sy->type = create_type_with_errors(errors, specifying, id);
 }
 
 analysis_error_t* type(syntax_component_t* tlu)
@@ -1556,9 +1598,10 @@ analysis_error_t* type(syntax_component_t* tlu)
     {
         (void) k;
         for (; sylist; sylist = sylist->next)
-            assign_type(errors, tlu->tlu_st, sylist);
+            assign_type(errors, sylist);
     }
     SYMBOL_TABLE_FOR_ENTRIES_END
+
     analysis_error_t* start_errors = errors->next;
     error_delete(errors);
     return start_errors;

@@ -2,7 +2,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define SETUP_LINEARIZE \
     ir_insn_t* dummy = calloc(1, sizeof *dummy); \
@@ -98,6 +98,9 @@ void insn_operand_delete(ir_insn_operand_t* op)
         case IIOP_LABEL:
             free(op->label);
             break;
+        case IIOP_DESIGNATION:
+            designation_delete_all(op->designation.desig);
+            break;
         default:
             break;
     }
@@ -137,6 +140,10 @@ ir_insn_operand_t* insn_operand_copy(ir_insn_operand_t* op)
             else
                 n->string_literal.wide = strdup_wide(op->string_literal.wide);
             break;
+        case IIOP_DESIGNATION:
+            n->designation.base = op->designation.base;
+            n->designation.desig = designation_copy(op->designation.desig);
+            break;
     }
     return n;
 }
@@ -175,6 +182,12 @@ bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2)
             if (op1->string_literal.wide && wcscmp(op1->string_literal.wide, op2->string_literal.wide))
                 return false;
             return true;
+        case IIOP_DESIGNATION:
+            if (op1->designation.base != op2->designation.base)
+                return false;
+            if (!designation_equals(op1->designation.desig, op2->designation.desig))
+                return false;
+            return true;
         default:
             return false;
     }
@@ -195,7 +208,7 @@ void insn_operand_print(ir_insn_operand_t* op, int (*printer)(const char* fmt, .
             printer("%lld", op->immediate);
             break;
         case IIOP_IDENTIFIER:
-            printer("%s", op->id_symbol->declarer->id);
+            printer("%s", symbol_get_name(op->id_symbol));
             break;
         case IIOP_LABEL:
             printer("%s", op->label);
@@ -214,6 +227,10 @@ void insn_operand_print(ir_insn_operand_t* op, int (*printer)(const char* fmt, .
                 // TODO
                 printer("(wide string literal)");
             break;
+        case IIOP_DESIGNATION:
+            printer("%s", symbol_get_name(op->designation.base));
+            designation_print(op->designation.desig, printer);
+            break;
     }
 }
 
@@ -224,7 +241,6 @@ ir_insn_t* insn_copy(ir_insn_t* insn)
     n->type = insn->type;
     n->prev = insn->prev;
     n->next = insn->next;
-    n->ref = insn->ref;
     n->ctype = type_copy(insn->ctype);
     n->noops = insn->noops;
     n->function_label = insn->function_label;
@@ -312,10 +328,9 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
         printer("(null)");
         return;
     }
-    #define REF_IF_NEEDED if (insn->ref) printer("ref ");
     #define INDENT_START printer("    ")
     #define SPACE printer(" ")
-    #define WALRUS printer(" := ")
+    #define EQUALS printer(" = ")
     #define SEMICOLON_END printer(";")
     #define GENERIC_BINOP_CASE(t, operator) \
         case t: \
@@ -323,33 +338,44 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             type_humanized_print(insn->ctype, printer); \
             SPACE; \
             insn_operand_print(insn->ops[0], printer); \
-            WALRUS; \
+            EQUALS; \
             insn_operand_print(insn->ops[1], printer); \
             printer(operator); \
             insn_operand_print(insn->ops[2], printer); \
             SEMICOLON_END; \
             break;
+    #define GENERIC_UNOP_CASE(t, operator) \
+        case t: \
+            INDENT_START; \
+            type_humanized_print(insn->ctype, printer); \
+            SPACE; \
+            insn_operand_print(insn->ops[0], printer); \
+            EQUALS; \
+            printer(operator); \
+            insn_operand_print(insn->ops[1], printer); \
+            SEMICOLON_END; \
+            break;
+    #define ADDRESS_OF_IF_TYPE(ty) if (insn->type == ty) printer("&");
     switch (insn->type)
     {
         case II_LOAD:
+        case II_LOAD_ADDRESS:
             INDENT_START;
-            REF_IF_NEEDED;
             type_humanized_print(insn->ctype, printer);
             SPACE;
             insn_operand_print(insn->ops[0], printer);
-            WALRUS;
+            EQUALS;
+            ADDRESS_OF_IF_TYPE(II_LOAD_ADDRESS);
             insn_operand_print(insn->ops[1], printer);
             SEMICOLON_END;
             break;
         case II_STORE_ADDRESS:
             INDENT_START;
-            type_humanized_print(insn->ctype, printer);
-            SPACE;
+            if (insn->ops[0]->type == IIOP_VIRTUAL_REGISTER || insn->ops[0]->type == IIOP_PHYSICAL_REGISTER)
+                printer("*");
             insn_operand_print(insn->ops[0], printer);
-            WALRUS;
+            EQUALS;
             insn_operand_print(insn->ops[1], printer);
-            printer(" = ");
-            insn_operand_print(insn->ops[2], printer);
             SEMICOLON_END;
             break;
         case II_LOCAL_LABEL:
@@ -357,8 +383,6 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             printer(":");
             break;
         case II_FUNCTION_LABEL:
-            type_humanized_print(insn->ctype, printer);
-            SPACE;
             insn_operand_print(insn->ops[0], printer);
             printer(":");
             break;
@@ -370,22 +394,51 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             break;
         GENERIC_BINOP_CASE(II_ADDITION, " + ")
         GENERIC_BINOP_CASE(II_SUBTRACTION, " - ")
+        GENERIC_BINOP_CASE(II_MULTIPLICATION, " * ")
+        GENERIC_BINOP_CASE(II_DIVISION, " / ")
+        GENERIC_BINOP_CASE(II_EQUALITY, " == ")
+        GENERIC_BINOP_CASE(II_MODULAR, " %% ")
+        GENERIC_BINOP_CASE(II_LESS, " < ")
         case II_SUBSCRIPT:
+        case II_SUBSCRIPT_ADDRESS:
             INDENT_START;
-            REF_IF_NEEDED;
             type_humanized_print(insn->ctype, printer);
             SPACE;
             insn_operand_print(insn->ops[0], printer);
-            WALRUS;
+            EQUALS;
+            ADDRESS_OF_IF_TYPE(II_SUBSCRIPT_ADDRESS);
             insn_operand_print(insn->ops[1], printer);
             printer("[");
             insn_operand_print(insn->ops[2], printer);
             printer("]");
             SEMICOLON_END;
             break;
+        case II_MEMBER:
+        case II_MEMBER_ADDRESS:
+            INDENT_START;
+            type_humanized_print(insn->ctype, printer);
+            SPACE;
+            insn_operand_print(insn->ops[0], printer);
+            EQUALS;
+            ADDRESS_OF_IF_TYPE(II_MEMBER_ADDRESS);
+            insn_operand_print(insn->ops[1], printer);
+            printer("->");
+            insn_operand_print(insn->ops[2], printer);
+            SEMICOLON_END;
+            break;
+        GENERIC_UNOP_CASE(II_DEREFERENCE, "*")
+        GENERIC_UNOP_CASE(II_NOT, "!")
         case II_JUMP_IF_ZERO:
             INDENT_START;
             printer("jz by ");
+            insn_operand_print(insn->ops[0], printer);
+            printer(" to ");
+            insn_operand_print(insn->ops[1], printer);
+            SEMICOLON_END;
+            break;
+        case II_JUMP_NOT_ZERO:
+            INDENT_START;
+            printer("jnz by ");
             insn_operand_print(insn->ops[0], printer);
             printer(" to ");
             insn_operand_print(insn->ops[1], printer);
@@ -402,7 +455,7 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             type_humanized_print(insn->ctype, printer);
             SPACE;
             insn_operand_print(insn->ops[0], printer);
-            WALRUS;
+            EQUALS;
             insn_operand_print(insn->ops[1], printer);
             printer("(");
             for (size_t i = 2; i < insn->noops; ++i)
@@ -516,6 +569,15 @@ ir_insn_operand_t* make_identifier_insn_operand(symbol_t* sy)
     return op;
 }
 
+ir_insn_operand_t* make_designation_insn_operand(symbol_t* base, designation_t* desig)
+{
+    ir_insn_operand_t* op = calloc(1, sizeof *op);
+    op->type = IIOP_DESIGNATION;
+    op->designation.base = base;
+    op->designation.desig = desig;
+    return op;
+}
+
 ir_insn_t* copy_code_impl(syntax_component_t* dest, syntax_component_t* src, ir_insn_t* start)
 {
     if (!src || !dest || !start)
@@ -620,28 +682,16 @@ ir_insn_t* make_function_label_insn(syntax_traverser_t* trav, syntax_component_t
 
 /*
 
-int main(void)
-{
-    int x[3];
-    x[0] = 5;
-}
-
-int main(void):
-    array of int _1 := x;
-    int _2 := 0;
-    ref int _3 := _1[_2];
-
-in the following conditions, the syn x must reference:
+in the following conditions, the syn x must acquire an address:
   x in &x
   x in x++
   x in x--
   x in x.m
-  x in x->m
   x in x = y
-  x in x += y (etc.)
+  x in x += y (et. al. compound assignment operators)
 
 */
-bool must_reference(syntax_component_t* syn)
+bool expression_needs_address(syntax_component_t* syn)
 {
     if (!syn) return false;
     if (!syn->parent) return false;
@@ -652,7 +702,6 @@ bool must_reference(syntax_component_t* syn)
         type == SC_POSTFIX_INCREMENT_EXPRESSION ||
         type == SC_POSTFIX_DECREMENT_EXPRESSION ||
         (type == SC_MEMBER_EXPRESSION && syn->parent->memexpr_expression == syn) ||
-        (type == SC_DEREFERENCE_MEMBER_EXPRESSION && syn->parent->memexpr_expression == syn) ||
         (syntax_is_assignment_expression(type) && syn->parent->bexpr_lhs == syn) ||
         (type == SC_INIT_DECLARATOR && syn->parent->ideclr_declarator == syn);
 }
@@ -680,9 +729,14 @@ void linearize_function_definition_before(syntax_traverser_t* trav, syntax_compo
 void linearize_function_definition_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    ADD_CODE_EXPR(LINEARIZING_TRAVERSER->function_label);
     LINEARIZING_TRAVERSER->function_label = NULL;
     if (!syn->fdef_declarator) report_return;
+    COPY_CODE(syn->fdef_declarator);
+    syntax_component_t* id = syntax_get_declarator_identifier(syn->fdef_declarator);
+    if (!id) report_return;
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+    if (!sy) report_return;
+    ADD_CODE(make_1op, II_FUNCTION_LABEL, NULL, make_identifier_insn_operand(sy));
     COPY_CODE(syn->fdef_body);
     if (!code || code->type != II_LEAVE)
         ADD_CODE(make_basic_insn, II_LEAVE, 0);
@@ -751,14 +805,33 @@ void linearize_string_literal_after(syntax_traverser_t* trav, syntax_component_t
     FINALIZE_LINEARIZE;
 }
 
+// identifiers will:
+//  - do nothing if they are part of or are a declarator
+//  - do nothing if they are the right hand side of a member or deref. member expression 
+//  - load the value of the object they designate if it is not used in an lvalue context
+//  - load the address of the object they designate if it is used in an lvalue context
 void linearize_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    if (syn->parent &&
+        (syn->parent->type == SC_MEMBER_EXPRESSION || syn->parent->type == SC_DEREFERENCE_MEMBER_EXPRESSION) &&
+        syn->parent->memexpr_id == syn)
+        return;
     SETUP_LINEARIZE;
-    syn->result_register = MAKE_REGISTER;
-    symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, syntax_get_namespace(syn));
+    c_namespace_t* ns = syntax_get_namespace(syn);
+    symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
+    namespace_delete(ns);
     if (!sy) report_return;
-    ADD_CODE(make_2op, II_LOAD, syn->ctype, make_vreg_insn_operand(syn->result_register, true), make_identifier_insn_operand(sy));
-    ENSURE_REFERENCE;
+    if (sy->declarer != syn)
+    {
+        syn->result_register = MAKE_REGISTER;
+        c_type_t* ptr = calloc(1, sizeof *ptr);
+        ptr->class = CTC_POINTER;
+        ptr->derived_from = type_copy(syn->ctype);
+        ADD_CODE(make_2op, expression_needs_address(syn) ? II_LOAD_ADDRESS : II_LOAD,
+            expression_needs_address(syn) ? ptr : syn->ctype,
+            make_vreg_insn_operand(syn->result_register, true), make_identifier_insn_operand(sy));
+        type_delete(ptr);
+    }
     FINALIZE_LINEARIZE;
 }
 
@@ -771,19 +844,92 @@ void linearize_array_declarator_after(syntax_traverser_t* trav, syntax_component
     FINALIZE_LINEARIZE;
 }
 
+void linearize_function_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->fdeclr_direct);
+    VECTOR_FOR(syntax_component_t*, pdecl, syn->fdeclr_parameter_declarations)
+    {
+        if (!pdecl->pdecl_declr) continue;
+        COPY_CODE(pdecl->pdecl_declr);
+    }
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->declr_direct);
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    syntax_component_t* idel = syn;
+    for (; idel && idel->type != SC_INIT_DECLARATOR && idel->type != SC_COMPOUND_LITERAL; idel = idel->parent);
+    if (!idel) report_return;
+    symbol_t* identifying = NULL;
+    if (idel->type == SC_INIT_DECLARATOR)
+        identifying = symbol_table_get_syn_id(SYMBOL_TABLE, syntax_get_declarator_identifier(idel));
+    else if (idel->type == SC_COMPOUND_LITERAL)
+        identifying = symbol_table_get_syn_id(SYMBOL_TABLE, idel);
+    if (!identifying) report_return;
+    VECTOR_FOR(syntax_component_t*, d, syn->inlist_designations)
+    {
+        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
+        COPY_CODE(init);
+        // initializer lists don't get a store instruction
+        if (init->type == SC_INITIALIZER_LIST)
+            continue;
+        ADD_CODE(make_2op, II_STORE_ADDRESS, NULL,
+            make_designation_insn_operand(identifying, get_full_designation(d)),
+            make_vreg_insn_operand(init->result_register, false));
+    }
+    FINALIZE_LINEARIZE;
+}
+
 void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
+    syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
+    if (!id) report_return;
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+    if (!sy) report_return;
+    // no init declarator code gets loaded if the identifier it creates has static storage duration
+    if (symbol_get_storage_duration(sy) == SD_STATIC)
+        return;
     if (syn->ideclr_initializer)
     {
         syn->result_register = MAKE_REGISTER;
         COPY_CODE(syn->ideclr_initializer);
-        COPY_CODE(syn->ideclr_declarator);
-        ADD_CODE(make_3op, II_STORE_ADDRESS, syn->ideclr_declarator->ctype,
-            make_vreg_insn_operand(syn->result_register, true),
-            make_vreg_insn_operand(syn->ideclr_declarator->result_register, false),
-            make_vreg_insn_operand(syn->ideclr_initializer->result_register, false));
+        if (syn->ideclr_initializer->type != SC_INITIALIZER_LIST)
+        {
+            ADD_CODE(make_2op, II_STORE_ADDRESS, sy->type,
+                make_identifier_insn_operand(sy),
+                make_vreg_insn_operand(syn->ideclr_initializer->result_register, false));
+        }
     }
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+    if (!sy) report_return;
+    // no compound literal code gets loaded if the identifier it creates has static storage duration
+    if (symbol_get_storage_duration(sy) == SD_STATIC)
+        return;
+    syn->result_register = MAKE_REGISTER;
+    COPY_CODE(syn->cl_inlist);
+    c_type_t* ptr = calloc(1, sizeof *ptr);
+    ptr->class = CTC_POINTER;
+    ptr->derived_from = type_copy(syn->ctype);
+    ADD_CODE(make_2op, expression_needs_address(syn) ? II_LOAD_ADDRESS : II_LOAD,
+        expression_needs_address(syn) ? ptr : syn->ctype,
+        make_vreg_insn_operand(syn->result_register, true),
+        make_identifier_insn_operand(sy));
     FINALIZE_LINEARIZE;
 }
 
@@ -792,11 +938,10 @@ void linearize_assignment_expression_after(syntax_traverser_t* trav, syntax_comp
     SETUP_LINEARIZE;
     COPY_CODE(syn->bexpr_rhs);
     COPY_CODE(syn->bexpr_lhs);
-    syn->result_register = MAKE_REGISTER;
-    ADD_CODE(make_3op, II_STORE_ADDRESS, syn->ctype,
-        make_vreg_insn_operand(syn->result_register, true),
+    syn->result_register = syn->bexpr_rhs->result_register;
+    ADD_CODE(make_2op, II_STORE_ADDRESS, syn->ctype,
         make_vreg_insn_operand(syn->bexpr_lhs->result_register, false),
-        make_vreg_insn_operand(syn->bexpr_rhs->result_register, false));
+        make_vreg_insn_operand(syn->bexpr_rhs->result_register, true));
     FINALIZE_LINEARIZE;
 }
 
@@ -814,6 +959,11 @@ static ir_insn_type_t binary_expression_type_map(syntax_component_type_t type)
     {
         case SC_ADDITION_EXPRESSION: return II_ADDITION;
         case SC_SUBTRACTION_EXPRESSION: return II_SUBTRACTION;
+        case SC_MULTIPLICATION_EXPRESSION: return II_MULTIPLICATION;
+        case SC_DIVISION_EXPRESSION: return II_DIVISION;
+        case SC_EQUALITY_EXPRESSION: return II_EQUALITY;
+        case SC_LESS_EXPRESSION: return II_LESS;
+        case SC_MODULAR_EXPRESSION: return II_MODULAR;
         default:
             report_return_value(II_UNKNOWN);
     }
@@ -840,25 +990,38 @@ void linearize_subscript_expression_after(syntax_traverser_t* trav, syntax_compo
     COPY_CODE(lhs);
     COPY_CODE(rhs);
     syn->result_register = MAKE_REGISTER;
-    locator_t* loc = calloc(1, sizeof *loc);
-    loc->type = L_ARRAY;
-    if (lhs->ctype->class == CTC_ARRAY)
-    {
-        loc->array.scale = type_size(lhs->ctype->derived_from);
-        loc->array.offset_reg = rhs->result_register;
-        loc->array.base_reg = lhs->result_register;
-    }
-    else
-    {
-        loc->array.scale = type_size(rhs->ctype->derived_from);
-        loc->array.offset_reg = lhs->result_register;
-        loc->array.base_reg = rhs->result_register;
-    }
-    ADD_CODE(make_3op, II_SUBSCRIPT, syn->ctype,
+    c_type_t* ptr = calloc(1, sizeof *ptr);
+    ptr->class = CTC_POINTER;
+    ptr->derived_from = type_copy(syn->ctype);
+    ADD_CODE(make_3op, expression_needs_address(syn) ? II_SUBSCRIPT_ADDRESS : II_SUBSCRIPT,
+        expression_needs_address(syn) ? ptr : syn->ctype,
         make_vreg_insn_operand(syn->result_register, true),
         make_vreg_insn_operand(lhs->result_register, false),
         make_vreg_insn_operand(rhs->result_register, false));
-    ENSURE_REFERENCE;
+    type_delete(ptr);
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_member_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    syntax_component_t* lhs = syn->memexpr_expression;
+    syntax_component_t* rhs = syn->memexpr_id;
+    COPY_CODE(lhs);
+    syn->result_register = MAKE_REGISTER;
+    c_namespace_t* ns = syntax_get_namespace(rhs);
+    symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, rhs, ns);
+    namespace_delete(ns);
+    if (!sy) report_return;
+    c_type_t* ptr = calloc(1, sizeof *ptr);
+    ptr->class = CTC_POINTER;
+    ptr->derived_from = type_copy(syn->ctype);
+    ADD_CODE(make_3op, expression_needs_address(syn) ? II_MEMBER_ADDRESS : II_MEMBER,
+        expression_needs_address(syn) ? ptr : syn->ctype,
+        make_vreg_insn_operand(syn->result_register, true),
+        make_vreg_insn_operand(lhs->result_register, false),
+        make_identifier_insn_operand(sy));
+        type_delete(ptr);
     FINALIZE_LINEARIZE;
 }
 
@@ -870,7 +1033,9 @@ void linearize_if_statement_after(syntax_traverser_t* trav, syntax_component_t* 
     // jump if zero to else
     char* else_label = make_local_label(trav);
     char* end_label = make_local_label(trav);
-    ADD_CODE(make_2op, II_JUMP_IF_ZERO, syn->ifstmt_condition->ctype, make_vreg_insn_operand(syn->ifstmt_condition->result_register, false), make_label_insn_operand(else_label));
+    ADD_CODE(make_2op, II_JUMP_IF_ZERO, syn->ifstmt_condition->ctype,
+        make_vreg_insn_operand(syn->ifstmt_condition->result_register, false),
+        make_label_insn_operand(else_label));
     // if body
     COPY_CODE(syn->ifstmt_body);
     if (syn->ifstmt_else)
@@ -892,6 +1057,123 @@ void linearize_if_statement_after(syntax_traverser_t* trav, syntax_component_t* 
     FINALIZE_LINEARIZE;
 }
 
+/*
+
+for (init; condition; post)
+    body
+
+becomes:
+
+    init
+    jmp condition label
+body label:
+    body
+    post
+condition label:
+    condition
+    jump not zero to body label
+
+*/
+void linearize_for_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->forstmt_init);
+    char* body_label = make_local_label(trav);
+    char* cond_label = make_local_label(trav);
+    ADD_CODE(make_1op, II_JUMP, NULL, make_label_insn_operand(cond_label));
+    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(body_label));
+    COPY_CODE(syn->forstmt_body);
+    COPY_CODE(syn->forstmt_post);
+    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(cond_label));
+    COPY_CODE(syn->forstmt_condition);
+    ADD_CODE(make_2op, II_JUMP_NOT_ZERO, syn->forstmt_condition->ctype,
+        make_vreg_insn_operand(syn->forstmt_condition->result_register, false),
+        make_label_insn_operand(body_label));
+    free(body_label);
+    free(cond_label);
+    FINALIZE_LINEARIZE;
+}
+
+/*
+
+while (condition)
+    body
+
+becomes:
+
+    jmp condition label
+body label:
+    body
+condition label:
+    condition
+    jump not zero to body label
+
+*/
+void linearize_while_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    char* body_label = make_local_label(trav);
+    char* cond_label = make_local_label(trav);
+    ADD_CODE(make_1op, II_JUMP, NULL, make_label_insn_operand(cond_label));
+    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(body_label));
+    COPY_CODE(syn->whstmt_body);
+    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(cond_label));
+    COPY_CODE(syn->whstmt_condition);
+    ADD_CODE(make_2op, II_JUMP_NOT_ZERO, syn->whstmt_condition->ctype,
+        make_vreg_insn_operand(syn->whstmt_condition->result_register, false),
+        make_label_insn_operand(body_label));
+    free(body_label);
+    free(cond_label);
+    FINALIZE_LINEARIZE;
+}
+
+/*
+
+do
+    body
+while (condition);
+
+becomes:
+
+body label:
+    body
+    condition
+    jump not zero to body label
+
+*/
+void linearize_do_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    char* body_label = make_local_label(trav);
+    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(body_label));
+    COPY_CODE(syn->dostmt_body);
+    COPY_CODE(syn->dostmt_condition);
+    ADD_CODE(make_2op, II_JUMP_NOT_ZERO, syn->dostmt_condition->ctype,
+        make_vreg_insn_operand(syn->dostmt_condition->result_register, false),
+        make_label_insn_operand(body_label));
+    free(body_label);
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_prefix_increment_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->uexpr_operand);
+    regid_t valuereg = MAKE_REGISTER;
+    syn->result_register = MAKE_REGISTER;
+    ADD_CODE(make_2op, II_DEREFERENCE, syn->ctype,
+        make_vreg_insn_operand(valuereg, true),
+        make_vreg_insn_operand(syn->uexpr_operand->result_register, false));
+    ADD_CODE(make_3op, II_ADDITION, syn->ctype,
+        make_vreg_insn_operand(syn->result_register, true),
+        make_vreg_insn_operand(valuereg, false),
+        make_immediate_insn_operand(1));
+    ADD_CODE(make_2op, II_STORE_ADDRESS, syn->ctype,
+        make_vreg_insn_operand(syn->uexpr_operand->result_register, false),
+        make_vreg_insn_operand(syn->result_register, false));
+    FINALIZE_LINEARIZE;
+}
+
 void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
@@ -908,6 +1190,33 @@ void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_c
     COPY_CODE(syn->fcallexpr_expression);
     ADD_CODE(make_function_call_insn, syn->ctype, args, noargs + 2);
     FINALIZE_LINEARIZE;
+}
+
+static ir_insn_type_t unary_expression_type_map(syntax_component_type_t type)
+{
+    switch (type)
+    {
+        case SC_NOT_EXPRESSION: return II_NOT;
+        default:
+            report_return_value(II_UNKNOWN);
+    }
+}
+
+void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->uexpr_operand);
+    syn->result_register = MAKE_REGISTER;
+    ADD_CODE(make_2op, unary_expression_type_map(syn->type), syn->ctype,
+        make_vreg_insn_operand(syn->result_register, true), 
+        make_vreg_insn_operand(syn->uexpr_operand->result_register, false));
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_no_action_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    // does nothing. for syntax elements which need not be linearized
+    // (assuredly, that's why the warning below is set up)
 }
 
 void linearize_default_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -930,15 +1239,33 @@ ir_insn_t* linearize(syntax_component_t* tlu)
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
     trav->after[SC_STRING_LITERAL] = linearize_string_literal_after;
     trav->after[SC_IDENTIFIER] = linearize_identifier_after;
+    trav->after[SC_DECLARATOR] = linearize_declarator_after;
     trav->after[SC_INIT_DECLARATOR] = linearize_init_declarator_after;
     trav->after[SC_ARRAY_DECLARATOR] = linearize_array_declarator_after;
+    trav->after[SC_FUNCTION_DECLARATOR] = linearize_function_declarator_after;
     trav->after[SC_DECLARATION] = linearize_declaration_after;
     trav->after[SC_ADDITION_EXPRESSION] = linearize_binary_expression_after;
     trav->after[SC_SUBTRACTION_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_MULTIPLICATION_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_DIVISION_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_MODULAR_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_LESS_EXPRESSION] = linearize_binary_expression_after;
+    trav->after[SC_EQUALITY_EXPRESSION] = linearize_binary_expression_after;
     trav->after[SC_ASSIGNMENT_EXPRESSION] = linearize_assignment_expression_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = linearize_subscript_expression_after;
     trav->after[SC_IF_STATEMENT] = linearize_if_statement_after;
+    trav->after[SC_FOR_STATEMENT] = linearize_for_statement_after;
+    trav->after[SC_WHILE_STATEMENT] = linearize_while_statement_after;
+    trav->after[SC_DO_STATEMENT] = linearize_do_statement_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = linearize_function_call_expression_after;
+    trav->after[SC_MEMBER_EXPRESSION] = linearize_member_expression_after;
+    trav->after[SC_INITIALIZER_LIST] = linearize_initializer_list_after;
+    trav->after[SC_COMPOUND_LITERAL] = linearize_compound_literal_after;
+    trav->after[SC_PREFIX_INCREMENT_EXPRESSION] = linearize_prefix_increment_expression_after;
+    trav->after[SC_NOT_EXPRESSION] = linearize_unary_expression_after;
+
+    trav->after[SC_POINTER] = linearize_no_action_after;
+    trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

@@ -1,6 +1,6 @@
 #include <stdlib.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
@@ -384,11 +384,11 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
             break;
         }
 
-        // SC_INITIALIZER_LIST_EXPRESSION - inlexpr
-        case SC_INITIALIZER_LIST_EXPRESSION:
+        // SC_COMPOUND_LITERAL - inlexpr
+        case SC_COMPOUND_LITERAL:
         {
-            traverse_syntax(trav, syn->inlexpr_type_name);
-            traverse_syntax(trav, syn->inlexpr_inlist);
+            traverse_syntax(trav, syn->cl_type_name);
+            traverse_syntax(trav, syn->cl_inlist);
             break;
         }
 

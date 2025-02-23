@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 buffer_t* buffer_init(void)
 {

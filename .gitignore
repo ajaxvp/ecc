@@ -67,7 +67,7 @@ build
 link
 
 # Build executable
-cc
+ecc
 
 # Testing file
 help.c

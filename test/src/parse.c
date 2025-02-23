@@ -3,7 +3,7 @@
 
 #include "test.h"
 #include "testutils.h"
-#include "../../src/cc.h"
+#include "../../src/ecc.h"
 
 static bool tparse(char* tlu_str)
 {

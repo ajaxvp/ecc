@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
@@ -449,42 +449,7 @@ x86_operand_t* ir_operand_to_operand(c_type_t* ctype, ir_insn_operand_t* iop, x8
     switch (iop->type)
     {
         case IIOP_IDENTIFIER:
-        {
-            symbol_t* sy = iop->id_symbol;
-            locator_t* loc = NULL;
-            if (!(loc = sy->loc))
-            {
-                storage_duration_t dur = symbol_get_storage_duration(sy);
-                if (dur == SD_STATIC)
-                {
-                    loc = calloc(1, sizeof *loc);
-                    loc->type = L_LABEL;
-                    if (scope_is_block(symbol_get_scope(sy)))
-                    {
-                        symbol_t* sylist = symbol_table_get_all(state->st, sy->declarer->id);
-                        long long idx = 0;
-                        for (; sylist && sylist->declarer != sy->declarer; sylist = sylist->next, ++idx);
-                        if (!sylist) report_return_value(NULL);
-                        size_t length = strlen(sy->declarer->id) + MAX_STRINGIFIED_INTEGER_LENGTH + 2;
-                        char* label = malloc(length);
-                        snprintf(label, length, "%s.%lld", sy->declarer->id, idx);
-                        loc->label = label;
-                    }
-                    else
-                        loc->label = strdup(sy->declarer->id);
-                }
-                else if (dur == SD_AUTOMATIC)
-                {
-                    loc = calloc(1, sizeof *loc);
-                    loc->type = L_OFFSET;
-                    loc->stack_offset = state->active_stackalloc -= type_size(ctype);
-                }
-                else
-                    report_return_value(NULL);
-                sy->loc = loc;
-            }
-            return locator_to_operand(loc);
-        }
+            return locator_to_operand(iop->id_symbol->loc);
         case IIOP_IMMEDIATE:
             return make_operand_immediate(iop->immediate);
         case IIOP_FLOAT:
@@ -560,7 +525,7 @@ x86_insn_t* x86_generate_load(ir_insn_t* insn, x86_gen_state_t* state)
 {
     bool loadaddr = (insn->ctype->class == CTC_POINTER && insn->ctype->derived_from->class == CTC_FUNCTION) ||
         insn->ctype->class == CTC_ARRAY ||
-        insn->ref;
+        insn->type == II_LOAD_ADDRESS;
     x86_insn_t* ld = make_basic_x86_insn(loadaddr ? X86I_LEA : X86I_MOV);
     ld->size = loadaddr ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
     ld->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
@@ -577,7 +542,7 @@ x86_insn_t* x86_generate_function_call(ir_insn_t* insn, x86_gen_state_t* state)
             cl->op1 = make_operand_ptr_register(insn->ops[1]->preg);
             break;
         case IIOP_IDENTIFIER:
-            cl->op1 = make_operand_label(insn->ops[1]->id_symbol->declarer->id);
+            cl->op1 = make_operand_label(symbol_get_name(insn->ops[1]->id_symbol));
             break;
         default: report_return_value(NULL);
     }
@@ -606,8 +571,8 @@ x86_insn_t* x86_generate_return(ir_insn_t* insn, x86_gen_state_t* state)
 
 x86_insn_t* x86_generate_subscript(ir_insn_t* insn, x86_gen_state_t* state)
 {
-    x86_insn_t* ld = make_basic_x86_insn(insn->ref ? X86I_LEA : X86I_MOV);
-    ld->size = insn->ref ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
+    x86_insn_t* ld = make_basic_x86_insn(insn->type == II_SUBSCRIPT_ADDRESS ? X86I_LEA : X86I_MOV);
+    ld->size = insn->type == II_SUBSCRIPT_ADDRESS ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
     ld->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
     if (insn->ops[1]->type != IIOP_PHYSICAL_REGISTER || insn->ops[2]->type != IIOP_PHYSICAL_REGISTER)
         report_return_value(NULL);
@@ -740,6 +705,43 @@ x86_insn_t* x86_generate_jump_if_zero(ir_insn_t* insn, x86_gen_state_t* state)
     jmp->op1 = make_operand_label(insn->ops[1]->label);
     cmp->next = jmp;
     return cmp;
+}
+
+x86_insn_t* x86_generate_ldecl(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    ir_insn_operand_t* op = insn->ops[0];
+    if (!op || op->type != IIOP_IDENTIFIER) report_return_value(NULL);
+    symbol_t* sy = op->id_symbol;
+    storage_duration_t dur = symbol_get_storage_duration(sy);
+    locator_t* loc = calloc(1, sizeof *loc);
+    if (dur == SD_STATIC)
+    {
+        loc = calloc(1, sizeof *loc);
+        loc->type = L_LABEL;
+        if (scope_is_block(symbol_get_scope(sy)))
+        {
+            symbol_t* sylist = symbol_table_get_all(state->st, symbol_get_name(sy));
+            long long idx = 0;
+            for (; sylist && sylist->declarer != sy->declarer; sylist = sylist->next, ++idx);
+            if (!sylist) report_return_value(NULL);
+            size_t length = strlen(symbol_get_name(sy)) + MAX_STRINGIFIED_INTEGER_LENGTH + 2;
+            char* label = malloc(length);
+            snprintf(label, length, "%s.%lld", symbol_get_name(sy), idx);
+            loc->label = label;
+        }
+        else
+            loc->label = strdup(symbol_get_name(sy));
+    }
+    else if (dur == SD_AUTOMATIC)
+    {
+        loc = calloc(1, sizeof *loc);
+        loc->type = L_OFFSET;
+        loc->stack_offset = state->active_stackalloc -= type_size(sy->type);
+    }
+    else
+        report_return_value(NULL);
+    sy->loc = loc;
+    return NULL;
 }
 
 x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)

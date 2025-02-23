@@ -6,7 +6,7 @@
 #include <ctype.h>
 #include <errno.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type, int type)
 {
@@ -105,7 +105,7 @@ bool syntax_is_expression_type(syntax_component_type_t type)
         type == SC_NOT_EXPRESSION ||
         type == SC_SIZEOF_EXPRESSION ||
         type == SC_SIZEOF_TYPE_EXPRESSION ||
-        type == SC_INITIALIZER_LIST_EXPRESSION ||
+        type == SC_COMPOUND_LITERAL ||
         type == SC_POSTFIX_INCREMENT_EXPRESSION ||
         type == SC_POSTFIX_DECREMENT_EXPRESSION ||
         type == SC_DEREFERENCE_MEMBER_EXPRESSION ||
@@ -220,10 +220,22 @@ syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
     return syn;
 }
 
+symbol_table_t* syntax_get_symbol_table(syntax_component_t* syn)
+{
+    syntax_component_t* tlu = syntax_get_translation_unit(syn);
+    if (!tlu) return NULL;
+    return tlu->tlu_st;
+}
+
+syntax_component_t* syntax_get_enclosing(syntax_component_t* syn, syntax_component_type_t enclosing)
+{
+    for (; syn && syn->type != enclosing; syn = syn->parent);
+    return syn;
+}
+
 syntax_component_t* syntax_get_function_definition(syntax_component_t* syn)
 {
-    for (; syn && syn->type != SC_FUNCTION_DEFINITION; syn = syn->parent);
-    return syn;
+    return syntax_get_enclosing(syn, SC_FUNCTION_DEFINITION);
 }
 
 bool syntax_is_assignment_expression(syntax_component_type_t type)
@@ -244,47 +256,146 @@ bool syntax_is_assignment_expression(syntax_component_type_t type)
 void namespace_delete(c_namespace_t* ns)
 {
     if (!ns) return;
-    if (ns->struct_union_type) free(ns->struct_union_type);
+    if (ns->struct_union_type) type_delete(ns->struct_union_type);
     free(ns);
 }
 
+bool namespace_equals(c_namespace_t* ns1, c_namespace_t* ns2)
+{
+    if (!ns1 && !ns2) return true;
+    if (!ns1 || !ns2) return false;
+    if (ns1->class != ns2->class) return false;
+    if (!type_is_compatible(ns1->struct_union_type, ns2->struct_union_type)) return false;
+    return true;
+}
+
+void namespace_print(c_namespace_t* ns, int (*printer)(const char* fmt, ...))
+{
+    if (!ns)
+    {
+        printer("(null)");
+        return;
+    }
+    printer("namespace { class: %s", C_NAMESPACE_CLASS_NAMES[ns->class]);
+    if (ns->struct_union_type)
+    {
+        printer(", struct/union type: ");
+        type_humanized_print(ns->struct_union_type, printer);
+    }
+    printer(" }");
+}
+
+// gets the type that contains the object being designated using a base, tracing type
+// e.g., designation .x[0] will get x's type (an array type)
+// e.g., designation .y.a will get y's type (a struct/union type)
+// { .x = { .a = 3 } } find .x.a aggregate type
+static c_type_t* get_type_by_designation(syntax_component_t* desig, syntax_component_t* term, bool parent)
+{
+    // get parent components (initializer list and whatever is containing that initializer list)
+    syntax_component_t* inlist = desig->parent;
+    if (!inlist || inlist->type != SC_INITIALIZER_LIST) report_return_value(NULL);
+    syntax_component_t* enclosing = inlist->parent;
+    if (!enclosing) report_return_value(NULL);
+
+    // pass thru additional initializer list levels
+
+    // find the starting type dependent on the enclosing type
+    c_type_t* trace = NULL;
+    // if the enclosing syntax element is a compound literal (like: (struct point) { .x = 3 }), get the parenthesized type
+    if (enclosing->type == SC_COMPOUND_LITERAL)
+        trace = create_type(enclosing->cl_type_name, enclosing->cl_type_name->tn_declarator);
+    // if the enclosing syntax element is an init declarator (like: p = { .x = 3 }), get the type by its symbol
+    else if (enclosing->type == SC_INIT_DECLARATOR)
+    {
+        syntax_component_t* ideclr_id = syntax_get_declarator_identifier(enclosing->ideclr_declarator);
+        if (!ideclr_id) report_return_value(NULL);
+        symbol_t* ideclr_sy = symbol_table_get_syn_id(syntax_get_symbol_table(ideclr_id), ideclr_id);
+        if (!ideclr_sy) return NULL;
+        trace = type_copy(ideclr_sy->type);
+    }
+    // if the enclosing syntax element is an initializer list, find the aggregate type of its designation
+    else if (enclosing->type == SC_INITIALIZER_LIST)
+    {
+        VECTOR_FOR(syntax_component_t*, d, enclosing->inlist_designations)
+        {
+            syntax_component_t* hinlist = vector_get(enclosing->inlist_initializers, i);
+            if (inlist != hinlist)
+                continue;
+            trace = get_type_by_designation(d, NULL, false);
+            break;
+        }
+    }
+    else
+        report_return_value(NULL);
+    if (!trace) return NULL;
+
+    c_type_t* top = trace;
+    VECTOR_FOR(syntax_component_t*, designator, desig->desig_designators)
+    {
+        if (parent && term && designator == term)
+            break;
+        if (designator->type == SC_IDENTIFIER)
+        {
+            if (trace->class != CTC_STRUCTURE && trace->class != CTC_UNION)
+                return NULL;
+            c_type_t* old = trace;
+            VECTOR_FOR(char*, member_name, trace->struct_union.member_names)
+            {
+                if (!streq(designator->id, member_name))
+                    continue;
+                trace = vector_get(trace->struct_union.member_types, i);
+                break;
+            }
+            if (old == trace)
+                return NULL;
+        }
+        else
+        {
+            if (trace->class != CTC_ARRAY)
+                return NULL;
+            trace = trace->derived_from;
+        }
+        if (!parent && term && designator == term)
+            break;
+    }
+    c_type_t* ct = type_copy(trace);
+    type_delete(top);
+    return ct;
+}
+
+static c_type_t* get_aggregate_type_by_designation(syntax_component_t* desig, syntax_component_t* term)
+{
+    return get_type_by_designation(desig, term, true);
+}
+
+// finds the namespace to look in based on the contextualized id
 // allocates space for the c_namespace_t object
-// ONLY USE THIS FUNCTION DURING OR AFTER TYPING.
 c_namespace_t* syntax_get_namespace(syntax_component_t* id)
 {
     if (!id) return NULL;
     syntax_component_t* syn = id->parent;
     if (!syn) return NULL;
-    c_namespace_t* ns = calloc(1, sizeof *ns);
-    if (syn->type == SC_LABELED_STATEMENT)
-    {
-        ns->class = NSC_LABEL;
-        return ns;
-    }
+    if (syn->type == SC_GOTO_STATEMENT)
+        return make_basic_namespace(NSC_LABEL);
     if (syn->type == SC_STRUCT_UNION_SPECIFIER)
     {
         switch (syn->sus_sou)
         {
-            case SOU_STRUCT: ns->class = NSC_STRUCT; break;
-            case SOU_UNION: ns->class = NSC_UNION; break;
+            case SOU_STRUCT: return make_basic_namespace(NSC_STRUCT);
+            case SOU_UNION: return make_basic_namespace(NSC_UNION);
         }
-        return ns;
+        return NULL;
     }
     if (syn->type == SC_ENUM_SPECIFIER)
-    {
-        ns->class = NSC_ENUM;
-        return ns;
-    }
-    if (syn->type == SC_MEMBER_EXPRESSION ||
-        syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
+        return make_basic_namespace(NSC_ENUM);
+    if (syn->memexpr_id == id && (syn->type == SC_MEMBER_EXPRESSION ||
+        syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION))
     {
         c_type_t* ty = syn->memexpr_expression->ctype;
         if (!ty || (ty->class != CTC_STRUCTURE && ty->class != CTC_UNION))
-        {
-            namespace_delete(ns);
             return NULL;
-        }
-        ns->struct_union_type = ty;
+        c_namespace_t* ns = calloc(1, sizeof *ns);
+        ns->struct_union_type = type_copy(ty);
         switch (ty->class)
         {
             case CTC_STRUCTURE: ns->class = NSC_STRUCT_MEMBER; break;
@@ -297,8 +408,19 @@ c_namespace_t* syntax_get_namespace(syntax_component_t* id)
         }
         return ns;
     }
-    ns->class = NSC_ORDINARY;
-    return ns;
+    if (syn->type == SC_DESIGNATION)
+    {
+        // get the type of the identifier by stepping through its designation from the root type
+        c_type_t* ct = get_aggregate_type_by_designation(syn, id);
+        if (!ct) return NULL;
+
+        // return a namespace with that struct type
+        c_namespace_t* ns = calloc(1, sizeof *ns);
+        ns->class = ct->class == CTC_STRUCTURE ? NSC_STRUCT_MEMBER : NSC_UNION_MEMBER;
+        ns->struct_union_type = ct;
+        return ns;
+    }
+    return make_basic_namespace(NSC_ORDINARY);
 }
 
 c_namespace_t get_basic_namespace(c_namespace_class_t nsc)
@@ -316,7 +438,7 @@ bool syntax_is_lvalue(syntax_component_t* syn)
         (!type_is_complete(syn->ctype) && syn->ctype->class != CTC_VOID));
 }
 
-bool can_evaluate(syntax_component_t* expr, constant_expression_type_t ce_type)
+bool can_evaluate(syntax_component_t* expr, constexpr_type_t ce_type)
 {
     c_type_class_t c = CTC_ERROR;
     evaluate_constant_expression(expr, &c, ce_type);
@@ -571,7 +693,7 @@ static void print_vector_indented(vector_t* v, unsigned indent, int (*printer)(c
     // SC_NOT_EXPRESSION,
     // SC_SIZEOF_EXPRESSION,
     // SC_SIZEOF_TYPE_EXPRESSION,
-    // SC_INITIALIZER_LIST_EXPRESSION,
+    // SC_COMPOUND_LITERAL,
     // SC_POSTFIX_INCREMENT_EXPRESSION,
     // SC_POSTFIX_DECREMENT_EXPRESSION,
     // SC_DEREFERENCE_MEMBER_EXPRESSION,
@@ -694,7 +816,6 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SC_FUNCTION_DEFINITION:
         {
             ps(sty("function definition") "\n");
-            pf("stackframe size: %lld\n", s->fdef_stackframe_size);
             pf("declaration specifiers:\n");
             print_vector_indented(s->fdef_declaration_specifiers, next_indent, printer);
             pf("declarator:\n");
@@ -1017,6 +1138,50 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SC_COMPOUND_LITERAL:
+        {
+            ps(sty("compound literal") "\n");
+            if (s->cl_id)
+                pf("identifier: %s\n", s->cl_id);
+            pf("type name:\n");
+            print_syntax_indented(s->cl_type_name, next_indent, printer);
+            pf("initializer list:\n");
+            print_syntax_indented(s->cl_inlist, next_indent, printer);
+            break;
+        }
+
+        case SC_MEMBER_EXPRESSION:
+        case SC_DEREFERENCE_MEMBER_EXPRESSION:
+        {
+            if (s->type == SC_MEMBER_EXPRESSION)
+            {
+                ps(sty("member expression") "\n");
+            }
+            else
+            {
+                ps(sty("dereference member expression") "\n");
+            }
+            pf("expression:\n");
+            print_syntax_indented(s->memexpr_expression, next_indent, printer);
+            pf("identifier:\n");
+            print_syntax_indented(s->memexpr_id, next_indent, printer);
+            break;
+        }
+
+        case SC_FOR_STATEMENT:
+        {
+            ps(sty("for statement") "\n");
+            pf("init:\n");
+            print_syntax_indented(s->forstmt_init, next_indent, printer);
+            pf("condition:\n");
+            print_syntax_indented(s->forstmt_condition, next_indent, printer);
+            pf("post:\n");
+            print_syntax_indented(s->forstmt_post, next_indent, printer);
+            pf("body:\n");
+            print_syntax_indented(s->forstmt_body, next_indent, printer);
+            break;
+        }
+
         default:
             ps(sty("unknown/unprintable syntax") "\n");
             pf("type name: %s\n", SYNTAX_COMPONENT_NAMES[s->type]);
@@ -1321,10 +1486,11 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             deep_free_syntax_vector(syn->tn_specifier_qualifier_list, s);
             break;
         }
-        case SC_INITIALIZER_LIST_EXPRESSION:
+        case SC_COMPOUND_LITERAL:
         {
-            free_syntax(syn->inlexpr_inlist, tlu);
-            free_syntax(syn->inlexpr_type_name, tlu);
+            free_syntax(syn->cl_inlist, tlu);
+            free_syntax(syn->cl_type_name, tlu);
+            free(syn->cl_id);
             break;
         }
         case SC_MEMBER_EXPRESSION:
@@ -1626,7 +1792,7 @@ long double process_floating_constant(char* con, c_type_class_t* class)
 // the expression given to this function doesn't have to be checked for constant-ness
 // if it finds something it can't evaluate, it will toss it out and return CTC_ERROR in the 'class' parameter
 // otherwise, it will give back the type you should cast the return type to.
-unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constant_expression_type_t cexpr_type)
+unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constexpr_type_t cexpr_type)
 {
     //     type == SC_EQUALITY_EXPRESSION ||
     //     type == SC_INEQUALITY_EXPRESSION ||
@@ -1651,7 +1817,7 @@ unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type
     //     type == SC_NOT_EXPRESSION ||
     //     type == SC_SIZEOF_EXPRESSION ||
     //     type == SC_SIZEOF_TYPE_EXPRESSION ||
-    //     type == SC_INITIALIZER_LIST_EXPRESSION ||
+    //     type == SC_COMPOUND_LITERAL ||
     //     type == SC_DEREFERENCE_MEMBER_EXPRESSION ||
     //     type == SC_MEMBER_EXPRESSION ||
     //     type == SC_SUBSCRIPT_EXPRESSION ||

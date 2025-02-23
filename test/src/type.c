@@ -5,7 +5,7 @@
 
 #include "test.h"
 #include "testutils.h"
-#include "../../src/cc.h"
+#include "../../src/ecc.h"
 
 char buffer[1024];
 size_t buffer_off = 0;

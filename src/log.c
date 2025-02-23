@@ -4,7 +4,7 @@
 static int lf(FILE* file, char* form, char* fmt, va_list args)
 {
     int i = 0;
-    i += fprintf(file, "cc: ");
+    i += fprintf(file, "ecc: ");
     i += fprintf(file, "%s: ", form);
     i += vfprintf(file, fmt, args);
     return i;
@@ -13,7 +13,7 @@ static int lf(FILE* file, char* form, char* fmt, va_list args)
 static int snlf(char* buffer, size_t maxlen, char* form, char* fmt, va_list args)
 {
     int i = 0;
-    i += snprintf(buffer, maxlen, "cc: %s: ", form);
+    i += snprintf(buffer, maxlen, "ecc: %s: ", form);
     maxlen -= i;
     i += vsnprintf(buffer + i, maxlen, fmt, args);
     return i;

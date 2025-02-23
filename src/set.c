@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 set_t* set_init(int (*comparator)(void*, void*))
 {

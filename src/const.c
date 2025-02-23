@@ -1,4 +1,4 @@
-#include "cc.h"
+#include "ecc.h"
 
 const char* KEYWORDS[KW_ELEMENTS] = {
     "auto",
@@ -109,7 +109,7 @@ const char* SYNTAX_COMPONENT_NAMES[SC_NO_ELEMENTS] = {
     "SC_NOT_EXPRESSION",
     "SC_SIZEOF_EXPRESSION",
     "SC_SIZEOF_TYPE_EXPRESSION",
-    "SC_INITIALIZER_LIST_EXPRESSION",
+    "SC_COMPOUND_LITERAL",
     "SC_POSTFIX_INCREMENT_EXPRESSION",
     "SC_POSTFIX_DECREMENT_EXPRESSION",
     "SC_DEREFERENCE_MEMBER_EXPRESSION",
@@ -187,6 +187,16 @@ const char* C_TYPE_CLASS_NAMES[30] = {
     "pointer",
     "label",
     "error"
+};
+
+const char* C_NAMESPACE_CLASS_NAMES[7] = {
+    "NSC_LABEL",
+    "NSC_STRUCT",
+    "NSC_UNION",
+    "NSC_ENUM",
+    "NSC_STRUCT_MEMBER",
+    "NSC_UNION_MEMBER",
+    "NSC_ORDINARY"
 };
 
 const char* SPECIFIER_QUALIFIER_NAMES[9] = {

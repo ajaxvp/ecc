@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../src/cc.h"
+#include "../../src/ecc.h"
 
 token_t* testutils_tokenize(char* tlu)
 {

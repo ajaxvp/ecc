@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 ir_opt_options_t opt_profile_basic = {
     .inline_fcalls = true,

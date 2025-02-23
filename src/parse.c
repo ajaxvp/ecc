@@ -4,7 +4,7 @@
 #include <stdarg.h>
 #include <wchar.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 #define MAX_ERROR_LEN 4096
 
@@ -1685,7 +1685,7 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
     syntax_component_t* left = parse_primary_expression(&token, OPTIONAL, &pe_stat, tlu, next_depth, parent);
     if (pe_stat == NOT_FOUND)
     {
-        init_syn(SC_INITIALIZER_LIST_EXPRESSION);
+        init_syn(SC_COMPOUND_LITERAL);
         if (!is_punctuator(token, P_LEFT_PARENTHESIS))
         {
             fail_parse(token, "expected left parenthesis for compound literal type");
@@ -1693,7 +1693,7 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
         }
         advance_token;
         parse_status_code_t tn_stat = UNKNOWN_STATUS;
-        syn->inlexpr_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth, parent);
+        syn->cl_type_name = parse_type_name(&token, EXPECTED, &tn_stat, tlu, next_depth, syn);
         if (tn_stat == ABORT)
         {
             fail_status;
@@ -1714,7 +1714,7 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
         }
         advance_token;
         parse_status_code_t inlist_stat = UNKNOWN_STATUS;
-        syn->inlexpr_inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth, parent, true);
+        syn->cl_inlist = parse_initializer_list(&token, EXPECTED, &inlist_stat, tlu, next_depth, syn, true);
         if (inlist_stat == ABORT)
         {
             fail_status;
@@ -2797,6 +2797,7 @@ syntax_component_t* parse_function_definition(token_t** tokens, parse_request_co
     }
     parse_status_code_t cstmt_stat = UNKNOWN_STATUS;
     syn->fdef_body = parse_compound_statement(&token, EXPECTED, &cstmt_stat, tlu, next_depth, syn);
+    // TODO: add __func__ symbol declaration at beginning of compound statement
     if (cstmt_stat == ABORT)
     {
         fail_status;

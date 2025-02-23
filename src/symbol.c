@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cc.h"
+#include "ecc.h"
 
 symbol_t* symbol_init(syntax_component_t* declarer)
 {
@@ -127,6 +127,20 @@ bool symbol_in_scope(symbol_t* sy, syntax_component_t* syn)
     return syn == scope;
 }
 
+char* symbol_get_name(symbol_t* sy)
+{
+    if (!sy) return NULL;
+    switch (sy->declarer->type)
+    {
+        case SC_IDENTIFIER:
+            return sy->declarer->id;
+        case SC_COMPOUND_LITERAL:
+            return sy->declarer->cl_id;
+        default:
+            return NULL;
+    }
+}
+
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
 {
     if (!sy)
@@ -169,11 +183,28 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
     }
     else
         printer("(unknown)");
-    printer(", locator: ");
-    if (sy->loc)
-        locator_print(sy->loc, printer);
+    printer(", namespace: ");
+    if (sy->ns)
+        namespace_print(sy->ns, printer);
     else
-        printer("(unlocated)");
+        printer("(none)");
+    if (sy->designations)
+    {
+        printer(", initializations: [");
+        for (size_t i = 0; i < sy->designations->size; ++i)
+        {
+            if (i != 0)
+                printer(", ");
+            designation_t* desig = vector_get(sy->designations, i);
+            constexpr_t* ce = vector_get(sy->initial_values, i);
+            printer("%s", symbol_get_name(sy));
+            if (desig)
+                designation_print(desig, printer);
+            printer(" = ");
+            constexpr_print(ce, printer);
+        }
+        printer("]");
+    }
     printer(" }");
 }
 
@@ -181,7 +212,12 @@ void symbol_delete(symbol_t* sy)
 {
     if (!sy) return;
     type_delete(sy->type);
+    namespace_delete(sy->ns);
     locator_delete(sy->loc);
+    if (sy->designations)
+        vector_deep_delete(sy->designations, (void (*)(void*)) designation_delete_all);
+    if (sy->initial_values)
+        vector_deep_delete(sy->initial_values, (void (*)(void*)) constexpr_delete);
     free(sy);
 }
 
@@ -210,6 +246,13 @@ static symbol_t* symbol_table_get_internal(symbol_table_t* t, char* k, int* i)
     while (index != oidx);
     if (i) *i = -1;
     return NULL;
+}
+
+symbol_t* symbol_init_initializer(symbol_t* sy)
+{
+    if (!sy->designations) sy->designations = vector_init();
+    if (!sy->initial_values) sy->initial_values = vector_init();
+    return sy;
 }
 
 symbol_table_t* symbol_table_init(void)
@@ -282,20 +325,18 @@ symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id)
 // also takes a namespace 'ns' as an argument for searching only in a given namespace, NULL will ignore namespaces entirely
 symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns)
 {
+    if (!id) return NULL;
     symbol_t* sylist = symbol_table_get_all(t, id->id);
+    symbol_t* found = NULL;
     for (; sylist; sylist = sylist->next)
     {
         if (sylist->declarer == id)
             return sylist;
-        c_namespace_t* sns = syntax_get_namespace(sylist->declarer);
-        if (symbol_in_scope(sylist, id) && (!ns || (ns->class == sns->class && type_is_compatible(ns->struct_union_type, sns->struct_union_type))))
-        {
-            free(sns);
-            return sylist;
-        }
-        free(sns);
+        c_namespace_t* sns = sylist->ns;
+        if (symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)) && !found)
+            found = sylist;
     }
-    return NULL;
+    return found;
 }
 
 // 3 return values here:
@@ -319,13 +360,12 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
             found = sylist;
             continue;
         }
-        c_namespace_t* sns = syntax_get_namespace(sylist->declarer);
-        if (count && symbol_in_scope(sylist, id) && (!ns || (ns->class == sns->class && type_is_compatible(ns->struct_union_type, sns->struct_union_type))))
+        c_namespace_t* sns = sylist->ns;
+        if (count && symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)))
         {
             ++(*count);
-            found = sylist;
+            if (!found) found = sylist;
         }
-        free(sns);
     }
     return found;
 }
