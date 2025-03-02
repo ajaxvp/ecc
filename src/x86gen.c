@@ -225,24 +225,54 @@ x86_insn_size_t c_type_to_x86_operand_size(c_type_t* ct)
     }
 }
 
+bool x86_register_is_virtual(regid_t reg)
+{
+    return (reg >> (sizeof(regid_t) * 8 - 1)) & 1;
+}
+
+regid_t x86_get_virtual_register_value(regid_t reg)
+{
+    return reg & ~(1LLU << (sizeof(regid_t) * 8 - 1));
+}
+
+regid_t x86_register_make_virtual(regid_t reg)
+{
+    return reg | (1LLU << (sizeof(regid_t) * 8 - 1));
+}
+
+void x86_register_write(regid_t reg, x86_insn_size_t size, FILE* file)
+{
+    if (x86_register_is_virtual(reg))
+        fprintf(file, "%%%c%llu", x86_operand_size_character(size), x86_get_virtual_register_value(reg));
+    else
+        fprintf(file, "%%%s", register_name(reg, size));
+}
+
 void x86_operand_write(x86_operand_t* op, x86_insn_size_t size, FILE* file)
 {
     if (!op) return;
     switch (op->type)
     {
         case X86OP_REGISTER:
-            fprintf(file, "%%%s", register_name(op->reg, size));
+            x86_register_write(op->reg, size, file);
             break;
         case X86OP_PTR_REGISTER:
-            fprintf(file, "*%%%s", register_name(op->reg, size));
+            fprintf(file, "*");
+            x86_register_write(op->reg, size, file);
             break;
         case X86OP_DEREF_REGISTER:
             if (op->deref_reg.offset != 0)
                 fprintf(file, "%lld", op->deref_reg.offset);
-            fprintf(file, "(%%%s)", X86_REG64_MAP[op->deref_reg.reg - 1]);
+            fprintf(file, "(");
+            x86_register_write(op->deref_reg.reg_addr, X86SZ_QWORD, file);
+            fprintf(file, ")");
             break;
         case X86OP_ARRAY:
-            fprintf(file, "(%%%s, %%%s, %lld)", X86_REG64_MAP[op->array.reg_base - 1], X86_REG64_MAP[op->array.reg_offset - 1], op->array.scale);
+            fprintf(file, "(");
+            x86_register_write(op->array.reg_base, X86SZ_QWORD, file);
+            fprintf(file, ", ");
+            x86_register_write(op->array.reg_offset, X86SZ_QWORD, file);
+            fprintf(file, ", %lld)", op->array.scale);
             break;
         case X86OP_LABEL:
             fprintf(file, "%s", op->label);
@@ -381,25 +411,25 @@ x86_operand_t* make_operand_string(char* string)
     return op;
 }
 
-x86_operand_t* make_operand_register(regid_t reg)
+x86_operand_t* make_operand_register(regid_t reg, bool virtual)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_REGISTER);
-    op->reg = reg;
+    op->reg = virtual ? x86_register_make_virtual(reg) : reg;
     return op;
 }
 
-x86_operand_t* make_operand_ptr_register(regid_t reg)
+x86_operand_t* make_operand_ptr_register(regid_t reg, bool virtual)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_PTR_REGISTER);
-    op->reg = reg;
+    op->reg = virtual ? x86_register_make_virtual(reg) : reg;
     return op;
 }
 
-x86_operand_t* make_operand_deref_register(regid_t reg, long long offset)
+x86_operand_t* make_operand_deref_register(regid_t reg, bool virtual, long long offset)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_DEREF_REGISTER);
     op->deref_reg.offset = offset;
-    op->deref_reg.reg = reg;
+    op->deref_reg.reg_addr = virtual ? x86_register_make_virtual(reg) : reg;
     return op;
 }
 
@@ -410,11 +440,11 @@ x86_operand_t* make_operand_immediate(unsigned long long immediate)
     return op;
 }
 
-x86_operand_t* make_operand_array(regid_t reg_base, regid_t reg_offset, long long scale)
+x86_operand_t* make_operand_array(regid_t reg_base, bool v1, regid_t reg_offset, bool v2, long long scale)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_ARRAY);
-    op->array.reg_base = reg_base;
-    op->array.reg_offset = reg_offset;
+    op->array.reg_base = v1 ? x86_register_make_virtual(reg_base) : reg_base;
+    op->array.reg_offset = v2 ? x86_register_make_virtual(reg_offset) : reg_offset;
     op->array.scale = scale;
     return op;
 }
@@ -425,11 +455,11 @@ x86_operand_t* locator_to_operand(locator_t* loc)
     switch (loc->type)
     {
         case L_ARRAY:
-            return make_operand_array(loc->array.base_reg, loc->array.offset_reg, loc->array.scale);
+            return make_operand_array(loc->array.base_reg, true, loc->array.offset_reg, true, loc->array.scale);
         case L_LABEL:
             return make_operand_label_ref(loc->label);
         case L_OFFSET:
-            return make_operand_deref_register(X86R_RBP, loc->stack_offset);
+            return make_operand_deref_register(X86R_RBP, false, loc->stack_offset);
         default:
             return NULL;
     }
@@ -473,8 +503,10 @@ x86_operand_t* ir_operand_to_operand(c_type_t* ctype, ir_insn_operand_t* iop, x8
         }
         case IIOP_LABEL:
             return make_operand_label_ref(iop->label);
+        case IIOP_VIRTUAL_REGISTER:
+            return make_operand_register(iop->vreg, true);
         case IIOP_PHYSICAL_REGISTER:
-            return make_operand_register(iop->preg);
+            return make_operand_register(iop->preg, false);
         default:
             return NULL;
     }
@@ -497,7 +529,7 @@ x86_insn_t* x86_generate_local_label(ir_insn_t* insn, x86_gen_state_t* state)
 x86_insn_t* x86_generate_function_label(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* fl = make_basic_x86_insn(X86I_LABEL);
-    fl->op1 = make_operand_label(insn->ops[0]->label);
+    fl->op1 = make_operand_label(symbol_get_name(insn->ops[0]->id_symbol));
     state->active_function_ir = insn;
     state->active_function = fl;
     size_t noparams = state->active_function_ir->metadata.function_label.noparams;
@@ -520,7 +552,6 @@ x86_insn_t* x86_generate_leave(ir_insn_t* insn, x86_gen_state_t* state)
     return lv;
 }
 
-// type _r = id; | type _r = iconst;
 x86_insn_t* x86_generate_load(ir_insn_t* insn, x86_gen_state_t* state)
 {
     bool loadaddr = (insn->ctype->class == CTC_POINTER && insn->ctype->derived_from->class == CTC_FUNCTION) ||
@@ -538,19 +569,19 @@ x86_insn_t* x86_generate_function_call(ir_insn_t* insn, x86_gen_state_t* state)
     x86_insn_t* cl = make_basic_x86_insn(X86I_CALL);
     switch (insn->ops[1]->type)
     {
-        case IIOP_PHYSICAL_REGISTER:
-            cl->op1 = make_operand_ptr_register(insn->ops[1]->preg);
+        case IIOP_VIRTUAL_REGISTER:
+            cl->op1 = make_operand_ptr_register(insn->ops[1]->vreg, true);
             break;
         case IIOP_IDENTIFIER:
             cl->op1 = make_operand_label(symbol_get_name(insn->ops[1]->id_symbol));
             break;
         default: report_return_value(NULL);
     }
-    if (insn->ops[0]->type != IIOP_PHYSICAL_REGISTER || insn->ops[0]->preg != X86R_RAX)
+    if (insn->ops[0]->type != IIOP_VIRTUAL_REGISTER || insn->ops[0]->preg != X86R_RAX)
     {
         x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
         mov->size = c_type_to_x86_operand_size(insn->ctype);
-        mov->op1 = make_operand_register(X86R_RAX);
+        mov->op1 = make_operand_register(X86R_RAX, false);
         mov->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
         cl->next = mov;
     }
@@ -559,13 +590,10 @@ x86_insn_t* x86_generate_function_call(ir_insn_t* insn, x86_gen_state_t* state)
 
 x86_insn_t* x86_generate_return(ir_insn_t* insn, x86_gen_state_t* state)
 {
-    // no need to move to return value register if it's already there
-    if (insn->ops[0]->type == IIOP_PHYSICAL_REGISTER && insn->ops[0]->preg == X86R_RAX)
-        return NULL;
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = c_type_to_x86_operand_size(insn->ctype);
     mov->op1 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
-    mov->op2 = make_operand_register(X86R_RAX);
+    mov->op2 = make_operand_register(X86R_RAX, false);
     return mov;
 }
 
@@ -574,9 +602,9 @@ x86_insn_t* x86_generate_subscript(ir_insn_t* insn, x86_gen_state_t* state)
     x86_insn_t* ld = make_basic_x86_insn(insn->type == II_SUBSCRIPT_ADDRESS ? X86I_LEA : X86I_MOV);
     ld->size = insn->type == II_SUBSCRIPT_ADDRESS ? X86SZ_QWORD : c_type_to_x86_operand_size(insn->ctype);
     ld->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
-    if (insn->ops[1]->type != IIOP_PHYSICAL_REGISTER || insn->ops[2]->type != IIOP_PHYSICAL_REGISTER)
+    if (insn->ops[1]->type != IIOP_VIRTUAL_REGISTER || insn->ops[2]->type != IIOP_VIRTUAL_REGISTER)
         report_return_value(NULL);
-    ld->op1 = make_operand_array(insn->ops[1]->preg, insn->ops[2]->preg, type_size(insn->ctype));
+    ld->op1 = make_operand_array(insn->ops[1]->vreg, true, insn->ops[2]->vreg, true, type_size(insn->ctype));
     return ld;
 }
 
@@ -614,14 +642,14 @@ x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
     mov->op1 = ir_operand_to_operand(insn->ctype, insn->ops[2], state);
     switch (insn->ops[1]->type)
     {
-        case IIOP_PHYSICAL_REGISTER:
-            mov->op2 = make_operand_deref_register(insn->ops[1]->preg, 0);
+        case IIOP_VIRTUAL_REGISTER:
+            mov->op2 = make_operand_deref_register(insn->ops[1]->vreg, true, 0);
             break;
         case IIOP_LABEL:
             mov->op2 = make_operand_label_ref(insn->ops[1]->label);
             break;
         case IIOP_IDENTIFIER:
-            mov->op2 = make_operand_deref_register(X86R_RBP, insn->ops[1]->id_symbol->loc->stack_offset);
+            mov->op2 = make_operand_deref_register(X86R_RBP, false, insn->ops[1]->id_symbol->loc->stack_offset);
             break;
         default: report_return_value(NULL);
     }
@@ -648,12 +676,12 @@ x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
     }
     x86_insn_t* push = make_basic_x86_insn(X86I_PUSH);
     push->size = X86SZ_QWORD;
-    push->op1 = make_operand_register(X86R_RBP);
+    push->op1 = make_operand_register(X86R_RBP, false);
     insert_x86_insn_after(push, root);
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = X86SZ_QWORD;
-    mov->op1 = make_operand_register(X86R_RSP);
-    mov->op2 = make_operand_register(X86R_RBP);
+    mov->op1 = make_operand_register(X86R_RSP, false);
+    mov->op2 = make_operand_register(X86R_RBP, false);
     insert_x86_insn_after(mov, push);
     if (state->active_stackalloc)
     {
@@ -661,7 +689,7 @@ x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
         x86_insn_t* sub = make_basic_x86_insn(X86I_SUB);
         sub->size = X86SZ_QWORD;
         sub->op1 = make_operand_immediate(ALIGN(state->active_stackalloc, STACKFRAME_ALIGNMENT));
-        sub->op2 = make_operand_register(X86R_RSP);
+        sub->op2 = make_operand_register(X86R_RSP, false);
         insert_x86_insn_after(sub, mov);
         mov = sub;
     }
@@ -673,8 +701,8 @@ x86_insn_t* x86_generate_endproc(ir_insn_t* insn, x86_gen_state_t* state)
         if (!sy) continue;
         x86_insn_t* spill = make_basic_x86_insn(X86I_MOV);
         spill->size = c_type_to_x86_operand_size(sy->type);
-        spill->op1 = make_operand_register(x86procregmap(i));
-        spill->op2 = make_operand_deref_register(X86R_RBP, offset -= type_size(sy->type));
+        spill->op1 = make_operand_register(x86procregmap(i), false);
+        spill->op2 = make_operand_deref_register(X86R_RBP, false, offset -= type_size(sy->type));
         insert_x86_insn_after(spill, mov);
         mov = spill;
     }
@@ -774,12 +802,15 @@ x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)
             case II_ADDITION: ADD(x86_generate_addition); break;
             case II_SUBTRACTION: ADD(x86_generate_subtraction); break;
             case II_STORE_ADDRESS: ADD(x86_generate_store_address); break;
-            case II_SUBSCRIPT: ADD(x86_generate_subscript); break;
+            case II_SUBSCRIPT:
+            case II_SUBSCRIPT_ADDRESS:
+                ADD(x86_generate_subscript);
+                break;
             case II_ENDPROC: ADD(x86_generate_endproc); break;
             case II_JUMP: ADD(x86_generate_jump); break;
             case II_JUMP_IF_ZERO: ADD(x86_generate_jump_if_zero); break;
             default:
-                warnf("no x86 code generator built for a linear IR instruction\n");
+                warnf("no x86 code generator built for a linear IR instruction: %s\n", IR_INSN_NAMES[insns->type]);
                 break;
         }
         for (; curr->next; curr = curr->next);

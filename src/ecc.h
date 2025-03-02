@@ -224,6 +224,11 @@ typedef struct x86_insn x86_insn_t;
 typedef struct symbol_t symbol_t;
 typedef struct designation designation_t;
 
+typedef struct program_options
+{
+    bool iflag;
+} program_options_t;
+
 typedef struct preprocessing_token
 {
     preprocessor_token_type_t type;
@@ -432,7 +437,8 @@ typedef enum ir_insn_operand_type
     IIOP_IMMEDIATE,
     IIOP_FLOAT,
     IIOP_STRING_LITERAL,
-    IIOP_DESIGNATION
+    IIOP_DESIGNATION,
+    IIOP_TYPE
 } ir_insn_operand_type_t;
 
 typedef struct ir_insn_operand
@@ -458,6 +464,7 @@ typedef struct ir_insn_operand
             symbol_t* base;
             designation_t* desig;
         } designation;
+        c_type_t* ct;
     };
 } ir_insn_operand_t;
 
@@ -484,11 +491,17 @@ typedef enum ir_insn_type
     II_EQUALITY,
     II_MODULAR,
     II_LESS,
+    II_GREATER,
+    II_LESS_EQUAL,
+    II_GREATER_EQUAL,
+    II_CAST,
     II_DEREFERENCE,
+    II_DEREFERENCE_ADDRESS,
     II_NOT,
     II_FUNCTION_CALL,
     II_LEAVE,
     II_ENDPROC,
+    II_DECLARE,
 
     // LOW-LEVEL INSTRUCTIONS
     II_RETAIN,
@@ -542,7 +555,7 @@ typedef struct x86_operand
         regid_t reg;
         struct
         {
-            regid_t reg;
+            regid_t reg_addr;
             long long offset;
         } deref_reg;
         struct
@@ -1419,6 +1432,7 @@ bool syntax_is_assignment_expression(syntax_component_type_t type);
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
 c_type_t* integer_promotions(c_type_t* ct);
+c_type_t* default_argument_promotions(c_type_t* ct);
 void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
 long long type_size(c_type_t* ct);
@@ -1467,6 +1481,7 @@ int* strdup_wide(const int* str);
 int* strdup_widen(const char* str);
 bool contains_substr(char* str, char* substr);
 bool streq(char* s1, char* s2);
+bool streq_ignore_case(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
 void print_int_array(int* array, size_t length);
 bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
@@ -1546,6 +1561,9 @@ void designation_delete(designation_t* desig);
 void designation_delete_all(designation_t* desig);
 designation_t* designation_concat(designation_t* d1, designation_t* d2);
 constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
+
+/* ecc.c */
+program_options_t* get_program_options(void);
 
 /* from somewhere */
 bool in_debug(void);

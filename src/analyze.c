@@ -340,7 +340,9 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
 {
     bool pass = true;
     c_type_t* called_type = syn->fcallexpr_expression->ctype;
-    if (called_type->class != CTC_POINTER || called_type->derived_from->class != CTC_FUNCTION)
+    if (called_type->class == CTC_ERROR)
+        pass = false;
+    else if (called_type->class != CTC_POINTER || called_type->derived_from->class != CTC_FUNCTION)
     {
         // ISO: 6.5.2.2 (1)
         ADD_ERROR(syn, "calling expression in function call must be of function or function pointer type");
@@ -640,13 +642,14 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
 void analyze_cast_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     bool pass = true;
-    if (syn->caexpr_type_name->ctype->class != CTC_VOID && !type_is_scalar(syn->caexpr_operand->ctype))
+    c_type_t* ct = create_type(syn->caexpr_type_name, syn->caexpr_type_name->tn_declarator);
+    if (ct->class != CTC_VOID && !type_is_scalar(ct))
     {
         // ISO: 6.5.4 (2)
         ADD_ERROR(syn, "operand of cast expression must be of scalar type");
         pass = false;
     }
-    if (syn->caexpr_type_name->ctype->class != CTC_VOID && !type_is_scalar(syn->caexpr_type_name->ctype))
+    if (ct->class != CTC_VOID && !type_is_scalar(ct))
     {
         // ISO: 6.5.4 (2)
         ADD_ERROR(syn, "type name of cast expression must be of scalar type");
@@ -654,9 +657,12 @@ void analyze_cast_expression_after(syntax_traverser_t* trav, syntax_component_t*
     }
     if (pass)
         // ISO: 6.5.4 (4)
-        syn->ctype = type_copy(syn->caexpr_type_name->ctype);
+        syn->ctype = ct;
     else
+    {
         syn->ctype = make_basic_type(CTC_ERROR);
+        type_delete(ct);
+    }
 }
 
 void analyze_modular_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)

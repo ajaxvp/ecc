@@ -420,7 +420,14 @@ c_namespace_t* syntax_get_namespace(syntax_component_t* id)
         ns->struct_union_type = ct;
         return ns;
     }
-    return make_basic_namespace(NSC_ORDINARY);
+    symbol_t* sy = symbol_table_get_syn_id(syntax_get_symbol_table(id), id);
+    if (!sy)
+        return make_basic_namespace(NSC_ORDINARY);
+    c_namespace_t* ns = calloc(1, sizeof *ns);
+    ns->class = sy->ns->class;
+    if (sy->ns->struct_union_type)
+        ns->struct_union_type = type_copy(sy->ns->struct_union_type);
+    return ns;
 }
 
 c_namespace_t get_basic_namespace(c_namespace_class_t nsc)
@@ -1658,7 +1665,14 @@ unsigned long long process_integer_constant(char* con, c_type_class_t* class)
     }
     char* end = NULL;
     unsigned long long full = strtoull(con, &end, radix);
-    if (errno == ERANGE || !end || *end)
+    if (errno == ERANGE || !end || (*end &&
+        !streq_ignore_case(end, "ull") &&
+        !streq_ignore_case(end, "llu") &&
+        !streq_ignore_case(end, "ll") &&
+        !streq_ignore_case(end, "ul") &&
+        !streq_ignore_case(end, "lu") &&
+        !streq_ignore_case(end, "l") &&
+        !streq_ignore_case(end, "u")))
     {
         errno = 0;
         *class = CTC_ERROR;

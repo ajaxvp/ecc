@@ -426,12 +426,19 @@ bool type_is_scalar(c_type_t* ct)
 c_type_t* integer_promotions(c_type_t* ct)
 {
     if (!ct) return NULL;
-    if (!type_is_integer(ct)) return NULL;
+    if (!type_is_integer(ct)) return type_copy(ct);
     c_type_t* int_type = make_basic_type(CTC_INT);
     if (get_integer_conversion_rank(ct) < get_integer_conversion_rank(int_type))
         return int_type;
     type_delete(int_type);
     return type_copy(ct);
+}
+
+c_type_t* default_argument_promotions(c_type_t* ct)
+{
+    if (!ct) return NULL;
+    if (ct->class == CTC_FLOAT) return make_basic_type(CTC_DOUBLE);
+    return integer_promotions(ct);
 }
 
 // recursively strips the qualifiers of a type
@@ -792,10 +799,10 @@ c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus)
                 {
                     syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
                     if (!id) continue; // TODO: unnamed bitfields (ugh)
-    
+
                     symbol_t* member_sy = symbol_table_get_syn_id(st, id);
                     if (!member_sy) report_return_value(NULL);
-    
+
                     if (member_sy->ns)
                         namespace_delete(member_sy->ns);
                     member_sy->ns = calloc(1, sizeof *member_sy->ns);
@@ -1338,13 +1345,13 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
 
     if (check(0, 0, 1))
     {
-        c_namespace_t ns = get_basic_namespace(NSC_ORDINARY);
-        symbol_t* tn_sy = symbol_table_lookup(st, tn, &ns);
-        if (!tn_sy)
+        symbol_t* tn_sy = symbol_table_lookup(st, tn, NULL);
+        if (!tn_sy || !syntax_is_typedef_name(tn_sy->declarer))
         {
             ADD_ERROR(sus, "type '%s' is not defined in this context", tn->id);
             return NULL;
         }
+        assign_type(errors, tn_sy);
         type_delete(ct);
         return type_copy(tn_sy->type);
     }

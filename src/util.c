@@ -78,6 +78,16 @@ bool streq(char* s1, char* s2)
     return !strcmp(s1, s2);
 }
 
+bool streq_ignore_case(char* s1, char* s2)
+{
+    if (!s1 && !s2) return true;
+    if (!s1 || !s2) return false;
+    for (; *s1 && *s2; ++s1, ++s2)
+        if (tolower(*s1) != tolower(*s2))
+            return false;
+    return *s1 == '\0' && *s2 == '\0';
+}
+
 bool in_debug(void)
 {
     return debug_m;

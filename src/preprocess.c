@@ -638,7 +638,7 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     preprocessing_table_add(state->table, "__STDC__", tmp, NULL, NULL);
     preprocessing_token_t* ts = *tokens;
     pp_status_code_t code = preprocess_preprocessing_file(state, &ts, EXPECTED);
-    if (debug)
+    if (get_program_options()->iflag)
         preprocessing_table_print(state->table, printf);
     state_delete(state);
 

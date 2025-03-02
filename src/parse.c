@@ -338,6 +338,7 @@ syntax_component_t* parse_struct_or_union_specifier(token_t** tokens, parse_requ
         // add to symbol table //
         symbol_t* sy = symbol_init(syn->sus_id);
         symbol_table_add(tlu->tlu_st, syn->sus_id->id, sy);
+        sy->ns = make_basic_namespace(syn->sus_sou == SOU_STRUCT ? NSC_STRUCT : NSC_UNION);
     }
     for (;;)
     {
@@ -561,9 +562,8 @@ syntax_component_t* parse_type_specifier(token_t** tokens, parse_request_code_t 
     syntax_component_t* td = parse_identifier(&token, OPTIONAL, &td_stat, tlu, next_depth, parent);
     if (td_stat == FOUND)
     {
-        c_namespace_t ns = get_basic_namespace(NSC_ORDINARY);
         symbol_t* sy;
-        if (!(sy = symbol_table_lookup(tlu->tlu_st, td, &ns)))
+        if (!(sy = symbol_table_lookup(tlu->tlu_st, td, NULL)))
         {
             free_syntax(td, tlu);
             fail_parse(token, "could not find the given typedef name");
