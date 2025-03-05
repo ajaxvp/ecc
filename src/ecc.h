@@ -594,14 +594,20 @@ typedef enum x86_insn_type
     X86I_RET,
     X86I_JMP,
     X86I_JE,
+    X86I_JNE,
     X86I_CMP,
+    X86I_SETE,
+    X86I_SETL,
+    X86I_XOR,
 
     /* directives */
     X86I_GLOBL,
     X86I_STRING,
     X86I_TEXT,
     X86I_DATA,
-    X86I_SECTION
+    X86I_SECTION,
+
+    X86I_NO_ELEMENTS
 } x86_insn_type_t;
 
 typedef struct x86_insn
@@ -1338,6 +1344,7 @@ extern const char* TOKEN_NAMES[T_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
 extern const char* IR_INSN_NAMES[II_NO_ELEMENTS];
+extern const char* X86_INSN_NAMES[X86I_NO_ELEMENTS];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
@@ -1499,6 +1506,8 @@ char* quickbuffer(void);
 int hexadecimal_digit_value(int c);
 unsigned get_universal_character_hex_value(char* unichar, size_t length);
 unsigned get_universal_character_utf8_encoding(unsigned value);
+
+char* temp_filepath_gen(char* ext);
 
 /* tokenize.c */
 

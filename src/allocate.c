@@ -126,11 +126,17 @@ void allocate_region(ir_insn_t* insns, ir_insn_t* end, allocator_options_t* opti
         // if there is no resulting virt. register, don't mess with it
         if (insn->noops < 1)
             continue;
-        if (!insn->ops[0]->result)
+        ir_insn_operand_t* result = NULL;
+        for (size_t i = 0; i < insn->noops; ++i)
+            if (insn->ops[i]->result)
+            {
+                result = insn->ops[i];
+                break;
+            }
+        if (!result)
             continue;
-        if (insn->ops[0]->type != IIOP_VIRTUAL_REGISTER)
+        if (result->type != IIOP_VIRTUAL_REGISTER)
             continue;
-        ir_insn_operand_t* result = insn->ops[0];
         ir_insn_t* expiry = insn;
         long long proc_arg_index = -1;
         ir_insn_t* proc_call = NULL;

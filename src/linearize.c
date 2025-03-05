@@ -522,6 +522,8 @@ void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...))
             EQUALS;
             printer("(");
             insn_operand_print(insn->ops[1], printer);
+            printer(" -> ");
+            type_humanized_print(insn->ctype, printer);
             printer(") ");
             insn_operand_print(insn->ops[2], printer);
             SEMICOLON_END;
@@ -963,7 +965,7 @@ void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_component_
             {
                 ADD_CODE(make_3op, II_CAST, sy->type,
                     make_vreg_insn_operand(syn->result_register = MAKE_REGISTER, true),
-                    make_type_insn_operand(sy->type),
+                    make_type_insn_operand(syn->ideclr_initializer->ctype),
                     make_vreg_insn_operand(syn->ideclr_initializer->result_register, false));
             }
             ADD_CODE(make_2op, II_STORE_ADDRESS, sy->type,
@@ -1004,7 +1006,7 @@ void linearize_assignment_expression_after(syntax_traverser_t* trav, syntax_comp
     {
         ADD_CODE(make_3op, II_CAST, syn->ctype,
             make_vreg_insn_operand(syn->result_register = MAKE_REGISTER, true),
-            make_type_insn_operand(syn->ctype),
+            make_type_insn_operand(syn->bexpr_rhs->ctype),
             make_vreg_insn_operand(syn->bexpr_rhs->result_register, false));
     }
     ADD_CODE(make_2op, II_STORE_ADDRESS, syn->ctype,
@@ -1050,8 +1052,8 @@ static ir_insn_type_t binary_expression_type_map(syntax_component_type_t type)
 void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    COPY_CODE(syn->bexpr_lhs);
     COPY_CODE(syn->bexpr_rhs);
+    COPY_CODE(syn->bexpr_lhs);
     syn->result_register = MAKE_REGISTER;
     ADD_CODE(make_3op, binary_expression_type_map(syn->type), syn->ctype,
         make_vreg_insn_operand(syn->result_register, true), 
@@ -1155,18 +1157,26 @@ condition label:
 void linearize_for_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    COPY_CODE(syn->forstmt_init);
+    if (syn->forstmt_init)
+        COPY_CODE(syn->forstmt_init);
     char* body_label = make_local_label(trav);
     char* cond_label = make_local_label(trav);
-    ADD_CODE(make_1op, II_JUMP, NULL, make_label_insn_operand(cond_label));
+    if (syn->forstmt_condition)
+        ADD_CODE(make_1op, II_JUMP, NULL, make_label_insn_operand(cond_label));
     ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(body_label));
     COPY_CODE(syn->forstmt_body);
-    COPY_CODE(syn->forstmt_post);
-    ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(cond_label));
-    COPY_CODE(syn->forstmt_condition);
-    ADD_CODE(make_2op, II_JUMP_NOT_ZERO, syn->forstmt_condition->ctype,
-        make_vreg_insn_operand(syn->forstmt_condition->result_register, false),
-        make_label_insn_operand(body_label));
+    if (syn->forstmt_post)
+        COPY_CODE(syn->forstmt_post);
+    if (syn->forstmt_condition)
+    {
+        ADD_CODE(make_1op, II_LOCAL_LABEL, NULL, make_label_insn_operand(cond_label));
+        COPY_CODE(syn->forstmt_condition);
+        ADD_CODE(make_2op, II_JUMP_NOT_ZERO, syn->forstmt_condition->ctype,
+            make_vreg_insn_operand(syn->forstmt_condition->result_register, false),
+            make_label_insn_operand(body_label));
+    }
+    else
+        ADD_CODE(make_1op, II_JUMP, NULL, make_label_insn_operand(body_label));
     free(body_label);
     free(cond_label);
     FINALIZE_LINEARIZE;
@@ -1242,10 +1252,13 @@ void linearize_step_expression_after(syntax_traverser_t* trav, syntax_component_
     ADD_CODE(make_2op, II_DEREFERENCE, syn->ctype,
         make_vreg_insn_operand(valuereg, true),
         make_vreg_insn_operand(syn->uexpr_operand->result_register, false));
+    long long step = 1;
+    if (syn->ctype->class == CTC_POINTER)
+        step = type_size(syn->ctype->derived_from);
     ADD_CODE(make_3op, inc ? II_ADDITION : II_SUBTRACTION, syn->ctype,
         make_vreg_insn_operand(syn->result_register, true),
         make_vreg_insn_operand(valuereg, false),
-        make_immediate_insn_operand(1));
+        make_immediate_insn_operand(step));
     ADD_CODE(make_2op, II_STORE_ADDRESS, syn->ctype,
         make_vreg_insn_operand(syn->uexpr_operand->result_register, false),
         make_vreg_insn_operand(syn->result_register, false));
@@ -1299,7 +1312,7 @@ void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_c
             {
                 ADD_CODE(make_3op, II_CAST, ptype,
                     make_vreg_insn_operand(result = MAKE_REGISTER, true),
-                    make_type_insn_operand(ptype),
+                    make_type_insn_operand(arg->ctype),
                     make_vreg_insn_operand(arg->result_register, false));
             }
 
@@ -1341,7 +1354,7 @@ void linearize_cast_expression_after(syntax_traverser_t* trav, syntax_component_
     syn->result_register = MAKE_REGISTER;
     ADD_CODE(make_3op, II_CAST, syn->ctype,
         make_vreg_insn_operand(syn->result_register, true),
-        make_type_insn_operand(syn->ctype),
+        make_type_insn_operand(syn->caexpr_operand->ctype),
         make_vreg_insn_operand(syn->caexpr_operand->result_register, false));
     FINALIZE_LINEARIZE;
 }
@@ -1436,6 +1449,7 @@ ir_insn_t* linearize(syntax_component_t* tlu)
     trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;
+    trav->after[SC_STORAGE_CLASS_SPECIFIER] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

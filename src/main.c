@@ -17,8 +17,11 @@ STD C TRANSLATION PHASES -> FUNCTIONS IN THIS PROJECT:
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include <getopt.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #include "ecc.h"
 
@@ -38,19 +41,19 @@ int usage(void)
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
-    return EXIT_SUCCESS;
+    return EXIT_FAILURE;
 }
 
-void work(char* filename)
+char* work(char* filename)
 {
     FILE* file = fopen(filename, "r");
     if (!file)
     {
         errorf("file '%s' not found", filename);
-        return;
+        return NULL;
     }
     preprocessing_token_t* tokens = lex(file, true);
-    if (!tokens) return;
+    if (!tokens) return NULL;
 
     if (opts.iflag)
     {
@@ -70,7 +73,7 @@ void work(char* filename)
     if (!preprocess(&tokens, &settings))
     {
         printf("%s", settings.error);
-        return;
+        return NULL;
     }
 
     if (opts.iflag)
@@ -96,7 +99,7 @@ void work(char* filename)
     if (tk_settings.error[0])
     {
         printf("%s", tk_settings.error);
-        return;
+        return NULL;
     }
 
     pp_token_delete_all(tokens);
@@ -112,14 +115,14 @@ void work(char* filename)
     }
 
     syntax_component_t* tlu = parse(ts);
-    if (!tlu) return;
+    if (!tlu) return NULL;
 
     analysis_error_t* type_errors = type(tlu);
     if (type_errors)
     {
         dump_errors(type_errors);
         if (error_list_size(type_errors, false) > 0)
-            return;
+            return NULL;
     }
 
     if (opts.iflag)
@@ -136,7 +139,7 @@ void work(char* filename)
     {
         dump_errors(errors);
         if (error_list_size(errors, false) > 0)
-            return;
+            return NULL;
     }
 
     if (opts.iflag)
@@ -164,36 +167,86 @@ void work(char* filename)
         insn_clike_print_all(insns, printf);
     }
 
-    // allocator_options_t alloc_options;
-    // alloc_options.procregmap = x86procregmap;
-    // alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
-    // alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
+    allocator_options_t alloc_options;
+    alloc_options.procregmap = x86procregmap;
+    alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
+    alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
 
-    // allocate(insns, &alloc_options);
+    allocate(insns, &alloc_options);
 
-    // printf("<<allocated linear IR>>\n");
-    // insn_clike_print_all(insns, printf);
+    if (opts.iflag)
+    {
+        printf("<<allocated linear IR>>\n");
+        insn_clike_print_all(insns, printf);
+    }
 
-    // x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
+    x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
 
-    // printf("<<x86 assembly code>>\n");
-    // x86_write_all(x86_insns, stdout);
+    if (opts.iflag)
+    {
+        printf("<<x86 assembly code>>\n");
+        x86_write_all(x86_insns, stdout);
+    }
 
-    // FILE* out = fopen("prgmtest.s", "w");
-    // x86_write_all(x86_insns, out);
-    // fclose(out);
-    // printf("assembly written to prgmtest.s\n");
+    char* asm_filepath = temp_filepath_gen(".s");
+    char* obj_filepath = temp_filepath_gen(".o");
+    FILE* out = fopen(asm_filepath, "w");
+    x86_write_all(x86_insns, out);
+    fclose(out);
+    if (opts.iflag)
+        printf("assembly written to %s\n", asm_filepath);
 
     fclose(file);
-    //x86_insn_delete_all(x86_insns);
+    x86_insn_delete_all(x86_insns);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
-    return;
+
+    pid_t as_pid = fork();
+    if (as_pid == -1)
+    {
+        free(obj_filepath);
+        free(asm_filepath);
+        errorf("failed to spawn assembler process\n");
+        return NULL;
+    }
+    if (as_pid == 0)
+    {
+        char* argv[] = { "/usr/bin/as", asm_filepath, "-o", obj_filepath, NULL };
+        int status = execv(argv[0], argv);
+        if (status == -1)
+        {
+            free(obj_filepath);
+            free(asm_filepath);
+            errorf("failed to execute assembler\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+    int as_status = EXIT_FAILURE;
+    waitpid(as_pid, &as_status, 0);
+    as_status = WEXITSTATUS(as_status);
+    if (as_status)
+    {
+        free(obj_filepath);
+        free(asm_filepath);
+        errorf("assembler has failed to produce an object file, cannot proceed with compilation\n");
+        return NULL;
+    }
+
+    free(asm_filepath);
+    return obj_filepath;
+}
+
+static void delete_array(void** arr, size_t length)
+{
+    for (size_t i = 0; i < length; ++i)
+        free(arr[i]);
+    free(arr);
 }
 
 int main(int argc, char** argv)
 {
     PROGRAM_NAME = argv[0];
+    srand(time(NULL));
     if (argc <= 1)
     {
         errorf("no input files\n");
@@ -216,7 +269,60 @@ int main(int argc, char** argv)
             }
         }
     }
+
+    size_t object_count = argc - optind;
+    char** objects = calloc(object_count, sizeof(char*));
     for (unsigned i = optind; i < argc; ++i)
-        work(argv[i]);
-    return 0;
+    {
+        char* obj_filepath = work(argv[i]);
+        if (obj_filepath == NULL)
+        {
+            delete_array((void**) objects, object_count);
+            return EXIT_FAILURE;
+        }
+        objects[i - optind] = obj_filepath;
+    }
+
+    pid_t ld_pid = fork();
+    if (ld_pid == -1)
+    {
+        delete_array((void**) objects, object_count);
+        errorf("failed to spawn linker process\n");
+        return EXIT_FAILURE;
+    }
+
+    if (ld_pid == 0)
+    {
+        #define NO_LIBRARIES 3
+        char* argv[object_count + NO_LIBRARIES + 4];
+        argv[0] = "/usr/bin/ld";
+        for (size_t i = 0; i < object_count; ++i)
+            argv[i + 1] = objects[i];
+        argv[1 + object_count] = "lib/crt0.o";
+        argv[2 + object_count] = "lib/sdef.o";
+        argv[3 + object_count] = "lib/putint.o";
+        argv[1 + object_count + NO_LIBRARIES] = "-o";
+        argv[2 + object_count + NO_LIBRARIES] = "a.out";
+        argv[3 + object_count + NO_LIBRARIES] = NULL;
+        int status = execv("/usr/bin/ld", argv);
+        if (status == -1)
+        {
+            delete_array((void**) objects, object_count);
+            errorf("failed to execute linker\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    int ld_status = EXIT_FAILURE;
+    waitpid(ld_pid, &ld_status, 0);
+    ld_status = WEXITSTATUS(ld_status);
+    if (ld_status)
+    {
+        delete_array((void**) objects, object_count);
+        errorf("linker has failed to produce an executable\n");
+        return EXIT_FAILURE;
+    }
+    
+    delete_array((void**) objects, object_count);
+    return EXIT_SUCCESS;
 }

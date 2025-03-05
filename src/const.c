@@ -506,3 +506,25 @@ const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[] = {
     "/usr/local/include",
     "/usr/include/x86_64-linux-gnu"
 };
+
+const char* X86_INSN_NAMES[X86I_NO_ELEMENTS] = {
+    "X86I_UNKNOWN",
+    "X86I_LABEL",
+    "X86I_MOV",
+    "X86I_LEA",
+    "X86I_CALL",
+    "X86I_PUSH",
+    "X86I_POP",
+    "X86I_ADD",
+    "X86I_SUB",
+    "X86I_LEAVE",
+    "X86I_RET",
+    "X86I_JMP",
+    "X86I_JE",
+    "X86I_CMP",
+    "X86I_GLOBL",
+    "X86I_STRING",
+    "X86I_TEXT",
+    "X86I_DATA",
+    "X86I_SECTION"
+};

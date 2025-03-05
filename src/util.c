@@ -308,3 +308,22 @@ unsigned get_universal_character_utf8_encoding(unsigned value)
         return first | second | third | (0xF << 28) | (((value >> 18) & 0x3) << 24) | (((value >> 20) & 0x1) << 26);
     return 0;
 }
+
+char* temp_filepath_gen(char* ext)
+{
+    char* cs = "1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM";
+    size_t extlen = strlen(ext);
+    size_t pathlen = 5 + 32 + extlen + 1;
+    char* filepath = malloc(pathlen);
+    filepath[0] = '/';
+    filepath[1] = 't';
+    filepath[2] = 'm';
+    filepath[3] = 'p';
+    filepath[4] = '/';
+    for (int i = 0; i < 32; ++i)
+        filepath[i + 5] = cs[rand() % 62];
+    for (int i = 0; i < extlen; ++i)
+        filepath[37 + i] = ext[i];
+    filepath[pathlen - 1] = '\0';
+    return filepath;
+}

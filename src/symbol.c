@@ -23,16 +23,11 @@ tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
 
 */
 
-// SC_STATEMENT = SC_LABELED_STATEMENT | SC_COMPOUND_STATEMENT | SC_EXPRESSION_STATEMENT | SC_SELECTION_STATEMENT | SC_ITERATION_STATEMENT | SC_JUMP_STATEMENT
-// SC_SELECTION_STATEMENT = SC_IF_STATEMENT | SC_SWITCH_STATEMENT
-// SC_ITERATION_STATEMENT = SC_DO_STATEMENT | SC_WHILE_STATEMENT | SC_FOR_STATEMENT
-// SC_JUMP_STATEMENT = SC_GOTO_STATEMENT | SC_CONTINUE_STATEMENT | SC_BREAK_STATEMENT | SC_RETURN_STATEMENT
-// SC_TYPE_SPECIFIER = SC_BASIC_TYPE_SPECIFIER | SC_STRUCT_UNION_SPECIFIER | SC_ENUM_SPECIFIER | SC_TYPEDEF_NAME
-syntax_component_t* symbol_get_scope(symbol_t* sy)
+static syntax_component_t* syntax_get_scope(syntax_component_t* syn)
 {
-    if (!sy) return NULL;
-    // first, check if it's in a label. if so, it's in function scope
-    syntax_component_t* syn = sy->declarer->parent;
+    if (!syn) return NULL;
+    syntax_component_t* orig = syn;
+    syn = syn->parent;
     if (!syn) return NULL;
     // ISO: 6.2.1 (3)
     if (syn->type == SC_LABELED_STATEMENT)
@@ -43,9 +38,9 @@ syntax_component_t* symbol_get_scope(symbol_t* sy)
     // if not a label, determine whether it is declared in a type specifier or a declarator.
     // if in a declarator (or a declarator itself), get outside of the full declarator before proceeding with the search
     // if in a type specifier, exit the struct, union, or enum before proceeding
-    if (syntax_is_declarator_type(sy->declarer->type) || syntax_is_declarator_type(syn->type))
+    if (syntax_is_declarator_type(orig->type) || syntax_is_declarator_type(syn->type))
     {
-        syn = syntax_get_full_declarator(syn = sy->declarer);
+        syn = syntax_get_full_declarator(syn = orig);
         if (!syn) return NULL;
         syn = syn->parent;
     }
@@ -75,6 +70,12 @@ syntax_component_t* symbol_get_scope(symbol_t* sy)
         }
     }
     return NULL;
+}
+
+syntax_component_t* symbol_get_scope(symbol_t* sy)
+{
+    if (!sy) return NULL;
+    return syntax_get_scope(sy->declarer);
 }
 
 bool scope_is_block(syntax_component_t* scope)
@@ -125,6 +126,13 @@ bool symbol_in_scope(symbol_t* sy, syntax_component_t* syn)
     if (!scope) return false;
     for (; syn && syn != scope; syn = syn->parent);
     return syn == scope;
+}
+
+int symbol_get_scope_distance(syntax_component_t* inner, syntax_component_t* outer)
+{
+    int i = 0;
+    for (; inner && inner != outer; inner = inner->parent);
+    return inner == outer ? i : -1;
 }
 
 char* symbol_get_name(symbol_t* sy)
@@ -328,13 +336,21 @@ symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_names
     if (!id) return NULL;
     symbol_t* sylist = symbol_table_get_all(t, id->id);
     symbol_t* found = NULL;
+    int distance = INT_MAX;
     for (; sylist; sylist = sylist->next)
     {
         if (sylist->declarer == id)
             return sylist;
         c_namespace_t* sns = sylist->ns;
-        if (symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)) && !found)
-            found = sylist;
+        if (symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)))
+        {
+            int d = symbol_get_scope_distance(syntax_get_scope(id), symbol_get_scope(sylist));
+            if (d < distance)
+            {
+                distance = d;
+                found = sylist;
+            }
+        }
     }
     return found;
 }
@@ -349,6 +365,7 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
     symbol_t* sylist = symbol_table_get_all(t, id->id);
     if (count) *count = 0;
     symbol_t* found = NULL;
+    int distance = INT_MAX;
     for (; sylist; sylist = sylist->next)
     {
         if (sylist->declarer == id)
@@ -361,10 +378,17 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
             continue;
         }
         c_namespace_t* sns = sylist->ns;
-        if (count && symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)))
+        if (symbol_in_scope(sylist, id) && (!ns || namespace_equals(ns, sns)))
         {
-            ++(*count);
-            if (!found) found = sylist;
+            syntax_component_t* slscope = symbol_get_scope(sylist);
+            syntax_component_t* idscope = syntax_get_scope(id);
+            int d = symbol_get_scope_distance(idscope, slscope);
+            if (d < distance)
+            {
+                distance = d;
+                found = sylist;
+            }
+            if (count && slscope == idscope) ++(*count);
         }
     }
     return found;

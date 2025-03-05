@@ -64,7 +64,7 @@ ignored
 build
 
 # Libraries folder
-link
+lib
 
 # Build executable
 ecc
@@ -72,6 +72,7 @@ ecc
 # Testing file
 help.c
 help.h
+help
 
 # Temporary files
 temp.c
