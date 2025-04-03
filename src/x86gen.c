@@ -340,6 +340,7 @@ void x86_write(x86_insn_t* insn, FILE* file)
         case X86I_ADD: USUAL_2OP("add")
         case X86I_SUB: USUAL_2OP("sub")
         case X86I_CMP: USUAL_2OP("cmp")
+        case X86I_NOT: USUAL_2OP("not")
 
         op1:
             x86_operand_write(insn->op1, insn->size, file);
@@ -647,6 +648,20 @@ x86_insn_t* x86_generate_subtraction(ir_insn_t* insn, x86_gen_state_t* state)
     return x86_generate_binop(X86I_SUB, insn, state);
 }
 
+x86_insn_t* x86_generate_unop(x86_insn_type_t type, ir_insn_t* insn, x86_gen_state_t* state)
+{
+    x86_insn_t* uninsn = make_basic_x86_insn(type);
+    uninsn->size = c_type_to_x86_operand_size(insn->ctype);
+    uninsn->op2 = ir_operand_to_operand(insn->ctype, insn->ops[0], state);
+    uninsn->op1 = ir_operand_to_operand(insn->ctype, insn->ops[1], state);
+    return uninsn;
+}
+
+x86_insn_t* x86_generate_not(ir_insn_t* insn, x86_gen_state_t* state)
+{
+    return x86_generate_unop(X86I_NOT, insn, state);
+}
+
 x86_insn_t* x86_generate_store_address(ir_insn_t* insn, x86_gen_state_t* state)
 {
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
@@ -864,6 +879,7 @@ x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st)
             case II_RETURN: ADD(x86_generate_return); break;
             case II_ADDITION: ADD(x86_generate_addition); break;
             case II_SUBTRACTION: ADD(x86_generate_subtraction); break;
+            case II_NOT: ADD(x86_generate_not); break;
             case II_STORE_ADDRESS: ADD(x86_generate_store_address); break;
             case II_SUBSCRIPT:
             case II_SUBSCRIPT_ADDRESS:

@@ -599,6 +599,7 @@ typedef enum x86_insn_type
     X86I_SETE,
     X86I_SETL,
     X86I_XOR,
+    X86I_NOT,
 
     /* directives */
     X86I_GLOBL,
