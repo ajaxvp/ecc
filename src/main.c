@@ -294,7 +294,7 @@ int main(int argc, char** argv)
     if (ld_pid == 0)
     {
         #define NO_LIBRARIES 3
-        char* argv[object_count + NO_LIBRARIES + 4];
+        char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
         argv[0] = "/usr/bin/ld";
         for (size_t i = 0; i < object_count; ++i)
             argv[i + 1] = objects[i];
@@ -307,6 +307,7 @@ int main(int argc, char** argv)
         int status = execv("/usr/bin/ld", argv);
         if (status == -1)
         {
+            free(argv);
             delete_array((void**) objects, object_count);
             errorf("failed to execute linker\n");
             exit(EXIT_FAILURE);

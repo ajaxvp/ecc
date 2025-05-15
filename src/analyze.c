@@ -481,13 +481,14 @@ void analyze_member_expression_after(syntax_traverser_t* trav, syntax_component_
 void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __cl(number)(null)
-    char name[len];
+    char* name = malloc(len);
     snprintf(name, len, "__cl%llu", ANALYSIS_TRAVERSER->next_compound_literal);
     syn->cl_id = strdup(name);
     symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
     syn->ctype = type_copy(sy->type);
+    free(name);
 }
 
 void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
