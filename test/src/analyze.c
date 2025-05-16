@@ -7,22 +7,16 @@
 
 static bool tanalyze(char* tlu_str)
 {
-    token_t* tokens = testutils_tokenize(tlu_str);
-    syntax_component_t* tlu = parse(tokens);
+    syntax_component_t* tlu = quickparse(tlu_str);
     if (test_debug) print_syntax(tlu, printf);
     if (!tlu)
-    {
-        free_syntax(tlu, tlu);
-        lex_delete(tokens);
         return false;
-    }
     analysis_error_t* type_errors = type(tlu);
     if (test_debug) dump_errors(type_errors);
     if (type_errors)
     {
         error_delete_all(type_errors);
         free_syntax(tlu, tlu);
-        lex_delete(tokens);
         return false;
     }
     analysis_error_t* errors = analyze(tlu);
@@ -31,21 +25,15 @@ static bool tanalyze(char* tlu_str)
     error_delete_all(errors);
     error_delete_all(type_errors);
     free_syntax(tlu, tlu);
-    lex_delete(tokens);
     return accepted;
 }
 
 static bool tconstexpr(char* tlu_str, unsigned long long expected, c_type_class_t expected_class)
 {
-    lexer_token_t* tokens = testutils_tokenize(tlu_str);
-    syntax_component_t* tlu = parse(tokens);
+    syntax_component_t* tlu = quickparse(tlu_str);
     if (test_debug) print_syntax(tlu, printf);
     if (!tlu)
-    {
-        free_syntax(tlu, tlu);
-        lex_delete(tokens);
         return false;
-    }
     analysis_error_t* type_errors = type(tlu);
     if (test_debug) dump_errors(type_errors);
 
@@ -53,7 +41,6 @@ static bool tconstexpr(char* tlu_str, unsigned long long expected, c_type_class_
         { \
             error_delete_all(type_errors); \
             free_syntax(tlu, tlu); \
-            lex_delete(tokens); \
             return (value); \
         }
     

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "test.h"
 #include "testutils.h"
@@ -7,12 +8,13 @@
 
 static bool tparse(char* tlu_str)
 {
-    lexer_token_t* tokens = testutils_tokenize(tlu_str);
-    syntax_component_t* tlu = parse(tokens);
-    if (test_debug) print_syntax(tlu, printf);
+    syntax_component_t* tlu = quickparse(tlu_str);
+    if (!tlu)
+        return false;
+    if (test_debug)
+        print_syntax(tlu, printf);
     bool accepted = tlu != NULL;
     free_syntax(tlu, tlu);
-    lex_delete(tokens);
     return accepted;
 }
 

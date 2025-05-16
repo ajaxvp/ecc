@@ -68,16 +68,11 @@ lib
 
 # Build executable
 ecc
+test/test
 
 # Testing file
-help.c
-help.h
-help
+*.c
+*.h
 
 # Temporary files
-temp.c
-test/temp.c
-
-# Executable testing
-pt.sh
-prgmtest
+test/*.c

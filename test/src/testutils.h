@@ -3,6 +3,7 @@
 
 #include "../../src/ecc.h"
 
-token_t* testutils_tokenize(char* tlu);
+program_options_t* get_program_options(void);
+syntax_component_t* quickparse(char* tlu_str);
 
 #endif

@@ -21,7 +21,6 @@ typedef struct lex_state
 void lex_state_delete(lex_state_t* state)
 {
     if (!state) return;
-    free(state->data);
     free(state->error);
     free(state);
 }
@@ -416,7 +415,7 @@ preprocessing_token_t* lex_header_name(lex_state_t* state)
     read;
     int ending = c == '<' ? '>' : '"';
     buffer_t* buf = buffer_init();
-    while (in_source_charset(read) && c != '\n' && c != ending)
+    while (in_source_charset(read) && c != '\n' && c != ending && c != EOF)
         buffer_append(buf, c);
     if (c != ending)
     {
@@ -1150,21 +1149,12 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
     return NULL;
 }
 
-preprocessing_token_t* lex(FILE* file, bool dump_error)
+preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error)
 {
     lex_state_t* state = calloc(1, sizeof *state);
 
-    size_t buffer_size = 1024;
-    size_t count = 0;
-    state->data = malloc(buffer_size);
-    for (int c; (c = fgetc(file)) != EOF;)
-    {
-        if (count % 1024 == 0)
-            state->data = realloc(state->data, buffer_size += 1024);
-        state->data[count++] = c;
-    }
-
-    state->length = count;
+    state->data = data;
+    state->length = length;
     state->row = 1;
     state->col = 1;
     state->cursor = 0;
@@ -1261,5 +1251,21 @@ preprocessing_token_t* lex(FILE* file, bool dump_error)
     }
 
     lex_state_delete(state);
+    return tokens;
+}
+
+preprocessing_token_t* lex(FILE* file, bool dump_error)
+{
+    size_t buffer_size = 1024;
+    size_t count = 0;
+    unsigned char* data = malloc(buffer_size);
+    for (int c; (c = fgetc(file)) != EOF;)
+    {
+        if (count % 1024 == 0)
+            data = realloc(data, buffer_size += 1024);
+        data[count++] = c;
+    }
+    preprocessing_token_t* tokens = lex_raw(data, count, dump_error);
+    free(data);
     return tokens;
 }

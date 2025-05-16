@@ -6,7 +6,9 @@
 #include <sys/wait.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <fcntl.h>
 
+#include "../../src/ecc.h"
 #include "test.h"
 
 bool test_debug = false;
@@ -38,11 +40,18 @@ void test(test_exit_code_t (*fn)(void), size_t index)
     pid_t pid = fork();
     if (!pid)
     {
+        int dn = open("/dev/null", O_WRONLY);
+        if (dup2(dn, STDOUT_FILENO) == -1)
+            exit(FAIL_SETUP);
+        if (dup2(dn, STDERR_FILENO) == -1)
+            exit(FAIL_SETUP);
         struct sigaction sa = {0};
         sa.sa_handler = segfault_handler;
         if (sigaction(SIGSEGV, &sa, NULL) == -1)
             exit(FAIL_SETUP);
-        exit(fn());
+        test_exit_code_t result = fn();
+        close(dn);
+        exit(result);
     }
     int status;
     waitpid(pid, &status, 0);
@@ -118,16 +127,6 @@ bool handle_options(int argc, char** argv)
     return true;
 }
 
-bool contains(char** array, size_t length, char* item)
-{
-    for (size_t i = 0; i < length; ++i)
-    {
-        if (!strcmp(array[i], item))
-            return true;
-    }
-    return false;
-}
-
 void run_tests(int argc, char** argv)
 {
     if (!handle_options(argc, argv))
@@ -148,7 +147,7 @@ void run_tests(int argc, char** argv)
     first_pass_test = false;
     for (size_t i = 0; i < nt; ++i)
     {
-        if (!only_selected_tests || contains(argv + optind, argc - optind, test_names[i]))
+        if (!only_selected_tests || contains((void**) argv + optind, argc - optind, test_names[i], (int (*)(void*, void*)) strcmp) != -1)
             test(tests[i], i);
     }
     size_t total = !only_selected_tests ? no_tests : argc - optind;

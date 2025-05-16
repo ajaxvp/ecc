@@ -41,6 +41,8 @@ int usage(void)
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
+    printf("  %-*sLex, preprocess and exit\n", OPTION_DESCRIPTION_LENGTH, "-P");
+    printf("  %-*sLex, preprocess, tokenize, parse, and exit\n", OPTION_DESCRIPTION_LENGTH, "-p");
     return EXIT_FAILURE;
 }
 
@@ -86,6 +88,12 @@ char* work(char* filename)
         }
     }
 
+    if (opts.ppflag)
+    {
+        pp_token_delete_all(tokens);
+        return NULL;
+    }
+
     charconvert(tokens);
     strlitconcat(tokens);
 
@@ -116,6 +124,13 @@ char* work(char* filename)
 
     syntax_component_t* tlu = parse(ts);
     if (!tlu) return NULL;
+
+    if (opts.pflag)
+    {
+        token_delete_all(ts);
+        free_syntax(tlu, tlu);
+        return NULL;
+    }
 
     analysis_error_t* type_errors = type(tlu);
     if (type_errors)
@@ -252,7 +267,8 @@ int main(int argc, char** argv)
         errorf("no input files\n");
         return EXIT_FAILURE;
     }
-    for (int c; (c = getopt(argc, argv, "hi")) != -1;)
+    memset(&opts, 0, sizeof(program_options_t));
+    for (int c; (c = getopt(argc, argv, "hiPp")) != -1;)
     {
         switch (c)
         {
@@ -260,6 +276,12 @@ int main(int argc, char** argv)
                 return usage();
             case 'i':
                 opts.iflag = true;
+                break;
+            case 'P':
+                opts.ppflag = true;
+                break;
+            case 'p':
+                opts.pflag = true;
                 break;
             case '?':
             default:

@@ -160,6 +160,7 @@ void preprocessing_table_delete(preprocessing_table_t* t)
     free(t->key);
     free(t->v_repl_list);
     free(t->v_id_list);
+    free(t);
 }
 
 void preprocessing_table_print(preprocessing_table_t* t, int (*printer)(const char* fmt, ...))

@@ -227,6 +227,8 @@ typedef struct designation designation_t;
 typedef struct program_options
 {
     bool iflag;
+    bool ppflag;
+    bool pflag;
 } program_options_t;
 
 typedef struct preprocessing_token
@@ -1349,6 +1351,7 @@ extern const char* X86_INSN_NAMES[X86I_NO_ELEMENTS];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
+preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error);
 void pp_token_delete(preprocessing_token_t* token);
 void pp_token_delete_all(preprocessing_token_t* tokens);
 void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...));

@@ -21,14 +21,9 @@ int fake_printf(const char* fmt, ...)
 
 static test_exit_code_t ttype1(char* tlu_str, char* type_str)
 {
-    lexer_token_t* tokens = testutils_tokenize(tlu_str);
-    syntax_component_t* tlu = parse(tokens);
+    syntax_component_t* tlu = quickparse(tlu_str);
     if (!tlu)
-    {
-        free_syntax(tlu, tlu);
-        lex_delete(tokens);
         return FAIL;
-    }
     analysis_error_t* errors = type(tlu);
     if (test_debug) print_syntax(tlu, printf);
     if (test_debug) symbol_table_print(tlu->tlu_st, printf);
@@ -44,7 +39,6 @@ static test_exit_code_t ttype1(char* tlu_str, char* type_str)
     }
     error_delete_all(errors);
     free_syntax(tlu, tlu);
-    lex_delete(tokens);
     return pass ? OK : FAIL;
 }
 
