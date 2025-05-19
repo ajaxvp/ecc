@@ -14,7 +14,7 @@ $(EXE): $(BUILD)
 		gcc -g -o $(EXE) $^ $(LIBS)
 
 build/%.o: src/%.c
-		gcc -c -g -Wall -Werror=vla --std=c11 -o $@ $<
+		gcc -c -g -Wall -Werror=vla --std=c99 -o $@ $<
 
 clean:
 		rm -f $(EXE) $(BUILD)

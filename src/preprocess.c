@@ -1438,7 +1438,7 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
         return false;
     }
 
-    if (debug)
+    if (get_program_options()->iflag)
     {
         printf("<<preprocessing tree>>\n");
         pp_component_print(pp_file, printf);
@@ -1447,7 +1447,7 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     // part 2: analyze tree
     bool success = preprocess_preprocessing_file(pp_file, state);
 
-    if (debug)
+    if (get_program_options()->iflag)
     {
         printf("<<preprocessing table>>\n");
         preprocessing_table_print(state->table, printf);
