@@ -223,6 +223,7 @@ typedef struct ir_insn ir_insn_t;
 typedef struct x86_insn x86_insn_t;
 typedef struct symbol_t symbol_t;
 typedef struct designation designation_t;
+typedef struct vector_t vector_t;
 
 typedef struct program_options
 {
@@ -278,10 +279,20 @@ typedef struct preprocessing_token
     };
 } preprocessing_token_t;
 
+typedef struct preprocessing_table
+{
+    char** key;
+    preprocessing_token_t** v_repl_list;
+    vector_t** v_id_list;
+    unsigned size;
+    unsigned capacity;
+} preprocessing_table_t;
+
 typedef struct preprocessing_settings
 {
     char* filepath;
     char* error;
+    preprocessing_table_t* table;
 } preprocessing_settings_t;
 
 typedef struct token
@@ -1491,6 +1502,7 @@ char* strdup(const char* str);
 int* strdup_wide(const int* str);
 int* strdup_widen(const char* str);
 bool contains_substr(char* str, char* substr);
+bool contains_char(char* str, char c);
 bool streq(char* s1, char* s2);
 bool streq_ignore_case(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);

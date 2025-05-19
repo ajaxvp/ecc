@@ -71,6 +71,7 @@ char* work(char* filename)
     settings.filepath = filename;
     char pp_error[MAX_ERROR_LENGTH];
     settings.error = pp_error;
+    settings.table = NULL;
 
     if (!preprocess(&tokens, &settings))
     {

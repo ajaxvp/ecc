@@ -71,6 +71,14 @@ bool contains_substr(char* str, char* substr)
     return false;
 }
 
+bool contains_char(char* str, char c)
+{
+    for (; *str; ++str)
+        if (*str == c)
+            return true;
+    return false;
+}
+
 bool streq(char* s1, char* s2)
 {
     if (s1 == NULL && s2 == NULL)

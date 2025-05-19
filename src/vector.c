@@ -30,6 +30,8 @@ vector_t* vector_add(vector_t* v, void* el)
 
 void* vector_get(vector_t* v, unsigned index)
 {
+    if (!v)
+        return NULL;
     if (index < 0 || index >= v->size)
         return NULL;
     return v->data[index];
