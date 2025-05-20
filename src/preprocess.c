@@ -306,7 +306,7 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
     return end;
 }
 
-// returns the token at the position at the end of the expansion
+// returns the token at the position at the end of the expansion, NULL if expansion failed
 static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing_state_t* state, preprocessing_token_t** start)
 {
     if (start) *start = token;
@@ -317,6 +317,10 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
     preprocessing_table_get(state->table, token->identifier, &repl, &params);
     if (!repl)
         return token;
+    if (params && !is_punctuator(token->next, P_LEFT_PARENTHESIS))
+        return token;
+    if (params)
+        return fail(token, "invocations of function-like macros are not supported yet");
     preprocessing_token_t* inserting = token;
     for (; repl; repl = repl->next)
     {
@@ -325,7 +329,8 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
         cp->col = token->col;
         inserting = insert_token_after(cp, inserting);
         preprocessing_token_t* inner_start = NULL;
-        inserting = expand(inserting, state, &inner_start);
+        if (!(inserting = expand(inserting, state, &inner_start)))
+            return NULL;
         if (start && !*start)
             *start = inner_start;
     }
@@ -1280,7 +1285,8 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
 {
     preprocessing_token_t* seq_start = NULL;
     for (preprocessing_token_t* token = comp->incl_sequence->start; token && token != comp->incl_sequence->end; token = token->next)
-        token = expand(token, state, seq_start ? NULL : &seq_start);
+        if (!(token = expand(token, state, seq_start ? NULL : &seq_start)))
+            return false;
     comp->incl_sequence->start = seq_start;
     if (!is_pp_type(seq_start, PPT_HEADER_NAME))
     {
@@ -1367,7 +1373,8 @@ bool preprocess_control_line(preprocessing_component_t* comp, preprocessing_stat
 bool preprocess_text_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
     for (preprocessing_token_t* token = comp->start; token && token != comp->end; token = token->next)
-        token = expand(token, state, NULL);
+        if (!(token = expand(token, state, NULL)))
+            return false;
     return true;
 }
 
