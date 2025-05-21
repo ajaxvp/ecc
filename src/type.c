@@ -698,6 +698,16 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
         case CTC_UNION:
             if (ct->struct_union.name)
                 printer(" %s", ct->struct_union.name);
+            if (ct->struct_union.member_names)
+            {
+                printer(" { ");
+                VECTOR_FOR(char*, name, ct->struct_union.member_names)
+                {
+                    if (i) printer(", ");
+                    printer("%s", name);
+                }
+                printer(" }");
+            }
             break;
         case CTC_FUNCTION:
             printer("(");

@@ -41,8 +41,9 @@ int usage(void)
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
-    printf("  %-*sLex, preprocess and exit\n", OPTION_DESCRIPTION_LENGTH, "-P");
+    printf("  %-*sLex, preprocess, and exit\n", OPTION_DESCRIPTION_LENGTH, "-P");
     printf("  %-*sLex, preprocess, tokenize, parse, and exit\n", OPTION_DESCRIPTION_LENGTH, "-p");
+    printf("  %-*sLex, preprocess, tokenize, parse, type, analyze, and exit\n", OPTION_DESCRIPTION_LENGTH, "-a");
     return EXIT_FAILURE;
 }
 
@@ -167,6 +168,13 @@ char* work(char* filename)
         symbol_table_print(tlu->tlu_st, printf);
     }
 
+    if (opts.aflag)
+    {
+        token_delete_all(ts);
+        free_syntax(tlu, tlu);
+        return NULL;
+    }
+
     ir_insn_t* insns = linearize(tlu);
 
     if (opts.iflag)
@@ -269,7 +277,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPp")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpa")) != -1;)
     {
         switch (c)
         {
@@ -283,6 +291,9 @@ int main(int argc, char** argv)
                 break;
             case 'p':
                 opts.pflag = true;
+                break;
+            case 'a':
+                opts.aflag = true;
                 break;
             case '?':
             default:

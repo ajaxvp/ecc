@@ -230,6 +230,7 @@ typedef struct program_options
     bool iflag;
     bool ppflag;
     bool pflag;
+    bool aflag;
 } program_options_t;
 
 typedef struct preprocessing_token
