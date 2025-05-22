@@ -812,6 +812,8 @@ typedef enum syntax_component_type_t
     SC_BITWISE_AND_ASSIGNMENT_EXPRESSION,
     SC_BITWISE_OR_ASSIGNMENT_EXPRESSION,
     SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION,
+    SC_PRIMARY_EXPRESSION_IDENTIFIER,
+    SC_DECLARATOR_IDENTIFIER,
 
     SC_NO_ELEMENTS
 } syntax_component_type_t;
@@ -924,6 +926,8 @@ typedef struct syntax_component_t
         // SC_IDENTIFIER
         // SC_ENUMERATION_CONSTANT
         // SC_TYPEDEF_NAME
+        // SC_PRIMARY_EXPRESSION_IDENTIFIER
+        // SC_DECLARATOR_IDENTIFIER
         char* id;
 
         // SC_STRING_LITERAL - strl
@@ -1330,7 +1334,7 @@ void set_print(set_t* s, void (*printer)(void*));
 
 /* const.c */
 extern const char* KEYWORDS[37];
-extern const char* SYNTAX_COMPONENT_NAMES[95];
+extern const char* SYNTAX_COMPONENT_NAMES[SC_NO_ELEMENTS];
 extern const char* SPECIFIER_QUALIFIER_NAMES[9];
 extern const char* ARITHMETIC_TYPE_NAMES[21];
 extern unsigned ARITHMETIC_TYPE_SIZES[21];
@@ -1451,6 +1455,7 @@ long double process_floating_constant(char* con, c_type_class_t* class);
 unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constexpr_type_t cexpr_type);
 unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
 bool syntax_is_assignment_expression(syntax_component_type_t type);
+bool syntax_is_identifier(syntax_component_type_t type);
 
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
@@ -1460,6 +1465,7 @@ void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
 long long type_size(c_type_t* ct);
 void type_delete(c_type_t* ct);
+void symbol_type_delete(c_type_t* ct);
 c_type_t* type_compose(c_type_t* t1, c_type_t* t2);
 bool type_is_compatible(c_type_t* t1, c_type_t* t2);
 bool type_is_compatible_ignore_qualifiers(c_type_t* t1, c_type_t* t2);

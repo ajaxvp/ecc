@@ -141,6 +141,10 @@ char* symbol_get_name(symbol_t* sy)
     switch (sy->declarer->type)
     {
         case SC_IDENTIFIER:
+        case SC_PRIMARY_EXPRESSION_IDENTIFIER:
+        case SC_ENUMERATION_CONSTANT:
+        case SC_DECLARATOR_IDENTIFIER:
+        case SC_TYPEDEF_NAME:
             return sy->declarer->id;
         case SC_COMPOUND_LITERAL:
             return sy->declarer->cl_id;
@@ -219,7 +223,7 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
 void symbol_delete(symbol_t* sy)
 {
     if (!sy) return;
-    type_delete(sy->type);
+    symbol_type_delete(sy->type);
     namespace_delete(sy->ns);
     locator_delete(sy->loc);
     if (sy->designations)

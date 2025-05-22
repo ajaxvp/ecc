@@ -3,6 +3,18 @@
 
 #include "ecc.h"
 
+/*
+
+how types work (mainly so i don't forget):
+ - types should always copied when needed in other data structures using type_copy.
+ - type_copy will NOT copy any structs, unions, or enums, ever. the struct, union, and enum specifiers that generate new structs, unions, and enums
+    each have their own symbol in the symbol table. this symbol has a type associated with it, which is the only instance of the struct/union/enum.
+    the same instance of the struct/union/enum type will be used each time it is needed or used in a derived data structure.
+ - in the same manner, type_delete will NOT delete any structs, unions, or enums. these data structures must be deleted with symbol_type_delete, which
+    should only be used by the symbol table (because the symbols in the symbol table are the only owners of these types)
+
+*/
+
 c_type_t* make_basic_type(c_type_class_t class)
 {
     c_type_t* ct = calloc(1, sizeof *ct);
@@ -13,6 +25,8 @@ c_type_t* make_basic_type(c_type_class_t class)
 c_type_t* type_copy(c_type_t* ct)
 {
     if (!ct) return NULL;
+    if (ct->class == CTC_STRUCTURE || ct->class == CTC_UNION || ct->class == CTC_ENUMERATED)
+        return ct;
     c_type_t* nct = calloc(1, sizeof *nct);
     nct->class = ct->class;
     nct->qualifiers = ct->qualifiers;
@@ -732,10 +746,12 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
     type_humanized_print(ct->derived_from, printer);
 }
 
-void type_delete(c_type_t* ct)
+static void type_delete_internal(c_type_t* ct, bool ignore_owned)
 {
     if (!ct) return;
-    type_delete(ct->derived_from);
+    if (ignore_owned && (ct->class == CTC_STRUCTURE || ct->class == CTC_UNION || ct->class == CTC_ENUMERATED))
+        return;
+    type_delete_internal(ct->derived_from, ignore_owned);
     switch (ct->class)
     {
         case CTC_STRUCTURE:
@@ -757,6 +773,16 @@ void type_delete(c_type_t* ct)
     free(ct);
 }
 
+void type_delete(c_type_t* ct)
+{
+    type_delete_internal(ct, true);
+}
+
+void symbol_type_delete(c_type_t* ct)
+{
+    type_delete_internal(ct, false);
+}
+
 #define ADD_ERROR(syn, fmt, ...) errors = error_list_add(errors, error_init(syn, false, fmt, ## __VA_ARGS__ ))
 #define ADD_WARNING(syn, fmt, ...) errors = error_list_add(errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
 
@@ -769,10 +795,11 @@ c_namespace_t* make_basic_namespace(c_namespace_class_t class)
 
 void assign_type(analysis_error_t* errors, symbol_t* sy);
 
-c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus)
+c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus, c_type_t** working)
 {
     symbol_table_t* st = syntax_get_symbol_table(sus);
     c_type_t* ct = calloc(1, sizeof *ct);
+    if (working) *working = ct;
     switch (sus->sus_sou)
     {
         case SOU_STRUCT: ct->class = CTC_STRUCTURE; break;
@@ -830,7 +857,7 @@ void assign_sus_type(analysis_error_t* errors, symbol_t* sy)
     if (!sy) return;
     if (sy->type) return;
     syntax_component_t* sus = sy->declarer->parent;
-    sy->type = create_struct_type(errors, sus);
+    sy->type = create_struct_type(errors, sus, &sy->type);
     sy->ns = make_basic_namespace(sy->type->class == CTC_STRUCTURE ? NSC_STRUCT : NSC_UNION);
 }
 
@@ -1332,7 +1359,7 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
             type_delete(ct);
             return type_copy(struct_sy->type);
         }
-        return create_struct_type(errors, sus);
+        return create_struct_type(errors, sus, NULL);
     }
 
     // enum specifier
@@ -1395,7 +1422,7 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
 
     symbol_table_t* st = syntax_get_symbol_table(declr);
 
-    while (declr && declr->type != SC_IDENTIFIER)
+    while (declr && declr->type != SC_DECLARATOR_IDENTIFIER)
     {
         switch (declr->type)
         {

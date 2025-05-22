@@ -123,7 +123,7 @@ bool syntax_is_expression_type(syntax_component_type_t type)
         type == SC_BITWISE_AND_ASSIGNMENT_EXPRESSION ||
         type == SC_BITWISE_OR_ASSIGNMENT_EXPRESSION ||
         type == SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION ||
-        type == SC_IDENTIFIER ||
+        type == SC_PRIMARY_EXPRESSION_IDENTIFIER ||
         type == SC_INTEGER_CONSTANT ||
         type == SC_FLOATING_CONSTANT ||
         type == SC_CHARACTER_CONSTANT ||
@@ -133,7 +133,7 @@ bool syntax_is_expression_type(syntax_component_type_t type)
 
 bool syntax_is_concrete_declarator_type(syntax_component_type_t type)
 {
-    return type == SC_IDENTIFIER ||
+    return type == SC_DECLARATOR_IDENTIFIER ||
         type == SC_DECLARATOR ||
         type == SC_ARRAY_DECLARATOR ||
         type == SC_FUNCTION_DECLARATOR ||
@@ -179,7 +179,7 @@ syntax_component_t* syntax_get_declarator_identifier(syntax_component_t* declr)
         return syntax_get_declarator_identifier(declr->adeclr_direct);
     if (declr->type == SC_FUNCTION_DECLARATOR)
         return syntax_get_declarator_identifier(declr->fdeclr_direct);
-    if (declr->type == SC_IDENTIFIER)
+    if (declr->type == SC_DECLARATOR_IDENTIFIER)
         return declr;
     return NULL;
 }
@@ -251,6 +251,15 @@ bool syntax_is_assignment_expression(syntax_component_type_t type)
         type == SC_BITWISE_AND_ASSIGNMENT_EXPRESSION ||
         type == SC_BITWISE_OR_ASSIGNMENT_EXPRESSION ||
         type == SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION;
+}
+
+bool syntax_is_identifier(syntax_component_type_t type)
+{
+    return type == SC_IDENTIFIER ||
+        type == SC_PRIMARY_EXPRESSION_IDENTIFIER ||
+        type == SC_ENUMERATION_CONSTANT ||
+        type == SC_DECLARATOR_IDENTIFIER ||
+        type == SC_TYPEDEF_NAME;
 }
 
 void namespace_delete(c_namespace_t* ns)
@@ -334,7 +343,7 @@ static c_type_t* get_type_by_designation(syntax_component_t* desig, syntax_compo
     {
         if (parent && term && designator == term)
             break;
-        if (designator->type == SC_IDENTIFIER)
+        if (syntax_is_identifier(designator->type))
         {
             if (trace->class != CTC_STRUCTURE && trace->class != CTC_UNION)
                 return NULL;
@@ -739,6 +748,18 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SC_ENUMERATION_CONSTANT:
         {
             ps("enumeration constant: %s\n", s->id);
+            break;
+        }
+        
+        case SC_DECLARATOR_IDENTIFIER:
+        {
+            ps("identifier (declarator): %s\n", s->id);
+            break;
+        }
+        
+        case SC_PRIMARY_EXPRESSION_IDENTIFIER:
+        {
+            ps("identifier (primary expression): %s\n", s->id);
             break;
         }
 
@@ -1245,6 +1266,8 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         case SC_IDENTIFIER:
         case SC_TYPEDEF_NAME:
         case SC_ENUMERATION_CONSTANT:
+        case SC_DECLARATOR_IDENTIFIER:
+        case SC_PRIMARY_EXPRESSION_IDENTIFIER:
         {
             // remove the id from the symbol table if it defines a symbol
             if (tlu && syn->id)
@@ -2004,7 +2027,7 @@ unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type
             break;
         }
 
-        case SC_IDENTIFIER:
+        case SC_PRIMARY_EXPRESSION_IDENTIFIER:
         {
             c_namespace_t ns = get_basic_namespace(NSC_ORDINARY);
             symbol_t* sy = symbol_table_lookup(syntax_get_translation_unit(expr)->tlu_st, expr, &ns);

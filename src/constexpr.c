@@ -115,7 +115,7 @@ designation_t* syntax_to_designation(syntax_component_t* d)
     VECTOR_FOR(syntax_component_t*, designator, d->desig_designators)
     {
         if (i != 0) curr = curr->next = calloc(1, sizeof *curr->next);
-        if (designator->type == SC_IDENTIFIER)
+        if (syntax_is_identifier(designator->type))
         {
             c_namespace_t* ns = syntax_get_namespace(designator);
             symbol_t* sy = symbol_table_lookup(syntax_get_symbol_table(d), designator, ns);
@@ -257,7 +257,7 @@ static void ce_evaluate_integer_value(syntax_component_t* expr, unsigned long lo
             *class = expr->ctype->class;
             break;
         }
-        case SC_IDENTIFIER:
+        case SC_ENUMERATION_CONSTANT:
         {
             c_namespace_t* ns = syntax_get_namespace(expr);
             symbol_t* sy = symbol_table_lookup(syntax_get_symbol_table(expr), expr, ns);

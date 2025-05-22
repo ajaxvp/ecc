@@ -78,6 +78,8 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
         case SC_IDENTIFIER:
         case SC_ENUMERATION_CONSTANT:
         case SC_TYPEDEF_NAME:
+        case SC_DECLARATOR_IDENTIFIER:
+        case SC_PRIMARY_EXPRESSION_IDENTIFIER:
         case SC_FLOATING_CONSTANT:
         case SC_INTEGER_CONSTANT:
         case SC_CHARACTER_CONSTANT:

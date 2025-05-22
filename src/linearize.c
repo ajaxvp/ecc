@@ -859,35 +859,46 @@ void linearize_string_literal_after(syntax_traverser_t* trav, syntax_component_t
     FINALIZE_LINEARIZE;
 }
 
-// identifiers will:
-//  - do nothing if they are part of or are a declarator
-//  - do nothing if they are the right hand side of a member or deref. member expression 
-//  - load the value of the object they designate if it is not used in an lvalue context
-//  - load the address of the object they designate if it is used in an lvalue context
-void linearize_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+void linearize_primary_expression_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (syn->parent &&
-        (syn->parent->type == SC_MEMBER_EXPRESSION || syn->parent->type == SC_DEREFERENCE_MEMBER_EXPRESSION) &&
-        syn->parent->memexpr_id == syn)
-        return;
     SETUP_LINEARIZE;
     c_namespace_t* ns = syntax_get_namespace(syn);
     symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
     namespace_delete(ns);
     if (!sy) report_return;
-    if (sy->declarer != syn)
-    {
-        syn->result_register = MAKE_REGISTER;
-        c_type_t* ptr = calloc(1, sizeof *ptr);
-        ptr->class = CTC_POINTER;
-        ptr->derived_from = type_copy(syn->ctype);
-        ADD_CODE(make_2op, expression_needs_address(syn) ? II_LOAD_ADDRESS : II_LOAD,
-            expression_needs_address(syn) ? ptr : syn->ctype,
-            make_vreg_insn_operand(syn->result_register, true), make_identifier_insn_operand(sy));
-        type_delete(ptr);
-    }
-    else
-        ADD_CODE(make_1op, II_DECLARE, sy->type, make_identifier_insn_operand(sy));
+    syn->result_register = MAKE_REGISTER;
+    c_type_t* ptr = calloc(1, sizeof *ptr);
+    ptr->class = CTC_POINTER;
+    ptr->derived_from = type_copy(syn->ctype);
+    ADD_CODE(make_2op, expression_needs_address(syn) ? II_LOAD_ADDRESS : II_LOAD,
+        expression_needs_address(syn) ? ptr : syn->ctype,
+        make_vreg_insn_operand(syn->result_register, true), make_identifier_insn_operand(sy));
+    type_delete(ptr);
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    c_namespace_t* ns = syntax_get_namespace(syn);
+    symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
+    namespace_delete(ns);
+    if (!sy) report_return;
+    ADD_CODE(make_1op, II_DECLARE, sy->type, make_identifier_insn_operand(sy));
+    FINALIZE_LINEARIZE;
+}
+
+void linearize_enumeration_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!syn->parent) report_return;
+    // we only care about enumeration constants used as a primary expression
+    if (syn->parent->type == SC_ENUMERATOR) return;
+    SETUP_LINEARIZE;
+    syn->result_register = MAKE_REGISTER;
+    constexpr_t* ce = ce_evaluate(syn, CE_INTEGER);
+    if (!ce) report_return;
+    ADD_CODE(make_2op, II_LOAD, syn->ctype, make_vreg_insn_operand(syn->result_register, true), make_immediate_insn_operand(ce->ivalue));
+    constexpr_delete(ce);
     FINALIZE_LINEARIZE;
 }
 
@@ -1411,7 +1422,9 @@ ir_insn_t* linearize(syntax_component_t* tlu)
     trav->after[SC_EXPRESSION] = linearize_expression_after;
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
     trav->after[SC_STRING_LITERAL] = linearize_string_literal_after;
-    trav->after[SC_IDENTIFIER] = linearize_identifier_after;
+    trav->after[SC_DECLARATOR_IDENTIFIER] = linearize_declarator_identifier_after;
+    trav->after[SC_ENUMERATION_CONSTANT] = linearize_enumeration_constant_after;
+    trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = linearize_primary_expression_identifier_after;
     trav->after[SC_DECLARATOR] = linearize_declarator_after;
     trav->after[SC_INIT_DECLARATOR] = linearize_init_declarator_after;
     trav->after[SC_ARRAY_DECLARATOR] = linearize_array_declarator_after;
@@ -1450,6 +1463,10 @@ ir_insn_t* linearize(syntax_component_t* tlu)
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;
     trav->after[SC_STORAGE_CLASS_SPECIFIER] = linearize_no_action_after;
+    trav->after[SC_STRUCT_UNION_SPECIFIER] = linearize_no_action_after;
+    trav->after[SC_STRUCT_DECLARATION] = linearize_no_action_after;
+    trav->after[SC_STRUCT_DECLARATOR] = linearize_no_action_after;
+    trav->after[SC_IDENTIFIER] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

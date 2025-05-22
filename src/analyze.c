@@ -1704,6 +1704,10 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = analyze_function_call_expression_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = analyze_subscript_expression_after;
     trav->after[SC_IDENTIFIER] = analyze_identifier_after;
+    trav->after[SC_TYPEDEF_NAME] = analyze_identifier_after;
+    trav->after[SC_ENUMERATION_CONSTANT] = analyze_identifier_after;
+    trav->after[SC_DECLARATOR_IDENTIFIER] = analyze_identifier_after;
+    trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = analyze_identifier_after;
 
     // statements
     trav->after[SC_LABELED_STATEMENT] = analyze_labeled_statement_after;
