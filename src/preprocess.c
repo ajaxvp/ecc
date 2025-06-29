@@ -1438,7 +1438,7 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
     constexpr_t* ce = ce_evaluate(expr, CE_INTEGER);
     if (!ce)
     {
-        (void) fail(condition->start, "#if directive expression must be a constant expression");
+        (void) fail(condition->start, "#if/#elif directive expression must be a constant expression");
         return 2;
     }
     unsigned long long value = ce->ivalue;
