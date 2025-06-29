@@ -13,6 +13,9 @@ $(OUT): $(BUILD)
 build/%.o: src/%.s
 		as -o $@ $<
 
+build/%.o: src/%.c
+		gcc -pedantic-errors -std=c99 -c -o $@ $<
+
 clean:
 		rm -f $(OUT) $(BUILD)
 		rm -rf build
