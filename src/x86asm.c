@@ -410,7 +410,6 @@ x86_insn_t* make_x86_insn_clear_register(regid_t reg)
 
 x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_file_t* file)
 {
-    x86_insn_type_t itype = X86I_MOV;
     x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);

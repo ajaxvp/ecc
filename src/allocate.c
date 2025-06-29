@@ -94,11 +94,14 @@ static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air)
                 last = insn;
         }
     }
-    printf("liveness ends for ");
-    regid_print(reg, printf);
-    printf(" at: ");
-    air_insn_print(last, air, printf);
-    printf("\n");
+    if (get_program_options()->iflag)
+    {
+        printf("liveness ends for ");
+        regid_print(reg, printf);
+        printf(" at: ");
+        air_insn_print(last, air, printf);
+        printf("\n");
+    }
     return last;
 }
 
@@ -314,11 +317,13 @@ static void allocate_routine(air_routine_t* routine, air_t* air)
 
     find_all_conflicts(routine, a, air);
 
-    map_print(a->map, printf);
+    if (get_program_options()->iflag)
+        map_print(a->map, printf);
 
     coalesce(routine, a, air);
 
-    map_print(a->map, printf);
+    if (get_program_options()->iflag)
+        map_print(a->map, printf);
 
     replace_registers(routine, a, air);
 
