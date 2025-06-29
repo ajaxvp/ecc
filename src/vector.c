@@ -28,6 +28,13 @@ vector_t* vector_add(vector_t* v, void* el)
     return v;
 }
 
+void* vector_pop(vector_t* v)
+{
+    if (v->size == 0)
+        return v;
+    return v->data[--(v->size)];
+}
+
 void* vector_get(vector_t* v, unsigned index)
 {
     if (!v)
@@ -35,6 +42,12 @@ void* vector_get(vector_t* v, unsigned index)
     if (index < 0 || index >= v->size)
         return NULL;
     return v->data[index];
+}
+
+void* vector_peek(vector_t* v)
+{
+    if (!v) return NULL;
+    return vector_get(v, v->size - 1);
 }
 
 int vector_contains(vector_t* v, void* el, int (*c)(void*, void*))

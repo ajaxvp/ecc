@@ -71,8 +71,11 @@ ecc
 test/test
 
 # Testing file
-*.c
-*.h
+/*.c
+/*.h
 
 # Temporary files
 test/*.c
+
+# Brainstorming folder
+brainstorming

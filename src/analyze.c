@@ -12,6 +12,8 @@ typedef struct analysis_syntax_traverser
     syntax_traverser_t base;
     analysis_error_t* errors;
     unsigned long long next_compound_literal;
+    unsigned long long next_string_literal;
+    unsigned long long next_label_uid;
 } analysis_syntax_traverser_t;
 
 analysis_error_t* error_init(syntax_component_t* syn, bool warning, char* fmt, ...)
@@ -224,6 +226,8 @@ RESOLVED ISO SPECIFICATION REQUIREMENTS
 // syn: SC_DECLARATION | SC_FUNCTION_DEFINITION
 static void enforce_6_9_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    if (!syn->parent || syn->parent->type != SC_TRANSLATION_UNIT)
+        return;
     vector_t* declspecs = NULL;
     switch (syn->type)
     {
@@ -383,11 +387,7 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
                 if (!can_assign(tlhs, rhs->ctype, rhs))
                 {
                     // ISO: 6.5.2.2 (2)
-                    type_humanized_print(tlhs, printf);
-                    printf("\n");
-                    type_humanized_print(rhs->ctype, printf);
-                    printf("\n");
-                    ADD_ERROR(rhs, "invalid type of argument for this function call");
+                    ADD_ERROR(rhs, "invalid type for argument %d of this function call", i + 1);
                     pass = false;
                 }
             }
@@ -482,12 +482,24 @@ void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax
 {
     const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __cl(number)(null)
     char* name = malloc(len);
-    snprintf(name, len, "__cl%llu", ANALYSIS_TRAVERSER->next_compound_literal);
+    snprintf(name, len, "__cl%llu", ANALYSIS_TRAVERSER->next_compound_literal++);
     syn->cl_id = strdup(name);
     symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
     syn->ctype = type_copy(sy->type);
+    free(name);
+}
+
+void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __sl(number)(null)
+    char* name = malloc(len);
+    snprintf(name, len, "__sl%llu", ANALYSIS_TRAVERSER->next_string_literal++);
+    syn->strl_id = strdup(name);
+    symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
+    sy->ns = make_basic_namespace(NSC_ORDINARY);
+    sy->type = type_copy(syn->ctype);
     free(name);
 }
 
@@ -550,6 +562,10 @@ void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_compone
         // ISO: 6.5.3.2 (1)
         pass = true;
     // TODO: 6.5.3.2 (1) requires lvalues to be handled here as well
+    else if (syntax_is_lvalue(syn->uexpr_operand))
+        // ISO: 6.5.3.2 (1)
+        pass = true;
+    
     if (pass)
     {
         c_type_t* ct = calloc(1, sizeof *ct);
@@ -560,7 +576,7 @@ void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_compone
     }
     else
     {
-        ADD_ERROR(syn, "invalid operand to address operator");
+        ADD_ERROR(syn, "invalid operand to address-of operator");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -620,6 +636,8 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
 {
     bool pass = true;
     c_type_t* otype = syn->uexpr_operand->ctype;
+    if (syn->type == SC_SIZEOF_TYPE_EXPRESSION)
+        otype = create_type(syn->uexpr_operand, syn->uexpr_operand->tn_declarator);
     if (otype->class == CTC_FUNCTION)
     {
         // ISO: 6.5.3.4 (1)
@@ -632,6 +650,8 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
         ADD_ERROR(syn, "sizeof operand cannot be of incomplete type");
         pass = false;
     }
+    if (syn->type == SC_SIZEOF_TYPE_EXPRESSION)
+        type_delete(otype);
     // TODO: 6.5.3.4 (1) specifies sizeof cannot take a bitfield member
     if (pass)
         // ISO: 6.3.5.4 (4)
@@ -725,6 +745,9 @@ void analyze_addition_expression_after(syntax_traverser_t* trav, syntax_componen
     else if (type_is_integer(tlhs) && trhs->class == CTC_POINTER)
         // ISO: 6.5.6 (2), 6.5.6 (8)
         ct = type_copy(trhs);
+    else if (tlhs->class == CTC_POINTER && type_is_integer(trhs))
+        // ISO: 6.5.6 (2), 6.5.6 (8)
+        ct = type_copy(tlhs);
     if (!ct)
     {
         ADD_ERROR(syn, "invalid operands of addition expression");
@@ -1174,6 +1197,17 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
 void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
     syn->ctype = type_copy(sy->type);
+        if (sy->type->class == CTC_ARRAY && syn->parent &&
+        syn->parent->type != SC_REFERENCE_EXPRESSION &&
+        syn->parent->type != SC_SIZEOF_EXPRESSION &&
+        syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
+    {
+        // ISO: 6.3.2 (3)
+        type_delete(syn->ctype);
+        c_type_t* ptr_type = make_basic_type(CTC_POINTER);
+        ptr_type->derived_from = type_copy(sy->type->derived_from);
+        syn->ctype = ptr_type;
+    }
     if (sy->type->class == CTC_FUNCTION && syn->parent &&
         syn->parent->type != SC_REFERENCE_EXPRESSION &&
         syn->parent->type != SC_SIZEOF_EXPRESSION &&
@@ -1439,6 +1473,12 @@ void enforce_6_8_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
         ADD_ERROR(syn, "case and default labels may only exist within a switch statement");
 }
 
+void analyze_labeled_statement_before(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->lstmt_id)
+        syn->lstmt_uid = ++(ANALYSIS_TRAVERSER->next_label_uid);
+}
+
 void analyze_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     enforce_6_8_1_para_2(trav, syn);
@@ -1453,6 +1493,7 @@ void analyze_if_statement_after(syntax_traverser_t* trav, syntax_component_t* sy
 
 void analyze_switch_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    ADD_ERROR(syn, "switch statements are not supported yet");
     if (!type_is_integer(syn->swstmt_condition->ctype))
         // ISO: 6.8.4.2 (1)
         ADD_ERROR(syn->swstmt_condition, "controlling expression of a switch statement must be of integer type");
@@ -1498,6 +1539,7 @@ void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_componen
 
 void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    ADD_ERROR(syn, "continue statements are not supported yet");
     syntax_component_t* loop = syn;
     for (; loop && loop->type != SC_FOR_STATEMENT && loop->type != SC_WHILE_STATEMENT && loop->type != SC_DO_STATEMENT; loop = loop->parent);
     if (!loop)
@@ -1507,6 +1549,7 @@ void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component
 
 void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    ADD_ERROR(syn, "break statements are not supported yet");
     syntax_component_t* parent = syn;
     for (; parent &&
         parent->type != SC_FOR_STATEMENT &&
@@ -1631,6 +1674,24 @@ void analyze_struct_union_specifier_after(syntax_traverser_t* trav, syntax_compo
         analyze_complete_struct_union_specifier_after(trav, syn);
 }
 
+void analyze_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->ctype->class == CTC_LONG_DOUBLE || type_is_complex(syn->ctype))
+        ADD_ERROR(syn, "long double literals and complex numbers are not supported yet");
+}
+
+void analyze_function_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!syn->fdeclr_parameter_declarations)
+        ADD_ERROR(syn, "functions without prototypes are not supported yet");
+}
+
+void analyze_storage_class_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->scs == SCS_REGISTER)
+        ADD_WARNING(syn, "the 'register' storage class will not prioritize an object to remain in a register");
+}
+
 /*
 
 for an identifier, check to see if it's declaring or referencing.
@@ -1708,19 +1769,26 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_ENUMERATION_CONSTANT] = analyze_identifier_after;
     trav->after[SC_DECLARATOR_IDENTIFIER] = analyze_identifier_after;
     trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = analyze_identifier_after;
+    trav->after[SC_STRING_LITERAL] = analyze_string_literal_after;
+    trav->after[SC_FLOATING_CONSTANT] = analyze_floating_constant_after;
+    trav->after[SC_STORAGE_CLASS_SPECIFIER] = analyze_storage_class_specifier_after;
 
     // statements
+    trav->before[SC_LABELED_STATEMENT] = analyze_labeled_statement_before;
     trav->after[SC_LABELED_STATEMENT] = analyze_labeled_statement_after;
     trav->after[SC_IF_STATEMENT] = analyze_if_statement_after;
     trav->after[SC_FOR_STATEMENT] = analyze_iteration_statement_after;
     trav->after[SC_DO_STATEMENT] = analyze_iteration_statement_after;
     trav->after[SC_WHILE_STATEMENT] = analyze_iteration_statement_after;
     trav->after[SC_CONTINUE_STATEMENT] = analyze_continue_statement_after;
+    trav->after[SC_BREAK_STATEMENT] = analyze_break_statement_after;
     trav->after[SC_RETURN_STATEMENT] = analyze_return_statement_after;
+    trav->after[SC_SWITCH_STATEMENT] = analyze_switch_statement_after;
 
     // declarations
     trav->after[SC_INIT_DECLARATOR] = analyze_init_declarator_after;
     trav->after[SC_STRUCT_UNION_SPECIFIER] = analyze_struct_union_specifier_after;
+    trav->after[SC_FUNCTION_DECLARATOR] = analyze_function_declarator_after;
 
     traverse(trav);
     analysis_error_t* errors = ANALYSIS_TRAVERSER->errors;

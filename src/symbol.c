@@ -135,22 +135,31 @@ int symbol_get_scope_distance(syntax_component_t* inner, syntax_component_t* out
     return inner == outer ? i : -1;
 }
 
-char* symbol_get_name(symbol_t* sy)
+static char* syntax_get_identifier_name(syntax_component_t* syn)
 {
-    if (!sy) return NULL;
-    switch (sy->declarer->type)
+    if (!syn) return NULL;
+    switch (syn->type)
     {
         case SC_IDENTIFIER:
         case SC_PRIMARY_EXPRESSION_IDENTIFIER:
         case SC_ENUMERATION_CONSTANT:
         case SC_DECLARATOR_IDENTIFIER:
         case SC_TYPEDEF_NAME:
-            return sy->declarer->id;
+            return syn->id;
         case SC_COMPOUND_LITERAL:
-            return sy->declarer->cl_id;
+            return syn->cl_id;
+        case SC_STRING_LITERAL:
+            return syn->strl_id;
         default:
             return NULL;
     }
+}
+
+char* symbol_get_name(symbol_t* sy)
+{
+    if (!sy) return NULL;
+    if (!sy->declarer) return "__anonymous_lv__";
+    return syntax_get_identifier_name(sy->declarer);
 }
 
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
@@ -223,7 +232,7 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
 void symbol_delete(symbol_t* sy)
 {
     if (!sy) return;
-    symbol_type_delete(sy->type);
+    type_delete(sy->type);
     namespace_delete(sy->ns);
     locator_delete(sy->loc);
     if (sy->designations)
@@ -276,6 +285,7 @@ symbol_table_t* symbol_table_init(void)
     memset(t->value, 0, 50 * sizeof(symbol_t*));
     t->size = 0;
     t->capacity = 50;
+    t->unique_types = vector_init();
     return t;
 }
 
@@ -327,7 +337,7 @@ symbol_t* symbol_table_get_all(symbol_table_t* t, char* k)
 // uses an exact identifier object as opposed to just a name
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id)
 {
-    symbol_t* sylist = symbol_table_get_all(t, id->id);
+    symbol_t* sylist = symbol_table_get_all(t, syntax_get_identifier_name(id));
     for (; sylist && sylist->declarer != id; sylist = sylist->next);
     return sylist;
 }
@@ -338,7 +348,7 @@ symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id)
 symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns)
 {
     if (!id) return NULL;
-    symbol_t* sylist = symbol_table_get_all(t, id->id);
+    symbol_t* sylist = symbol_table_get_all(t, syntax_get_identifier_name(id));
     symbol_t* found = NULL;
     int distance = INT_MAX;
     for (; sylist; sylist = sylist->next)
@@ -366,7 +376,7 @@ symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_names
 symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, size_t* count, bool* first)
 {
     if (first) *first = false;
-    symbol_t* sylist = symbol_table_get_all(t, id->id);
+    symbol_t* sylist = symbol_table_get_all(t, syntax_get_identifier_name(id));
     if (count) *count = 0;
     symbol_t* found = NULL;
     int distance = INT_MAX;
@@ -466,6 +476,7 @@ void symbol_table_delete(symbol_table_t* t, bool free_contents)
             symbol_delete_list(t->value[i]);
         free(t->key[i]);
     }
+    vector_deep_delete(t->unique_types, (void (*)(void*)) symbol_type_delete);
     free(t->key);
     free(t->value);
     free(t);

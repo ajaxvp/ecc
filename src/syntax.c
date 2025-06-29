@@ -401,6 +401,8 @@ c_namespace_t* syntax_get_namespace(syntax_component_t* id)
         syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION))
     {
         c_type_t* ty = syn->memexpr_expression->ctype;
+        if (syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
+            ty = ty ? ty->derived_from : NULL;
         if (!ty || (ty->class != CTC_STRUCTURE && ty->class != CTC_UNION))
             return NULL;
         c_namespace_t* ns = calloc(1, sizeof *ns);
@@ -544,6 +546,32 @@ bool syntax_is_modifiable_lvalue(syntax_component_t* syn)
 
     // ISO: 6.3.2.1 (1)
     return true;
+}
+
+/*
+
+in the following conditions, the lvalue expression x must acquire an address:
+  x in &x
+  x in x++
+  x in x--
+  x in x.m
+  x in x = y
+  x in x += y (et. al. compound assignment operators)
+
+*/
+bool syntax_is_in_lvalue_context(syntax_component_t* syn)
+{
+    if (!syn) return false;
+    if (!syn->parent) return false;
+    syntax_component_type_t type = syn->parent->type;
+    return type == SC_REFERENCE_EXPRESSION ||
+        type == SC_PREFIX_INCREMENT_EXPRESSION ||
+        type == SC_PREFIX_DECREMENT_EXPRESSION ||
+        type == SC_POSTFIX_INCREMENT_EXPRESSION ||
+        type == SC_POSTFIX_DECREMENT_EXPRESSION ||
+        (type == SC_MEMBER_EXPRESSION && syn->parent->memexpr_expression == syn) ||
+        (syntax_is_assignment_expression(type) && syn->parent->bexpr_lhs == syn) ||
+        (type == SC_INIT_DECLARATOR && syn->parent->ideclr_declarator == syn);
 }
 
 // using a declaring identifier, get its declaration specifiers, if any
@@ -936,6 +964,12 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         case SC_INTEGER_CONSTANT:
         {
             ps("integer constant (ULL): %llu\n", s->intc);
+            break;
+        }
+
+        case SC_FLOATING_CONSTANT:
+        {
+            ps("floating constant (LD): %Lf\n", s->floc);
             break;
         }
 
@@ -1464,6 +1498,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         {
             free(syn->strl_reg);
             free(syn->strl_wide);
+            free(syn->strl_id);
             break;
         }
         case SC_IF_STATEMENT:
@@ -1563,6 +1598,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
     }
     type_delete(syn->ctype);
     insn_delete_all(syn->code);
+    air_insn_delete_all(syn->acode);
     free(syn);
 }
 
@@ -1805,6 +1841,19 @@ long double process_floating_constant(char* con, c_type_class_t* class)
 {
     char* end = NULL;
     long double value = strtof(con, &end);
+
+    if (end && (streq(end, "f") || streq(end, "F")))
+    {
+        *class = CTC_FLOAT;
+        return value;
+    }
+
+    if (end && (streq(end, "l") || streq(end, "L")))
+    {
+        *class = CTC_LONG_DOUBLE;
+        return value;
+    }
+
     if (errno == ERANGE || !end || *end)
     {
         errno = 0;
@@ -1812,13 +1861,7 @@ long double process_floating_constant(char* con, c_type_class_t* class)
         return 0.0L;
     }
 
-    if (ends_with_ignore_case(con, "f"))
-        *class = CTC_FLOAT;
-    else if (ends_with_ignore_case(con, "l"))
-        *class = CTC_LONG_DOUBLE;
-    else
-        *class = CTC_DOUBLE;
-    
+    *class = CTC_DOUBLE;
     return value;
 }
 

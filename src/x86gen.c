@@ -4,29 +4,7 @@
 
 #include "ecc.h"
 
-#define min(x, y) ((x) < (y) ? (x) : (y))
-
 #define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 3
-
-typedef enum x86_register
-{
-    X86R_RAX = 1,
-    X86R_RDI,
-    X86R_RSI,
-    X86R_RDX,
-    X86R_RCX,
-    X86R_R8,
-    X86R_R9,
-    X86R_R10,
-    X86R_R11,
-    X86R_RBX,
-    X86R_R12,
-    X86R_R13,
-    X86R_R14,
-    X86R_R15,
-    X86R_RSP,
-    X86R_RBP
-} x86_register_t;
 
 const char* X86_REG64_MAP[] = {
     "rax",

@@ -31,6 +31,11 @@
 #define STRUCT_UNION_ALIGNMENT 8
 #define ALIGN(x, req) ((x) + ((req) - ((x) % (req))))
 
+#define UNSIGNED_CHAR_WIDTH 1
+#define UNSIGNED_SHORT_INT_WIDTH 2
+#define UNSIGNED_INT_WIDTH 4
+#define UNSIGNED_LONG_LONG_INT_WIDTH 8
+
 #define BOOL_MAX (unsigned char) 0xff
 #define CHAR_MAX (signed char) 0x7f
 #define SIGNED_CHAR_MAX (signed char) 0x7f
@@ -48,9 +53,47 @@
 #define C_TYPE_PTRSIZE_T CTC_LONG_INT
 #define C_TYPE_WCHAR_T CTC_INT
 
+#define min(x, y) ((x) < (y) ? (x) : (y))
+#define max(x, y) ((x) > (y) ? (x) : (y))
+
 typedef unsigned long long regid_t;
 
 #define INVALID_VREGID ((regid_t) (0))
+#define NO_PHYSICAL_REGISTERS 512
+
+typedef enum air_locale
+{
+    LOC_UNKNOWN,
+    LOC_X86_64
+} air_locale_t;
+
+typedef enum x86_register
+{
+    X86R_RAX = 1,
+    X86R_RDI,
+    X86R_RSI,
+    X86R_RDX,
+    X86R_RCX,
+    X86R_R8,
+    X86R_R9,
+    X86R_R10,
+    X86R_R11,
+    X86R_RBX,
+    X86R_RSP,
+    X86R_RBP,
+    X86R_R12,
+    X86R_R13,
+    X86R_R14,
+    X86R_R15,
+    X86R_XMM0,
+    X86R_XMM1,
+    X86R_XMM2,
+    X86R_XMM3,
+    X86R_XMM4,
+    X86R_XMM5,
+    X86R_XMM6,
+    X86R_XMM7
+} x86_register_t;
 
 typedef enum c_keyword
 {
@@ -231,6 +274,7 @@ typedef struct program_options
     bool ppflag;
     bool pflag;
     bool aflag;
+    bool xflag;
 } program_options_t;
 
 typedef struct preprocessing_token
@@ -441,6 +485,194 @@ typedef struct locator
         } array;
     };
 } locator_t;
+
+typedef enum air_insn_operand_type {
+    AOP_SYMBOL,
+    AOP_REGISTER,
+    AOP_INDIRECT_REGISTER,
+    AOP_INDIRECT_SYMBOL,
+    AOP_INTEGER_CONSTANT,
+    AOP_FLOATING_CONSTANT,
+    AOP_LABEL,
+} air_insn_operand_type_t;
+
+typedef struct air_insn_operand {
+    air_insn_operand_type_t type;
+    union
+    {
+        symbol_t* sy;
+        regid_t reg;
+        struct
+        {
+            regid_t id;
+            regid_t roffset;
+            long long offset;
+            long long factor;
+        } inreg;
+        struct
+        {
+            symbol_t* sy;
+            long long offset;
+        } insy;
+        unsigned long long ic;
+        long double fc;
+        struct
+        {
+            unsigned long long id;
+            char disambiguator;
+        } label;
+    } content;
+} air_insn_operand_t;
+
+// examples:
+//  AIR_DECLARE:                     i32 x;
+//  AIR_LOAD:                        i32 _1 = x;
+//  AIR_LOAD_ADDR:                   i32 _1 = &x + 16;
+//  AIR_ADD:                         i32 _3 = _1 + _2;
+//  AIR_RETURN:                      return _1;
+//  AIR_FUNC_CALL:                   i32 _5 = _1(_4, _3, _2);
+//  AIR_PHI:                         i32 _3 = phi(_1, _2);
+//  AIR_NOP:                         <none>
+//  AIR_ASSIGN:                      x = _1;
+//  AIR_INDIRECT_ASSIGN:             *_1 = _2;
+//  AIR_NEGATE:                      int _2 = -_1;
+//  AIR_MULTIPLY:                    int _3 = _1 * _2;
+//  AIR_DEREFERENCE:                 int _2 = *_1;
+//  AIR_INDIRECT_ADD:                *_1 += _2;
+//  AIR_INDIRECT_SUBTRACT:           *_1 -= _2;
+//  AIR_INDIRECT_MULTIPLY:           *_1 *= _2;
+//  AIR_INDIRECT_DIVIDE:             *_1 /= _2;
+//  AIR_INDIRECT_MODULO:             *_1 %= _2;
+//  AIR_INDIRECT_SHIFT_LEFT:         *_1 <<= _2;
+//  AIR_INDIRECT_SHIFT_RIGHT:        *_1 >>= _2;
+//  AIR_INDIRECT_SIGNED_SHIFT_RIGHT: *_1 >>>= _2;
+//  AIR_INDIRECT_AND:                *_1 &= _2;
+//  AIR_INDIRECT_XOR:                *_1 ^= _2;
+//  AIR_INDIRECT_OR:                 *_1 |= _2;
+//  AIR_POSATE:                      int _2 = +_1;
+//  AIR_COMPLEMENT:                  int _2 = ~_1;
+//  AIR_NOT:                         int _2 = !_1;
+//  AIR_SEXT:                        int _2 = sext(_1);
+//  AIR_ZEXT:                        int _2 = zext(_1);
+//  AIR_S2D:                         double _2 = (double) _1;
+//  AIR_D2S:                         float _2 = (float) _1;
+//  AIR_DIVIDE:                      int _3 = _1 / _2;
+//  AIR_MODULO:                      int _3 = _1 % _2;
+//  AIR_SHIFT_LEFT:                  int _3 = _1 << _2;
+//  AIR_SHIFT_RIGHT:                 int _3 = _1 >> _2;
+//  AIR_SIGNED_SHIFT_RIGHT:          int _3 = _1 >>> _2;
+//  AIR_LESS_EQUAL:                  int _3 = _1 <= _2;
+//  AIR_LESS:                        int _3 = _1 < _2;
+//  AIR_GREATER_EQUAL:               int _3 = _1 >= _2;
+//  AIR_GREATER:                     int _3 = _1 > _2;
+//  AIR_EQUAL:                       int _3 = _1 == _2;
+//  AIR_INEQUAL:                     int _3 = _1 != _2;
+//  AIR_AND:                         int _3 = _1 & _2;
+//  AIR_XOR:                         int _3 = _1 ^ _2;
+//  AIR_OR:                          int _3 = _1 | _2;
+//  AIR_JZ:                          jz(.L1, _1);
+//  AIR_JNZ:                         jnz(.L1, _1);
+//  AIR_JMP:                         jmp(.L1);
+//  AIR_LABEL:                       .L1:
+//  AIR_DIRECT_SHIFT_LEFT:           _1 <<= _2;
+//  AIR_DIRECT_OR:                   _1 |= _2;
+//  AIR_DIRECT_XOR:                  _1 ^= _2;
+
+typedef enum air_insn_type {
+    AIR_DECLARE,
+    AIR_LOAD,
+    AIR_LOAD_ADDR,
+    AIR_ADD,
+    AIR_RETURN,
+    AIR_FUNC_CALL,
+    AIR_PHI,
+    AIR_NOP,
+    AIR_ASSIGN,
+    AIR_NEGATE,
+    AIR_MULTIPLY,
+    AIR_DIRECT_ADD,
+    AIR_DIRECT_SUBTRACT,
+    AIR_DIRECT_MULTIPLY,
+    AIR_DIRECT_DIVIDE,
+    AIR_DIRECT_MODULO,
+    AIR_DIRECT_SHIFT_LEFT,
+    AIR_DIRECT_SHIFT_RIGHT,
+    AIR_DIRECT_SIGNED_SHIFT_RIGHT,
+    AIR_DIRECT_AND,
+    AIR_DIRECT_XOR,
+    AIR_DIRECT_OR,
+    AIR_POSATE,
+    AIR_COMPLEMENT,
+    AIR_NOT,
+    AIR_SEXT,
+    AIR_ZEXT,
+    AIR_S2D,
+    AIR_D2S,
+    AIR_S2SI,
+    AIR_S2UI,
+    AIR_D2SI,
+    AIR_D2UI,
+    AIR_SI2S,
+    AIR_UI2S,
+    AIR_SI2D,
+    AIR_UI2D,
+    AIR_DIVIDE,
+    AIR_MODULO,
+    AIR_SHIFT_LEFT,
+    AIR_SHIFT_RIGHT,
+    AIR_SIGNED_SHIFT_RIGHT,
+    AIR_LESS_EQUAL,
+    AIR_LESS,
+    AIR_GREATER_EQUAL,
+    AIR_GREATER,
+    AIR_EQUAL,
+    AIR_INEQUAL,
+    AIR_AND,
+    AIR_XOR,
+    AIR_OR,
+    AIR_JZ,
+    AIR_JNZ,
+    AIR_JMP,
+    AIR_LABEL,
+    AIR_PUSH
+} air_insn_type_t;
+
+typedef struct air_insn air_insn_t;
+
+typedef struct air_insn {
+    air_insn_type_t type;
+    c_type_t* ct;
+    air_insn_t* prev;
+    air_insn_t* next;
+    size_t noops;
+    air_insn_operand_t** ops;
+    struct {
+        // function calls that return structs have C type "pointer to struct." this disambiguates struct returns from ptr to struct returns. 
+        bool fcall_sret;
+    } metadata;
+} air_insn_t;
+
+typedef struct air_data {
+    bool readonly;
+    symbol_t* sy;
+    unsigned char* data;
+} air_data_t;
+
+typedef struct air_routine {
+    symbol_t* sy;
+    air_insn_t* insns;
+    symbol_t* retptr;
+} air_routine_t;
+
+typedef struct air {
+    vector_t* rodata; // <air_data_t*>
+    vector_t* data; // <air_data_t*>
+    vector_t* routines; // <air_routine_t*>
+    symbol_table_t* st;
+    air_locale_t locale;
+    regid_t next_available_temporary;
+    unsigned long long next_available_lv;
+} air_t;
 
 typedef enum ir_insn_operand_type
 {
@@ -836,11 +1068,20 @@ typedef enum syntax_component_type_t
 typedef struct syntax_component_t
 {
     syntax_component_type_t type;
-    c_type_t* ctype;
-    ir_insn_t* code;
-    regid_t result_register;
     unsigned row, col;
     struct syntax_component_t* parent;
+
+    // additional information
+    c_type_t* ctype;
+    ir_insn_t* code;
+    air_insn_t* acode;
+
+    // type-specific additional info for linear IR transformation
+
+    // expression types
+    regid_t expr_reg;
+    regid_t result_register;
+
     union
     {
         // SC_TRANSLATION_UNIT - tlu
@@ -933,6 +1174,7 @@ typedef struct syntax_component_t
         // SC_STRING_LITERAL - strl
         struct
         {
+            char* strl_id;
             char* strl_reg;
             int* strl_wide;
             struct syntax_component_t* strl_length; // SC_INTEGER_CONSTANT
@@ -1016,6 +1258,8 @@ typedef struct syntax_component_t
             struct syntax_component_t* lstmt_id; // SC_IDENTIFIER
             struct syntax_component_t* lstmt_case_expression; // SC_CONSTANT_EXPRESSION
             struct syntax_component_t* lstmt_stmt; // SC_STATEMENT
+            // additional info
+            unsigned long long lstmt_uid;
         };
 
         // SC_COMPOUND_STATEMENT - cstmt
@@ -1261,6 +1505,7 @@ typedef struct symbol_table_t
     symbol_t** value;
     unsigned size;
     unsigned capacity;
+    vector_t* unique_types; // <c_type_t*>
 } symbol_table_t;
 
 typedef struct analysis_error
@@ -1324,6 +1569,8 @@ vector_t* vector_deep_copy(vector_t* v, void* (*copy_member)(void*));
 bool vector_equals(vector_t* v1, vector_t* v2, bool (*equals)(void*, void*));
 void vector_delete(vector_t* v);
 void vector_deep_delete(vector_t* v, void (*deleter)(void*));
+void* vector_pop(vector_t* v);
+void* vector_peek(vector_t* v);
 
 /* set.c */
 set_t* set_init(int (*comparator)(void*, void*));
@@ -1456,13 +1703,16 @@ unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type
 unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
 bool syntax_is_assignment_expression(syntax_component_type_t type);
 bool syntax_is_identifier(syntax_component_type_t type);
+bool syntax_is_in_lvalue_context(syntax_component_t* syn);
 
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
+c_type_t* make_reference_type(c_type_t* ct);
 c_type_t* integer_promotions(c_type_t* ct);
 c_type_t* default_argument_promotions(c_type_t* ct);
 void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
+long long type_alignment(c_type_t* ct);
 long long type_size(c_type_t* ct);
 void type_delete(c_type_t* ct);
 void symbol_type_delete(c_type_t* ct);
@@ -1493,6 +1743,10 @@ bool type_is_arithmetic_type(c_type_class_t class);
 bool type_is_arithmetic(c_type_t* ct);
 bool type_is_scalar_type(c_type_class_t class);
 bool type_is_scalar(c_type_t* ct);
+bool type_is_sua_type(c_type_class_t class);
+bool type_is_sua(c_type_t* ct);
+bool type_is_character_type(c_type_class_t class);
+bool type_is_character(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);
 c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr);
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));
@@ -1560,6 +1814,28 @@ ir_insn_t* make_2op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op1
 
 bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2);
 
+/* air.c */
+
+air_t* airinize(syntax_component_t* tlu);
+void air_print(air_t* air, int (*printer)(const char* fmt, ...));
+void air_insn_delete_all(air_insn_t* insns);
+air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting);
+air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting);
+air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op);
+void air_insn_operand_delete(air_insn_operand_t* op);
+air_insn_operand_t* air_insn_symbol_operand_init(symbol_t* sy);
+air_insn_operand_t* air_insn_register_operand_init(regid_t reg);
+air_insn_operand_t* air_insn_indirect_register_operand_init(regid_t reg, long long offset, regid_t roffset, long long factor);
+air_insn_operand_t* air_insn_indirect_symbol_operand_init(symbol_t* sy, long long offset);
+air_insn_operand_t* air_insn_integer_constant_operand_init(unsigned long long ic);
+air_insn_operand_t* air_insn_floating_constant_operand_init(long double fc);
+air_insn_operand_t* air_insn_label_operand_init(unsigned long long label, char disambiguator);
+air_insn_t* air_insn_init(air_insn_type_t type, size_t noops);
+bool air_insn_creates_temporary(air_insn_t* insn);
+
+/* localize.c */
+void localize(air_t* air, air_locale_t locale);
+
 /* iropt.c */
 
 ir_opt_options_t* ir_opt_profile_basic(void);
@@ -1593,6 +1869,7 @@ void designation_delete(designation_t* desig);
 void designation_delete_all(designation_t* desig);
 designation_t* designation_concat(designation_t* d1, designation_t* d2);
 constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
+void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** ct);
 
 /* ecc.c */
 program_options_t* get_program_options(void);

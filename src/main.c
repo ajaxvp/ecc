@@ -44,6 +44,7 @@ int usage(void)
     printf("  %-*sLex, preprocess, and exit\n", OPTION_DESCRIPTION_LENGTH, "-P");
     printf("  %-*sLex, preprocess, tokenize, parse, and exit\n", OPTION_DESCRIPTION_LENGTH, "-p");
     printf("  %-*sLex, preprocess, tokenize, parse, type, analyze, and exit\n", OPTION_DESCRIPTION_LENGTH, "-a");
+    printf("  %-*sBleeding edge work\n", OPTION_DESCRIPTION_LENGTH, "-x");
     return EXIT_FAILURE;
 }
 
@@ -127,6 +128,12 @@ char* work(char* filename)
     syntax_component_t* tlu = parse(ts);
     if (!tlu) return NULL;
 
+    if (opts.iflag)
+    {
+        printf("<<syntax tree>>\n");
+        print_syntax(tlu, printf);
+    }
+
     if (opts.pflag)
     {
         token_delete_all(ts);
@@ -170,6 +177,29 @@ char* work(char* filename)
 
     if (opts.aflag)
     {
+        token_delete_all(ts);
+        free_syntax(tlu, tlu);
+        return NULL;
+    }
+
+    if (opts.xflag)
+    {
+        air_t* air = airinize(tlu);
+
+        if (opts.iflag)
+        {
+            printf("<<AIR>>\n");
+            air_print(air, printf);
+        }
+
+        localize(air, LOC_X86_64);
+
+        if (opts.iflag)
+        {
+            printf("<<AIR (x86-localized)>>\n");
+            air_print(air, printf);
+        }
+
         token_delete_all(ts);
         free_syntax(tlu, tlu);
         return NULL;
@@ -277,7 +307,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpa")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpax")) != -1;)
     {
         switch (c)
         {
@@ -294,6 +324,9 @@ int main(int argc, char** argv)
                 break;
             case 'a':
                 opts.aflag = true;
+                break;
+            case 'x':
+                opts.xflag = true;
                 break;
             case '?':
             default:

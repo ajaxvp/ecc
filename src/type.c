@@ -363,6 +363,21 @@ bool type_is_object_type(c_type_t* ct)
     return true;
 }
 
+// sua = struct/union/array
+bool type_is_sua_type(c_type_class_t class)
+{
+    return class == CTC_STRUCTURE ||
+        class == CTC_UNION ||
+        class == CTC_ARRAY;
+}
+
+// sua = struct/union/array
+bool type_is_sua(c_type_t* ct)
+{
+    if (!ct) return false;
+    return type_is_sua_type(ct->class);
+}
+
 bool type_is_real_floating_type(c_type_class_t class)
 {
     return class == CTC_FLOAT ||
@@ -437,6 +452,19 @@ bool type_is_scalar(c_type_t* ct)
     return type_is_scalar_type(ct->class);
 }
 
+bool type_is_character_type(c_type_class_t class)
+{
+    return class == CTC_CHAR ||
+        class == CTC_SIGNED_CHAR ||
+        class == CTC_UNSIGNED_CHAR;
+}
+
+bool type_is_character(c_type_t* ct)
+{
+    if (!ct) return false;
+    return type_is_character_type(ct->class);
+}
+
 c_type_t* integer_promotions(c_type_t* ct)
 {
     if (!ct) return NULL;
@@ -464,6 +492,15 @@ c_type_t* strip_qualifiers(c_type_t* ct)
     for (c_type_t* d = ct->derived_from; d; d = d->derived_from)
         d->qualifiers = 0;
     return ct;
+}
+
+// like applying the & operator to some of the given type
+c_type_t* make_reference_type(c_type_t* ct)
+{
+    if (!ct) return NULL;
+    c_type_t* nct = make_basic_type(CTC_POINTER);
+    nct->derived_from = type_copy(ct->class != CTC_ARRAY ? ct : ct->derived_from);
+    return nct;
 }
 
 c_type_class_t retain_type_domain(c_type_class_t old, c_type_class_t new_real)
@@ -618,6 +655,59 @@ c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2)
     return conv_t2;
 }
 
+long long type_alignment(c_type_t* ct)
+{
+    if (!ct) return -1;
+    switch (ct->class)
+    {
+        case CTC_BOOL:
+        case CTC_CHAR:
+        case CTC_SIGNED_CHAR:
+        case CTC_UNSIGNED_CHAR:
+            return 1;
+        case CTC_SHORT_INT:
+        case CTC_UNSIGNED_SHORT_INT:
+            return 2;
+        case CTC_INT:
+        case CTC_UNSIGNED_INT:
+        case CTC_FLOAT:
+        case CTC_FLOAT_IMAGINARY:
+        case CTC_ENUMERATED:
+            return 4;
+        case CTC_LONG_INT:
+        case CTC_UNSIGNED_LONG_INT:
+        case CTC_LONG_LONG_INT:
+        case CTC_UNSIGNED_LONG_LONG_INT:
+        case CTC_DOUBLE:
+            return 8;
+        case CTC_LONG_DOUBLE:
+            return 16;
+        case CTC_POINTER:
+        case CTC_FUNCTION:
+            return 8;
+        case CTC_ARRAY:
+            return type_alignment(ct->derived_from);
+        case CTC_STRUCTURE:
+        case CTC_UNION:
+        {
+            long long mma = -1;
+            VECTOR_FOR(c_type_t*, mt, ct->struct_union.member_types)
+            {
+                long long ma = type_alignment(mt);
+                if (ma > mma)
+                    mma = ma;
+            }
+            return mma;
+        }
+        case CTC_VOID:
+        case CTC_ERROR:
+        case CTC_LABEL:
+            return 0;
+        default:
+            return -1;
+    }
+}
+
 // returns -1 if size is unknown
 long long type_size(c_type_t* ct)
 {
@@ -643,15 +733,9 @@ long long type_size(c_type_t* ct)
         case CTC_LONG_LONG_INT:
         case CTC_UNSIGNED_LONG_LONG_INT:
         case CTC_DOUBLE:
-        case CTC_FLOAT_COMPLEX:
-        case CTC_DOUBLE_IMAGINARY:
             return 8;
         case CTC_LONG_DOUBLE:
-        case CTC_DOUBLE_COMPLEX:
-        case CTC_LONG_DOUBLE_IMAGINARY:
             return 16;
-        case CTC_LONG_DOUBLE_COMPLEX:
-            return 32;
         case CTC_POINTER:
         // technically any type you'd have to deal with the "size" of an object with function type
         // is if you're dealing with a function designator, which gets converted to a pointer anyways
@@ -670,21 +754,37 @@ long long type_size(c_type_t* ct)
             return length * dsize;
         }
         case CTC_STRUCTURE:
+        {
+            long long size = 0;
+            long long mma = -1;
+            VECTOR_FOR(c_type_t*, mct, ct->struct_union.member_types)
+            {
+                long long msize = type_size(mct);
+                long long ma = type_alignment(mct);
+                if (ma > mma)
+                    mma = ma;
+                if (msize == -1)
+                {
+                    // flexible array member
+                    if (i == ct->struct_union.member_types->size - 1 && mct->class == CTC_ARRAY)
+                        continue;
+                    return -1;
+                }
+                size += (ma - (size % ma)) % ma;
+                size += msize;
+            }
+            return size + (mma - (size % mma)) % mma;
+        }
         case CTC_UNION:
         {
             long long size = 0;
             VECTOR_FOR(c_type_t*, mct, ct->struct_union.member_types)
             {
                 long long msize = type_size(mct);
-                if (msize == -1)
-                {
-                    if (i == ct->struct_union.member_types->size - 1 && mct->class == CTC_ARRAY)
-                        continue;
-                    return -1;
-                }
-                size += msize;
+                if (msize > size)
+                    size = msize;
             }
-            return size + (STRUCT_UNION_ALIGNMENT - (size % STRUCT_UNION_ALIGNMENT));
+            return size;
         }
         case CTC_VOID:
         case CTC_ERROR:
@@ -858,6 +958,7 @@ void assign_sus_type(analysis_error_t* errors, symbol_t* sy)
     if (sy->type) return;
     syntax_component_t* sus = sy->declarer->parent;
     sy->type = create_struct_type(errors, sus, &sy->type);
+    vector_add(syntax_get_translation_unit(sus)->tlu_st->unique_types, sy->type);
     sy->ns = make_basic_namespace(sy->type->class == CTC_STRUCTURE ? NSC_STRUCT : NSC_UNION);
 }
 

@@ -222,7 +222,7 @@ void insn_operand_print(ir_insn_operand_t* op, int (*printer)(const char* fmt, .
             printer("%s", op->label);
             break;
         case IIOP_FLOAT:
-            printer("%lf", op->fl);
+            printer("%Lf", op->fl);
             break;
         case IIOP_STRING_LITERAL:
             if (op->string_literal.normal)

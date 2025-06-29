@@ -22,7 +22,7 @@ void constexpr_print(constexpr_t* ce, int (*printer)(const char* fmt, ...))
             printer("%llu", ce->ivalue);
             break;
         case CE_ARITHMETIC:
-            printer("%lf", ce->fvalue);
+            printer("%Lf", ce->fvalue);
             break;
         case CE_ADDRESS:
             // TODO: print address constexprs
@@ -218,32 +218,32 @@ constexpr_t* ce_make_integer(c_type_t* ct, unsigned long long value)
 
 #define errret { *class = CTC_ERROR; return; }
 
-static bool representable(unsigned long long value, c_type_class_t class)
-{
-    #define representable_case(ctc, type) case ctc: return value == (type) value;
-    switch (class)
-    {
-        representable_case(CTC_BOOL, bool)
-        representable_case(CTC_CHAR, char)
-        representable_case(CTC_SIGNED_CHAR, signed char)
-        representable_case(CTC_SHORT_INT, short int)
-        representable_case(CTC_INT, int)
-        representable_case(CTC_LONG_INT, long int)
-        representable_case(CTC_LONG_LONG_INT, long long int)
-        representable_case(CTC_UNSIGNED_CHAR, unsigned char)
-        representable_case(CTC_UNSIGNED_SHORT_INT, unsigned short int)
-        representable_case(CTC_UNSIGNED_INT, unsigned int)
-        representable_case(CTC_UNSIGNED_LONG_INT, unsigned long int)
-        representable_case(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long int)
-        representable_case(CTC_FLOAT, float)
-        representable_case(CTC_DOUBLE, double)
-        representable_case(CTC_LONG_DOUBLE, long double)
-        representable_case(CTC_FLOAT_COMPLEX, float _Complex)
-        representable_case(CTC_DOUBLE_COMPLEX, double _Complex)
-        representable_case(CTC_LONG_DOUBLE_COMPLEX, long double _Complex)
-        default: return false;
-    }
-}
+// static bool representable(unsigned long long value, c_type_class_t class)
+// {
+//     #define representable_case(ctc, type) case ctc: return value == (type) value;
+//     switch (class)
+//     {
+//         representable_case(CTC_BOOL, bool)
+//         representable_case(CTC_CHAR, char)
+//         representable_case(CTC_SIGNED_CHAR, signed char)
+//         representable_case(CTC_SHORT_INT, short int)
+//         representable_case(CTC_INT, int)
+//         representable_case(CTC_LONG_INT, long int)
+//         representable_case(CTC_LONG_LONG_INT, long long int)
+//         representable_case(CTC_UNSIGNED_CHAR, unsigned char)
+//         representable_case(CTC_UNSIGNED_SHORT_INT, unsigned short int)
+//         representable_case(CTC_UNSIGNED_INT, unsigned int)
+//         representable_case(CTC_UNSIGNED_LONG_INT, unsigned long int)
+//         representable_case(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long int)
+//         representable_case(CTC_FLOAT, float)
+//         representable_case(CTC_DOUBLE, double)
+//         representable_case(CTC_LONG_DOUBLE, long double)
+//         representable_case(CTC_FLOAT_COMPLEX, float _Complex)
+//         representable_case(CTC_DOUBLE_COMPLEX, double _Complex)
+//         representable_case(CTC_LONG_DOUBLE_COMPLEX, long double _Complex)
+//         default: return false;
+//     }
+// }
 
 static void ce_evaluate_integer_value(syntax_component_t* expr, unsigned long long* value, c_type_class_t* class)
 {

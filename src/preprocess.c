@@ -1441,6 +1441,8 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     preprocessing_component_t* pp_file = pp_parse_preprocessing_file(&tmp, state);
     if (!pp_file)
     {
+        if (settings->table)
+            state->table = NULL;
         state_delete(state);
         return false;
     }

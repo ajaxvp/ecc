@@ -1447,7 +1447,8 @@ syntax_component_t* parse_string_literal(token_t** tokens, parse_request_code_t 
         syn->strl_wide = strdup_wide(token->string_literal.value_wide);
     syn->strl_length = calloc(1, sizeof *syn->strl_length);
     syn->strl_length->type = SC_INTEGER_CONSTANT;
-    syn->strl_length->intc = syn->strl_reg ? strlen(syn->strl_reg) : wcslen(syn->strl_wide);
+    syn->strl_length->intc = syn->strl_reg ? strlen(syn->strl_reg) + 1 : wcslen(syn->strl_wide) + 1;
+    syn->strl_length->ctype = make_basic_type(C_TYPE_SIZE_T);
     syn->ctype = make_basic_type(CTC_ARRAY);
     syn->ctype->array.length_expression = syn->strl_length;
     syn->ctype->array.unspecified_size = false;
