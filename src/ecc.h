@@ -8,9 +8,9 @@
 
 // these macros are used in circumstances where an error was produced by something that wasn't expected to error.
 // for instance, if there was a mistake with an earlier stage like parsing, this might get thrown.
-#define report_return { printf("bad (%s:%d)\n", __FILE__, __LINE__); return; }
-#define report_continue { printf("bad (%s:%d)\n", __FILE__, __LINE__); continue; }
-#define report_return_value(x) { printf("bad (%s:%d)\n", __FILE__, __LINE__); return (x); }
+#define report_return { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); return; }
+#define report_continue { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); continue; }
+#define report_return_value(x) { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); return (x); }
 
 #define VECTOR_FOR(type, var, vec) type var = (type) vector_get((vec), 0); for (unsigned i = 0; i < (vec)->size; ++i, var = (type) vector_get((vec), i))
 #define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var, tlu); vector_delete((vec)); }
@@ -282,6 +282,8 @@ typedef struct program_options
     bool pflag;
     bool aflag;
     bool xflag;
+    bool llflag;
+    bool aaflag;
 } program_options_t;
 
 typedef struct preprocessing_token
@@ -1746,6 +1748,7 @@ token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* setti
 /* air.c */
 
 air_t* airinize(syntax_component_t* tlu);
+void air_delete(air_t* air);
 void air_print(air_t* air, int (*printer)(const char* fmt, ...));
 void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt, ...));
 void air_insn_delete_all(air_insn_t* insns);

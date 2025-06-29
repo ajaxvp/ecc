@@ -41,9 +41,11 @@ int usage(void)
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
-    printf("  %-*sLex, preprocess, and exit\n", OPTION_DESCRIPTION_LENGTH, "-P");
-    printf("  %-*sLex, preprocess, tokenize, parse, and exit\n", OPTION_DESCRIPTION_LENGTH, "-p");
-    printf("  %-*sLex, preprocess, tokenize, parse, type, analyze, and exit\n", OPTION_DESCRIPTION_LENGTH, "-a");
+    printf("  %-*sPreprocess\n", OPTION_DESCRIPTION_LENGTH, "-P");
+    printf("  %-*sParse\n", OPTION_DESCRIPTION_LENGTH, "-p");
+    printf("  %-*sStatic analysis\n", OPTION_DESCRIPTION_LENGTH, "-a");
+    printf("  %-*sLocalized AIR\n", OPTION_DESCRIPTION_LENGTH, "-L");
+    printf("  %-*sRegister-allocated AIR\n", OPTION_DESCRIPTION_LENGTH, "-A");
     printf("  %-*sBleeding edge work\n", OPTION_DESCRIPTION_LENGTH, "-x");
     return EXIT_FAILURE;
 }
@@ -137,8 +139,8 @@ char* work(char* filename)
 
     if (opts.pflag)
     {
-        token_delete_all(ts);
         free_syntax(tlu, tlu);
+        token_delete_all(ts);
         return NULL;
     }
 
@@ -178,8 +180,8 @@ char* work(char* filename)
 
     if (opts.aflag)
     {
-        token_delete_all(ts);
         free_syntax(tlu, tlu);
+        token_delete_all(ts);
         return NULL;
     }
 
@@ -199,12 +201,28 @@ char* work(char* filename)
         air_print(air, printf);
     }
 
+    if (opts.llflag)
+    {
+        air_delete(air);
+        free_syntax(tlu, tlu);
+        token_delete_all(ts);
+        return NULL;
+    }
+
     allocate(air);
 
     if (opts.iflag)
     {
         printf("<<AIR (register-allocated)>>\n");
         air_print(air, printf);
+    }
+
+    if (opts.aaflag)
+    {
+        air_delete(air);
+        free_syntax(tlu, tlu);
+        token_delete_all(ts);
+        return NULL;
     }
 
     x86_asm_file_t* asmfile = x86_generate(air, tlu->tlu_st);
@@ -225,6 +243,7 @@ char* work(char* filename)
 
     fclose(file);
     x86_asm_file_delete(asmfile);
+    air_delete(air);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
 
@@ -281,7 +300,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpax")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpaxLA")) != -1;)
     {
         switch (c)
         {
@@ -301,6 +320,12 @@ int main(int argc, char** argv)
                 break;
             case 'x':
                 opts.xflag = true;
+                break;
+            case 'L':
+                opts.llflag = true;
+                break;
+            case 'A':
+                opts.aaflag = true;
                 break;
             case '?':
             default:
