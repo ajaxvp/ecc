@@ -17,6 +17,63 @@ typedef struct airinizing_syntax_traverser
 #define NEXT_VIRTUAL_REGISTER (AIRINIZING_TRAVERSER->air->next_available_temporary++)
 #define NEXT_LABEL (AIRINIZING_TRAVERSER->next_label++)
 
+locator_t* locator_copy(locator_t* loc)
+{
+    if (!loc) return NULL;
+    locator_t* n = calloc(1, sizeof *loc);
+    n->type = loc->type;
+    switch (loc->type)
+    {
+        case L_OFFSET:
+            n->stack_offset = loc->stack_offset;
+            break;
+        case L_LABEL:
+            n->label = strdup(loc->label);
+            break;
+        case L_ARRAY:
+            n->array.base_reg = loc->array.base_reg;
+            n->array.offset_reg = loc->array.offset_reg;
+            n->array.scale = loc->array.scale;
+            break;
+    }
+    return n;
+}
+
+void locator_delete(locator_t* loc)
+{
+    if (!loc) return;
+    switch (loc->type)
+    {
+        case L_LABEL:
+            free(loc->label);
+            break;
+        default:
+            break;
+    }
+    free(loc);
+}
+
+void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...))
+{
+    if (!loc)
+    {
+        printer("(null)");
+        return;
+    }
+    switch (loc->type)
+    {
+        case L_OFFSET:
+            printer("local[%lld]", loc->stack_offset);
+            break;
+        case L_LABEL:
+            printer("%s", loc->label);
+            break;
+        case L_ARRAY:
+            printer("array[_%lld, _%lld, %d]", loc->array.base_reg, loc->array.offset_reg, loc->array.scale);
+            break;
+    }
+}
+
 void air_data_delete(air_data_t* ad)
 {
     if (!ad) return;
@@ -87,12 +144,7 @@ void air_data_print(air_data_t* ad, air_t* air, int (*printer)(const char* fmt, 
     printer("\n}\n");
 }
 
-static char* X86_64_QUAD_REGISTERS[] = { "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "rbx", "rsp", "rbp", "r12", "r13", "r14", "r15" };
-static char* X86_64_DOUBLE_REGISTERS[] = { "eax", "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d", "ebx", "esp", "ebp", "r12d", "r13d", "r14d", "r15d" };
-static char* X86_64_WORD_REGISTERS[] = { "ax", "di", "si", "dx", "cx", "r8w", "r9w", "r10w", "r11w", "bx", "sp", "bp", "r12w", "r13w", "r14w", "r15w" };
-static char* X86_64_BYTE_REGISTERS[] = { "al", "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b", "bl", "spl", "bpl", "r12b", "r13b", "r14b", "r15b" };
-
-static void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const char* fmt, ...))
+void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const char* fmt, ...))
 {
     if (reg == INVALID_VREGID)
         printer("(invalid register)");
@@ -102,7 +154,7 @@ static void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer
         {
             case LOC_X86_64:
                 long long size = type_size(ict);
-                char** list = NULL;
+                const char** list = NULL;
                 if (size == 1)
                     list = X86_64_BYTE_REGISTERS;
                 else if (size == 2)
@@ -568,7 +620,7 @@ air_insn_t* air_insn_init(air_insn_type_t type, size_t noops)
     air_insn_t* insn = calloc(1, sizeof *insn);
     insn->type = type;
     insn->noops = noops;
-    insn->ops = calloc(noops, sizeof(ir_insn_operand_t));
+    insn->ops = calloc(noops, sizeof(air_insn_operand_t));
     return insn;
 }
 
@@ -581,7 +633,7 @@ air_insn_t* air_insn_copy(air_insn_t* insn)
     n->prev = insn->prev;
     n->next = insn->next;
     n->noops = insn->noops;
-    n->ops = calloc(n->noops, sizeof(ir_insn_operand_t));
+    n->ops = calloc(n->noops, sizeof(air_insn_operand_t));
     n->metadata.fcall_sret = insn->metadata.fcall_sret;
     for (size_t i = 0; i < n->noops; ++i)
         n->ops[i] = air_insn_operand_copy(insn->ops[i]);
@@ -590,7 +642,7 @@ air_insn_t* air_insn_copy(air_insn_t* insn)
 
 bool air_insn_creates_temporary(air_insn_t* insn)
 {
-    if (!insn) return NULL;
+    if (!insn) return false;
     switch (insn->type)
     {
         case AIR_DECLARE:
@@ -655,6 +707,86 @@ bool air_insn_creates_temporary(air_insn_t* insn)
     return false;
 }
 
+bool air_insn_assigns(air_insn_t* insn)
+{
+    if (!insn) return false;
+    switch (insn->type)
+    {
+        case AIR_DECLARE:
+        case AIR_RETURN:
+        case AIR_NOP:
+        case AIR_JZ:
+        case AIR_JNZ:
+        case AIR_JMP:
+        case AIR_LABEL:
+        case AIR_PUSH:
+            return false;
+        case AIR_ASSIGN:
+        case AIR_DIRECT_ADD:
+        case AIR_DIRECT_SUBTRACT:
+        case AIR_DIRECT_MULTIPLY:
+        case AIR_DIRECT_DIVIDE:
+        case AIR_DIRECT_MODULO:
+        case AIR_DIRECT_SHIFT_LEFT:
+        case AIR_DIRECT_SHIFT_RIGHT:
+        case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
+        case AIR_DIRECT_AND:
+        case AIR_DIRECT_XOR:
+        case AIR_DIRECT_OR:
+        case AIR_LOAD:
+        case AIR_LOAD_ADDR:
+        case AIR_ADD:
+        case AIR_FUNC_CALL:
+        case AIR_PHI:
+        case AIR_NEGATE:
+        case AIR_MULTIPLY:
+        case AIR_POSATE:
+        case AIR_COMPLEMENT:
+        case AIR_NOT:
+        case AIR_SEXT:
+        case AIR_ZEXT:
+        case AIR_S2D:
+        case AIR_D2S:
+        case AIR_S2SI:
+        case AIR_S2UI:
+        case AIR_D2SI:
+        case AIR_D2UI:
+        case AIR_SI2S:
+        case AIR_UI2S:
+        case AIR_SI2D:
+        case AIR_UI2D:
+        case AIR_DIVIDE:
+        case AIR_MODULO:
+        case AIR_SHIFT_LEFT:
+        case AIR_SHIFT_RIGHT:
+        case AIR_SIGNED_SHIFT_RIGHT:
+        case AIR_LESS_EQUAL:
+        case AIR_LESS:
+        case AIR_GREATER_EQUAL:
+        case AIR_GREATER:
+        case AIR_EQUAL:
+        case AIR_INEQUAL:
+        case AIR_AND:
+        case AIR_XOR:
+        case AIR_OR:
+            return true;
+    }
+    return false;
+}
+
+air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start)
+{
+    for (; start; start = start->prev)
+    {
+        if (!air_insn_creates_temporary(start)) continue;
+        air_insn_operand_t* op = start->ops[0];
+        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        if (op->content.reg == tmp)
+            return start;
+    }
+    return NULL;
+}
+
 // prev insn inserting
 air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting)
 {
@@ -687,9 +819,9 @@ static air_insn_t* copy_code_impl(syntax_component_t* dest, syntax_component_t* 
         return NULL;
     if (!src)
         return start;
-    if (!src->acode)
+    if (!src->code)
         return start;
-    for (air_insn_t* insn = src->acode; insn; insn = insn->next)
+    for (air_insn_t* insn = src->code; insn; insn = insn->next)
         start->next = air_insn_copy(insn), start->next->prev = start, start = start->next;
     return start;
 }
@@ -711,8 +843,8 @@ static air_insn_t* copy_air_insn_sequence(air_insn_t* code)
 #define COPY_CODE(s) code = copy_code_impl(syn, s, code)
 
 #define FINALIZE_LINEARIZE \
-    syn->acode = dummy->next; \
-    if (syn->acode) syn->acode->prev = NULL; \
+    syn->code = dummy->next; \
+    if (syn->code) syn->code->prev = NULL; \
     air_insn_delete(dummy);
 
 #define ADD_CODE(insn) (code->next = (insn), code->next->prev = code, code = code->next)
@@ -744,7 +876,7 @@ static void linearize_function_definition_after(syntax_traverser_t* trav, syntax
 
     air_routine_t* routine = AIRINIZING_TRAVERSER->croutine;
     routine->insns = air_insn_init(AIR_NOP, 0);
-    routine->insns->next = copy_air_insn_sequence(syn->acode);
+    routine->insns->next = copy_air_insn_sequence(syn->code);
 
     AIRINIZING_TRAVERSER->croutine = NULL;
 }
@@ -795,7 +927,7 @@ static void linearize_primary_expression_identifier_after(syntax_traverser_t* tr
     if (!sy) report_return;
     SETUP_LINEARIZE;
     air_insn_t* insn = NULL;
-    if (!syntax_is_in_lvalue_context(syn) && !type_is_sua(sy->type))
+    if (!syntax_is_in_lvalue_context(syn) && !type_is_sua(sy->type) && sy->type->class != CTC_FUNCTION)
     {
         insn = air_insn_init(AIR_LOAD, 3);
         insn->ct = type_copy(syn->ctype);
@@ -812,21 +944,8 @@ static void linearize_primary_expression_identifier_after(syntax_traverser_t* tr
     FINALIZE_LINEARIZE;
 }
 
-/*
-
-exceptions to """typical""" constant semantics (i.e., loading into a tempreg):
-    - non-VLA typed sizeof, e.g., sizeof(x[0])          do nothing
-    - initializers outside of the body of a function    do nothing
-    - case expressions                                  do nothing
-    - declarators (unless it's a VLA maybe lolllll)     do nothing
-    - enums                                             do nothing
-    - structs                                           do nothing
-
-*/
-
 static void linearize_integer_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    // TODO: handle the above cases
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = type_copy(syn->ctype);
@@ -836,9 +955,19 @@ static void linearize_integer_constant_after(syntax_traverser_t* trav, syntax_co
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_character_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_integer_constant_operand_init(syn->charc_value);
+    ADD_CODE(insn);
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    // TODO: handle the above cases
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = type_copy(syn->ctype);
@@ -2101,6 +2230,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_DECLARATOR_IDENTIFIER] = linearize_declarator_identifier_after;
     trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = linearize_primary_expression_identifier_after;
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
+    trav->after[SC_CHARACTER_CONSTANT] = linearize_character_constant_after;
     trav->after[SC_FLOATING_CONSTANT] = linearize_floating_constant_after;
     trav->after[SC_ADDITION_EXPRESSION] = linearize_addition_expression_after;
     trav->after[SC_EXPRESSION] = linearize_expression_after;

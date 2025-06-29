@@ -140,42 +140,6 @@ const char* SYNTAX_COMPONENT_NAMES[SC_NO_ELEMENTS] = {
     "SC_DECLARATOR_IDENTIFIER"
 };
 
-const char* IR_INSN_NAMES[II_NO_ELEMENTS] = {
-    "II_UNKNOWN = 0",
-    "II_FUNCTION_LABEL",
-    "II_LOCAL_LABEL",
-    "II_LOAD",
-    "II_LOAD_ADDRESS",
-    "II_RETURN",
-    "II_STORE_ADDRESS",
-    "II_SUBSCRIPT",
-    "II_SUBSCRIPT_ADDRESS",
-    "II_MEMBER",
-    "II_MEMBER_ADDRESS",
-    "II_ADDITION",
-    "II_SUBTRACTION",
-    "II_MULTIPLICATION",
-    "II_DIVISION",
-    "II_JUMP",
-    "II_JUMP_IF_ZERO",
-    "II_JUMP_NOT_ZERO",
-    "II_EQUALITY",
-    "II_MODULAR",
-    "II_LESS",
-    "II_GREATER",
-    "II_LESS_EQUAL",
-    "II_GREATER_EQUAL",
-    "II_CAST",
-    "II_DEREFERENCE",
-    "II_NOT",
-    "II_FUNCTION_CALL",
-    "II_LEAVE",
-    "II_ENDPROC",
-    "II_DECLARE",
-    "II_RETAIN",
-    "II_RESTORE"
-};
-
 const char* C_TYPE_CLASS_NAMES[30] = {
     "_Bool",
     "char",
@@ -501,12 +465,8 @@ const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS] = {
     "%:%:"
 };
 
-// use gcc libc essentially
 const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[] = {
-    "/usr/include",
-    "/usr/lib/gcc/x86_64-linux-gnu/12/include",
-    "/usr/local/include",
-    "/usr/include/x86_64-linux-gnu"
+    "libc/include"
 };
 
 const char* X86_INSN_NAMES[X86I_NO_ELEMENTS] = {
@@ -529,4 +489,80 @@ const char* X86_INSN_NAMES[X86I_NO_ELEMENTS] = {
     "X86I_TEXT",
     "X86I_DATA",
     "X86I_SECTION"
+};
+
+const char* X86_64_QUAD_REGISTERS[] = {
+    "rax",
+    "rdi", 
+    "rsi", 
+    "rdx", 
+    "rcx", 
+    "r8", 
+    "r9", 
+    "r10", 
+    "r11", 
+    "rbx", 
+    "rsp", 
+    "rbp", 
+    "r12", 
+    "r13", 
+    "r14", 
+    "r15"
+};
+
+const char* X86_64_DOUBLE_REGISTERS[] = {
+    "eax", 
+    "edi", 
+    "esi", 
+    "edx", 
+    "ecx", 
+    "r8d", 
+    "r9d", 
+    "r10d", 
+    "r11d", 
+    "ebx", 
+    "esp", 
+    "ebp", 
+    "r12d", 
+    "r13d", 
+    "r14d", 
+    "r15d"
+};
+
+const char* X86_64_WORD_REGISTERS[] = {
+    "ax", 
+    "di", 
+    "si", 
+    "dx", 
+    "cx", 
+    "r8w", 
+    "r9w", 
+    "r10w", 
+    "r11w", 
+    "bx", 
+    "sp", 
+    "bp", 
+    "r12w", 
+    "r13w", 
+    "r14w", 
+    "r15w"
+};
+
+const char* X86_64_BYTE_REGISTERS[] = {
+    "al", 
+    "dil", 
+    "sil", 
+    "dl", 
+    "cl", 
+    "r8b", 
+    "r9b", 
+    "r10b", 
+    "r11b", 
+    "bl", 
+    "spl", 
+    "bpl", 
+    "r12b", 
+    "r13b", 
+    "r14b", 
+    "r15b"
 };

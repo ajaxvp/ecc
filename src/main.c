@@ -73,6 +73,7 @@ char* work(char* filename)
     settings.filepath = filename;
     char pp_error[MAX_ERROR_LENGTH];
     settings.error = pp_error;
+    settings.error[0] = '\0';
     settings.table = NULL;
 
     if (!preprocess(&tokens, &settings))
@@ -182,76 +183,48 @@ char* work(char* filename)
         return NULL;
     }
 
-    if (opts.xflag)
-    {
-        air_t* air = airinize(tlu);
-
-        if (opts.iflag)
-        {
-            printf("<<AIR>>\n");
-            air_print(air, printf);
-        }
-
-        localize(air, LOC_X86_64);
-
-        if (opts.iflag)
-        {
-            printf("<<AIR (x86-localized)>>\n");
-            air_print(air, printf);
-        }
-
-        token_delete_all(ts);
-        free_syntax(tlu, tlu);
-        return NULL;
-    }
-
-    ir_insn_t* insns = linearize(tlu);
+    air_t* air = airinize(tlu);
 
     if (opts.iflag)
     {
-        printf("<<linear IR>>\n");
-        insn_clike_print_all(insns, printf);
+        printf("<<AIR>>\n");
+        air_print(air, printf);
     }
 
-    ir_optimize(insns, ir_opt_profile_basic());
+    localize(air, LOC_X86_64);
 
     if (opts.iflag)
     {
-        printf("<<optimized linear IR>>\n");
-        insn_clike_print_all(insns, printf);
+        printf("<<AIR (x86-localized)>>\n");
+        air_print(air, printf);
     }
 
-    allocator_options_t alloc_options;
-    alloc_options.procregmap = x86procregmap;
-    alloc_options.no_volatile = 9; // rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11
-    alloc_options.no_nonvolatile = 5; // rbx, r12, r13, r14, r15
-
-    allocate(insns, &alloc_options);
+    allocate(air);
 
     if (opts.iflag)
     {
-        printf("<<allocated linear IR>>\n");
-        insn_clike_print_all(insns, printf);
+        printf("<<AIR (register-allocated)>>\n");
+        air_print(air, printf);
     }
 
-    x86_insn_t* x86_insns = x86_generate(insns, tlu->tlu_st);
+    x86_asm_file_t* asmfile = x86_generate(air, tlu->tlu_st);
 
     if (opts.iflag)
     {
         printf("<<x86 assembly code>>\n");
-        x86_write_all(x86_insns, stdout);
+        x86_asm_file_write(asmfile, stdout);
     }
 
     char* asm_filepath = temp_filepath_gen(".s");
     char* obj_filepath = temp_filepath_gen(".o");
     FILE* out = fopen(asm_filepath, "w");
-    x86_write_all(x86_insns, out);
+    x86_asm_file_write(asmfile, out);
     fclose(out);
     if (opts.iflag)
         printf("assembly written to %s\n", asm_filepath);
 
     fclose(file);
-    x86_insn_delete_all(x86_insns);
+    x86_asm_file_delete(asmfile);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
 
@@ -277,6 +250,7 @@ char* work(char* filename)
     }
     int as_status = EXIT_FAILURE;
     waitpid(as_pid, &as_status, 0);
+    remove(asm_filepath);
     as_status = WEXITSTATUS(as_status);
     if (as_status)
     {
@@ -360,14 +334,13 @@ int main(int argc, char** argv)
 
     if (ld_pid == 0)
     {
-        #define NO_LIBRARIES 3
+        #define NO_LIBRARIES 2
         char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
         argv[0] = "/usr/bin/ld";
         for (size_t i = 0; i < object_count; ++i)
             argv[i + 1] = objects[i];
-        argv[1 + object_count] = "lib/crt0.o";
-        argv[2 + object_count] = "lib/sdef.o";
-        argv[3 + object_count] = "lib/putint.o";
+        argv[1 + object_count] = "libecc/libecc.a";
+        argv[2 + object_count] = "libc/libc.a";
         argv[1 + object_count + NO_LIBRARIES] = "-o";
         argv[2 + object_count + NO_LIBRARIES] = "a.out";
         argv[3 + object_count + NO_LIBRARIES] = NULL;
@@ -383,6 +356,8 @@ int main(int argc, char** argv)
 
     int ld_status = EXIT_FAILURE;
     waitpid(ld_pid, &ld_status, 0);
+    for (size_t i = 0; i < object_count; ++i)
+        remove(objects[i]);
     ld_status = WEXITSTATUS(ld_status);
     if (ld_status)
     {

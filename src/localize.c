@@ -7,19 +7,6 @@
 #define NEXT_LV (air->next_available_lv++)
 #define SYMBOL_TABLE (air->st)
 
-static air_insn_t* find_temporary_definition_above(regid_t tmp, air_insn_t* start)
-{
-    for (; start; start = start->prev)
-    {
-        if (!air_insn_creates_temporary(start)) continue;
-        air_insn_operand_t* op = start->ops[0];
-        if (op->type != AOP_REGISTER) report_return_value(NULL);
-        if (op->content.reg == tmp)
-            return start;
-    }
-    return NULL;
-}
-
 typedef enum arg_class
 {
     ARG_NO_CLASS,
@@ -325,7 +312,7 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
     {
         air_insn_operand_t* op = insn->ops[i];
         if (op->type != AOP_REGISTER && op->type != AOP_INDIRECT_REGISTER) report_return;
-        air_insn_t* tempdef = find_temporary_definition_above(op->type == AOP_REGISTER ? op->content.reg : op->content.inreg.id, insn);
+        air_insn_t* tempdef = air_insn_find_temporary_definition_above(op->type == AOP_REGISTER ? op->content.reg : op->content.inreg.id, insn);
         if (!tempdef) report_return;
 
         c_type_t* at = tempdef->ct;
@@ -382,6 +369,12 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
         assign->ops[1] = air_insn_integer_constant_operand_init(nextssereg - X86R_XMM0);
         air_insn_insert_before(assign, insn);
     }
+
+    for (size_t i = 2; i < insn->noops; ++i)
+    {
+        air_insn_operand_delete(insn->ops[i]);
+        insn->ops[i] = air_insn_register_operand_init(INVALID_VREGID);
+    }
 }
 
 /*
@@ -418,6 +411,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     regid_t resreg = insn->ops[0]->content.reg;
     air_insn_operand_delete(insn->ops[0]);
     insn->ops[0] = air_insn_register_operand_init(INVALID_VREGID);
+
     size_t ccount = 0;
     c_type_t* ct = insn->ct;
     if (insn->metadata.fcall_sret)
@@ -739,8 +733,6 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
 
         if (pt->class != CTC_STRUCTURE && pt->class != CTC_UNION)
             report_return;
-        
-        report_return;
         
         long long psize = type_size(pt);
         bool vreg = psize > 16 || nextintreg > X86R_R9;

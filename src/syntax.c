@@ -1597,8 +1597,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         }
     }
     type_delete(syn->ctype);
-    insn_delete_all(syn->code);
-    air_insn_delete_all(syn->acode);
+    air_insn_delete_all(syn->code);
     free(syn);
 }
 

@@ -1,224 +1,332 @@
 #include <stdlib.h>
-#include <string.h>
+#include <stdio.h>
 
 #include "ecc.h"
 
-/*
-
-for each instruction:
-    if instruction is a load with two operands which are phys. registers:
-        remap the virtual register mapped by the right to the left
-    replace all non-resulting virt. registers with their phys. mapping
-    release any register mappings that expire on this instruction
-    if there is no resulting virt. register:
-        continue
-    store where the resulting virt. register expires
-    if the resulting virt. register is used in a procedure call:
-        get the phys. register corresponding to that virt. register's index in the argument list
-        if that phys. register is occupied:
-            return to the last time that register had a value moved to it and store its value in the next nonvolatile phys. register
-            insert a 'load' instruction to move that physical register's value into the corresponding argument phys. register just before the function call
-    otherwise:
-        get the next available volatile phys. register
-        if there is a procedure call while the register's live:
-            get the next available nonvolatile phys. register
-    map that phys. register to the resulting virt. register
-    replace the resulting register with the phys. one
-
-*/
-
-ir_insn_t* find_last_update(regid_t reg, ir_insn_t* start)
+typedef struct allocinfo
 {
-    for (; start; start = start->prev)
+    vector_t* conflicts; // vector_t<regid_t>
+    vector_t* aliases; // vector_t<regid_t>
+} allocinfo_t;
+
+typedef struct allocator
+{
+    map_t* map; // map_t<regid_t, allocinfo_t>
+    map_t* replacements; // map_t<regid_t, regid_t>
+} allocator_t;
+
+int regid_comparator(regid_t r1, regid_t r2)
+{
+    return r2 - r1;
+}
+
+unsigned long regid_hash(regid_t x)
+{
+    return (unsigned long) x;
+}
+
+static int regid_print(regid_t reg, int (*printer)(const char*, ...))
+{
+    if (reg > NO_PHYSICAL_REGISTERS)
+        return printer("_%llu", reg - NO_PHYSICAL_REGISTERS);
+    else if (reg == INVALID_VREGID)
+        return printer("(invalid register)");
+    else
+        return printer("R%llu", reg);
+}
+
+static int allocinfo_print(allocinfo_t* info, int (*printer)(const char*, ...))
+{
+    int rv = printer("allocinfo { conflicts: [");
+    for (size_t i = 0; i < info->conflicts->size; ++i)
     {
-        for (size_t i = 0; i < start->noops; ++i)
+        if (i) rv += printer(", ");
+        rv += regid_print((regid_t) vector_get(info->conflicts, i), printer);
+    }
+    rv += printer("], aliases: [");
+    for (size_t i = 0; i < info->aliases->size; ++i)
+    {
+        if (i) rv += printer(", ");
+        rv += regid_print((regid_t) vector_get(info->aliases, i), printer);
+    }
+    rv += printer("] }");
+    return rv;
+}
+
+
+void allocator_delete(allocator_t* a)
+{
+    if (!a) return;
+    map_delete(a->map);
+    map_delete(a->replacements);
+    free(a);
+}
+
+void allocinfo_delete(allocinfo_t* info)
+{
+    if (!info) return;
+    vector_delete(info->conflicts);
+    vector_delete(info->aliases);
+    free(info);
+}
+
+static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air)
+{
+    if (!def) return NULL;
+    air_insn_t* last = def;
+    for (air_insn_t* insn = def->next; insn; insn = insn->next)
+    {
+        if (insn->type == AIR_FUNC_CALL &&
+            air->locale == LOC_X86_64 &&
+            reg != X86R_RBX && reg != X86R_RBP && (reg < X86R_R12 || reg > X86R_R15) &&
+            reg <= NO_PHYSICAL_REGISTERS)
         {
-            ir_insn_operand_t* op = start->ops[i];
-            if (!op->result) continue;
-            if ((op->type == IIOP_PHYSICAL_REGISTER && op->preg == reg) ||
-                (op->type == IIOP_VIRTUAL_REGISTER && op->vreg == reg))
-                return start;
+            last = insn;
+            continue;
         }
-    }
-    return NULL;
-}
-
-regid_t find_physical_register(regid_t vreg, regid_t* regmap, size_t count)
-{
-    for (size_t i = 0; i < count; ++i)
-    {
-        if (regmap[i] == vreg)
-            return i + 1;
-    }
-    return INVALID_VREGID;
-}
-
-void gather_vreg_info(regid_t vreg, ir_insn_t* insn, ir_insn_t* end, ir_insn_t** expiry, ir_insn_t** proc_call, long long* proc_arg_index, bool* proc_call_inbetween)
-{
-    ir_insn_t* start = insn;
-    *expiry = insn;
-    *proc_call = NULL;
-    *proc_arg_index = -1;
-    bool inbetween = false;
-    *proc_call_inbetween = false;
-    for (; insn && insn != end; insn = insn->next)
-    {
-        if (insn->type == II_FUNCTION_CALL && insn != start)
-            inbetween = true;
         for (size_t i = 0; i < insn->noops; ++i)
         {
-            ir_insn_operand_t* op = insn->ops[i];
-            if (op->type != IIOP_VIRTUAL_REGISTER) continue;
-            if (op->vreg != vreg) continue;
-            *expiry = insn;
-            if (inbetween)
-                *proc_call_inbetween = true;
-            if (insn->type == II_FUNCTION_CALL && i > 1)
+            air_insn_operand_t* op = insn->ops[i];
+            if (!op) continue;
+            if (op->type == AOP_INDIRECT_REGISTER && op->content.inreg.id == reg)
+                last = insn;
+            if (op->type == AOP_REGISTER && op->content.reg == reg)
+                last = insn;
+        }
+    }
+    printf("liveness ends for ");
+    regid_print(reg, printf);
+    printf(" at: ");
+    air_insn_print(last, air, printf);
+    printf("\n");
+    return last;
+}
+
+static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* air)
+{
+    for (air_insn_t* insn = routine->insns; insn; insn = insn->next)
+    {
+        if (!air_insn_creates_temporary(insn) &&
+            (insn->type != AIR_ASSIGN || insn->noops < 1 || insn->ops[0]->type != AOP_REGISTER || insn->ops[0]->content.reg > NO_PHYSICAL_REGISTERS))
+            continue;
+
+        if (insn->noops < 1 || insn->ops[0]->type != AOP_REGISTER) report_return;
+
+        regid_t reg = insn->ops[0]->content.reg;
+
+        if (air->locale == LOC_X86_64 && insn->type == AIR_FUNC_CALL && reg == INVALID_VREGID)
+            reg = X86R_RAX;
+
+        if (reg == INVALID_VREGID) continue;
+
+        allocinfo_t* info = calloc(1, sizeof *info);
+        info->conflicts = vector_init();
+        info->aliases = vector_init();
+        
+        map_add(a->map, (void*) reg, info);
+
+        air_insn_t* end = find_liveness_end(reg, insn, air);
+
+        for (air_insn_t* btinsn = end; btinsn && btinsn != insn; btinsn = btinsn->prev)
+        {
+            for (size_t i = 0; i < btinsn->noops; ++i)
             {
-                *proc_arg_index = i - 2;
-                *proc_call = insn;
+                if (air_insn_assigns(btinsn) && btinsn == end && i == 0)
+                    continue;
+                air_insn_operand_t* op = btinsn->ops[i];
+                if (!op) continue;
+                regid_t btreg = INVALID_VREGID;
+                if (op->type == AOP_INDIRECT_REGISTER)
+                    btreg = op->content.inreg.id;
+                else if (op->type == AOP_REGISTER)
+                    btreg = op->content.reg;
+                else
+                    continue;
+                
+                if (btreg == INVALID_VREGID)
+                    continue;
+                
+                if (btreg == reg)
+                    continue;
+                
+                vector_add_if_new(info->conflicts, (void*) btreg, (comparator_t) regid_comparator);
             }
         }
     }
 }
 
-void allocate_region(ir_insn_t* insns, ir_insn_t* end, allocator_options_t* options)
+static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
 {
-    // preg -> vreg
-    regid_t* regmap = calloc(options->no_volatile + options->no_nonvolatile, sizeof(regid_t));
-    // preg -> last insn
-    ir_insn_t** insnmap = calloc(options->no_volatile + options->no_nonvolatile, sizeof(ir_insn_t*));
-    
-    for (ir_insn_t* insn = insns; insn && insn != end; insn = insn->next)
+    MAP_FOR(regid_t, allocinfo_t*, a->map)
     {
-        // if instruction is a retain or restore instruction, don't mess with it
-        if (insn->type == II_RETAIN || insn->type == II_RESTORE)
-            continue;
-        // special case: load phys. register into phys. register will remap
-        if (insn->type == II_LOAD && insn->noops == 2 &&
-            insn->ops[0]->type == IIOP_PHYSICAL_REGISTER &&
-            insn->ops[1]->type == IIOP_PHYSICAL_REGISTER)
+        if (MAP_IS_BAD_KEY) continue;
+        regid_t ok = k;
+        allocinfo_t* ov = v;
+        MAP_FOR(regid_t, allocinfo_t*, a->map)
         {
-            regmap[insn->ops[0]->preg - 1] = regmap[insn->ops[1]->preg - 1];
-            insnmap[insn->ops[0]->preg - 1] = insnmap[insn->ops[1]->preg - 1];
-            regmap[insn->ops[1]->preg - 1] = INVALID_VREGID;
-            insnmap[insn->ops[1]->preg - 1] = NULL;
-            continue;
-        }
-        // replace all non-resulting virt. registers with their phys. mapping
-        for (size_t i = 0; i < insn->noops; ++i)
-        {
-            ir_insn_operand_t* op = insn->ops[i];
-            if (op->type != IIOP_VIRTUAL_REGISTER) continue;
-            if (op->result) continue;
-            op->type = IIOP_PHYSICAL_REGISTER;
-            op->preg = find_physical_register(op->vreg, regmap, options->no_volatile + options->no_nonvolatile);
-        }
-        // release any register mappings that expire on this instruction
-        for (size_t i = 0; i < options->no_volatile + options->no_nonvolatile; ++i)
-        {
-            if (insnmap[i] == insn)
+            if (MAP_IS_BAD_KEY) continue;
+
+            // ignore if it's the same register, we're not coalescing the register and itself
+            if (ok == k) continue;
+
+            // cannot coalesce two physical registers
+            if (ok <= NO_PHYSICAL_REGISTERS && k <= NO_PHYSICAL_REGISTERS) continue;
+
+            // if this register has the register we're merging as a conflict, skip it
+            if (vector_contains(v->conflicts, (void*) ok, (comparator_t) regid_comparator) != -1)
+                continue;
+            
+            // if any of this register's aliases has the register we're merging as a conflict, skip it
+            bool found_conflict = false;
+            VECTOR_FOR(regid_t, alias, ov->aliases)
             {
-                insnmap[i] = NULL;
-                regmap[i] = INVALID_VREGID;
-            }
-        }
-        // if there is no resulting virt. register, don't mess with it
-        if (insn->noops < 1)
-            continue;
-        ir_insn_operand_t* result = NULL;
-        for (size_t i = 0; i < insn->noops; ++i)
-            if (insn->ops[i]->result)
-            {
-                result = insn->ops[i];
-                break;
-            }
-        if (!result)
-            continue;
-        if (result->type != IIOP_VIRTUAL_REGISTER)
-            continue;
-        ir_insn_t* expiry = insn;
-        long long proc_arg_index = -1;
-        ir_insn_t* proc_call = NULL;
-        bool proc_call_inbetween = false;
-        gather_vreg_info(result->vreg, insn, end, &expiry, &proc_call, &proc_arg_index, &proc_call_inbetween);
-        regid_t preg = INVALID_VREGID;
-        // if the resulting virt. register is used a procedure call:
-        if (proc_arg_index != -1)
-        {
-            // get the phys. register corresponding to that virt. register's index in the argument list
-            preg = options->procregmap(proc_arg_index);
-            // if that phys. register is occupied
-            if (regmap[preg - 1] != INVALID_VREGID)
-            {
-                ir_insn_t* last = NULL;
-                // return to the last time that register had a value moved to it and
-                if ((last = find_last_update(preg, insn)))
+                if (vector_contains(v->conflicts, (void*) alias, (comparator_t) regid_comparator) != -1)
                 {
-                    // store its value in the next nonvolatile phys. register
-                    for (size_t i = 0; i < last->noops; ++i)
+                    found_conflict = true;
+                    break;
+                }
+            }
+            if (found_conflict)
+                continue;
+            
+            // merge conflicts and add each other as aliases
+            vector_add_if_new(ov->aliases, (void*) k, (comparator_t) regid_comparator);
+            vector_merge(ov->conflicts, v->conflicts, (comparator_t) regid_comparator);
+
+            vector_add_if_new(v->aliases, (void*) ok, (comparator_t) regid_comparator);
+            vector_merge(v->conflicts, ov->conflicts, (comparator_t) regid_comparator);
+        }
+    }
+}
+
+static void replace_registers_x86_64(air_routine_t* routine, allocator_t* a, air_t* air)
+{
+    regid_t nextintreg = X86R_RAX;
+    regid_t nextssereg = X86R_XMM0;
+
+    // go thru each instruction and replace of all its temps with physical registers
+    for (air_insn_t* insn = routine->insns; insn; insn = insn->next)
+    {
+        for (size_t i = 0; i < insn->noops; ++i)
+        {
+            air_insn_operand_t* op = insn->ops[i];
+            if (!op) continue;
+
+            // get the register associated with this operand, if any
+            regid_t reg = INVALID_VREGID;
+            if (op->type == AOP_REGISTER)
+                reg = op->content.reg;
+            else if (op->type == AOP_INDIRECT_REGISTER)
+                reg = op->content.inreg.id;
+            else
+                continue;
+            
+            // if the register's already physical, we don't need to replace anything
+            if (reg <= NO_PHYSICAL_REGISTERS)
+                continue;
+            
+            // get allocation info and its replacement, if any
+            allocinfo_t* info = map_get(a->map, (void*) reg);
+            regid_t repl = (regid_t) map_get(a->replacements, (void*) reg);
+
+            // if there's no replacement
+            if (repl == INVALID_VREGID)
+            {
+                // search the aliases for a physical register
+                VECTOR_FOR(regid_t, alias, info->aliases)
+                {
+                    if (alias <= NO_PHYSICAL_REGISTERS)
                     {
-                        ir_insn_operand_t* op = last->ops[i];
-                        if (!op->result) continue;
-                        op->type = IIOP_PHYSICAL_REGISTER;
-                        for (size_t j = options->no_volatile; j < options->no_volatile + options->no_nonvolatile; ++j)
-                        {
-                            if (regmap[j] != INVALID_VREGID) continue;
-                            op->preg = j + 1;
-                            break;
-                        }
-                        regmap[op->preg - 1] = regmap[preg - 1];
-                        insnmap[op->preg - 1] = insnmap[preg - 1];
-                        ir_insn_t* insn = make_2op(II_LOAD, last->ctype, make_preg_insn_operand(preg, true), make_preg_insn_operand(op->preg, false));
-                        insert_ir_insn_after(proc_call, insn);
+                        repl = alias;
                         break;
                     }
                 }
-            }
-        }
-        else
-        {
-            size_t start = proc_call_inbetween ? options->no_volatile : 0;
-            size_t end = proc_call_inbetween ? start + options->no_nonvolatile : options->no_volatile;
-            for (size_t i = start; i < end; ++i)
-                if (regmap[i] == INVALID_VREGID)
-                {
-                    preg = i + 1;
-                    break;
-                }
-            
-        }
-        if (preg == INVALID_VREGID)
-            report_return;
-        if (expiry != insn)
-        {
-            regmap[preg - 1] = result->vreg;
-            insnmap[preg - 1] = expiry;
-        }
-        else
-        {
-            regmap[preg - 1] = INVALID_VREGID;
-            insnmap[preg - 1] = NULL;
-        }
-        result->type = IIOP_PHYSICAL_REGISTER;
-        result->preg = preg;
-    }
 
-    free(regmap);
-    free(insnmap);
+                // if there isn't a physical register in the aliases
+                if (repl == INVALID_VREGID)
+                {
+                    // go to the definition of the temporary
+                    air_insn_t* def = air_insn_find_temporary_definition_above(reg, insn);
+                    if (!def) report_return;
+                    // and examine its type
+
+                    // if it's an integer/pointer type, take next integer register available (skipping ones that were part of the allocation process)
+                    if (type_is_integer(def->ct) || def->ct->class == CTC_POINTER)
+                    {
+                        for (; nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) nextintreg); ++nextintreg);
+                        if (nextintreg >= X86R_R15) report_return;
+                        map_add(a->replacements, (void*) reg, (void*) (repl = nextintreg++));
+                    }
+                    // if it's a floating type, take next SSE register available (skipping in the same manner as above)
+                    else if (type_is_real_floating(def->ct))
+                    {
+                        for (; nextintreg <= X86R_XMM7 && map_contains_key(a->map, (void*) nextssereg); ++nextssereg);
+                        if (nextintreg >= X86R_XMM7) report_return;
+                        map_add(a->replacements, (void*) reg, (void*) (repl = nextssereg++));
+                    }
+                    // TODO: complex numbas and maybe other?
+                    else
+                        report_return;
+                }
+                // if there is
+                else
+                    // use that
+                    map_add(a->replacements, (void*) reg, (void*) repl);
+            }
+            
+            // then replacement the temporary with the physical register
+            if (op->type == AOP_REGISTER)
+                op->content.reg = repl;
+            else if (op->type == AOP_INDIRECT_REGISTER)
+                op->content.inreg.id = repl;
+            else 
+                report_return;
+        }
+    }
 }
 
-void allocate(ir_insn_t* insns, allocator_options_t* options)
+static void replace_registers(air_routine_t* routine, allocator_t* a, air_t* air)
 {
-    if (!insns) return;
-    // if we find that we need to allocate on the
-    // basis of each basic block, we can do that
-    // for now, don't worry about it
-    ir_insn_t* dummy = calloc(1, sizeof *dummy);
-    dummy->type = II_UNKNOWN;
-    dummy->next = insns;
-    insns->prev = dummy;
-    allocate_region(insns, NULL, options);
-    insns->prev = NULL;
-    insn_delete(dummy);
+    switch (air->locale)
+    {
+        case LOC_X86_64: replace_registers_x86_64(routine, a, air); break;
+        default: report_return;
+    }
+}
+
+static void allocate_routine(air_routine_t* routine, air_t* air)
+{
+    if (!routine) return;
+
+    allocator_t* a = calloc(1, sizeof *a);
+    a->map = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
+    a->replacements = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
+
+    map_set_deleters(a->map, NULL, (deleter_t) allocinfo_delete);
+
+    map_set_printers(a->map,
+        (int (*)(void*, int (*)(const char*, ...))) regid_print,
+        (int (*)(void*, int (*)(const char*, ...))) allocinfo_print);
+    
+    map_set_printers(a->replacements,
+        (int (*)(void*, int (*)(const char*, ...))) regid_print,
+        (int (*)(void*, int (*)(const char*, ...))) regid_print);
+
+    find_all_conflicts(routine, a, air);
+
+    map_print(a->map, printf);
+
+    coalesce(routine, a, air);
+
+    map_print(a->map, printf);
+
+    replace_registers(routine, a, air);
+
+    allocator_delete(a);
+}
+
+void allocate(air_t* air)
+{
+    VECTOR_FOR(air_routine_t*, routine, air->routines)
+        allocate_routine(routine, air);
 }

@@ -54,25 +54,20 @@ dkms.conf
 # Custom
 ignored
 
-# Compiler output
-*.s
-
 # VS Code
 .vscode
 
 # Build folder
 build
 
-# Libraries folder
-lib
-
 # Build executable
 ecc
 test/test
 
-# Testing file
+# Testing files
 /*.c
 /*.h
+/*.s
 
 # Temporary files
 test/*.c

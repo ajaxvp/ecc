@@ -1,0 +1,587 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "ecc.h"
+
+#define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 3
+
+const char* register_name(regid_t reg, x86_insn_size_t size)
+{
+    switch (size)
+    {
+        case X86SZ_BYTE: return X86_64_BYTE_REGISTERS[reg - 1];
+        case X86SZ_WORD: return X86_64_WORD_REGISTERS[reg - 1];
+        case X86SZ_DWORD: return X86_64_DOUBLE_REGISTERS[reg - 1];
+        case X86SZ_QWORD: return X86_64_QUAD_REGISTERS[reg - 1];
+        default: return "(invalid register)";
+    }
+}
+
+void x86_operand_delete(x86_operand_t* op)
+{
+    if (!op) return;
+    switch (op->type)
+    {
+        case X86OP_LABEL:
+            free(op->label);
+            break;
+        case X86OP_TEXT:
+            free(op->text);
+            break;
+        case X86OP_STRING:
+            free(op->string);
+            break;
+        default:
+            break;
+    }
+    free(op);
+}
+
+void x86_insn_delete(x86_insn_t* insn)
+{
+    if (!insn) return;
+    x86_operand_delete(insn->op1);
+    x86_operand_delete(insn->op2);
+    x86_operand_delete(insn->op3);
+    free(insn);
+}
+
+void x86_insn_delete_all(x86_insn_t* insns)
+{
+    if (!insns) return;
+    x86_insn_delete_all(insns->next);
+    x86_insn_delete(insns);
+}
+
+void x86_asm_data_delete(x86_asm_data_t* data)
+{
+    if (!data) return;
+    free(data->data);
+    free(data->label);
+    free(data);
+}
+
+void x86_asm_routine_delete(x86_asm_routine_t* routine)
+{
+    if (!routine) return;
+    free(routine->label);
+    x86_insn_delete_all(routine->insns);
+    free(routine);
+}
+
+void x86_asm_file_delete(x86_asm_file_t* file)
+{
+    if (!file) return;
+    vector_deep_delete(file->data, (deleter_t) x86_asm_data_delete);
+    vector_deep_delete(file->rodata, (deleter_t) x86_asm_data_delete);
+    vector_deep_delete(file->routines, (deleter_t) x86_asm_routine_delete);
+    free(file);
+}
+
+// location next
+// location insn next
+void insert_x86_insn_after(x86_insn_t* insn, x86_insn_t* location)
+{
+    if (!insn || !location) return;
+    insn->next = location->next;
+    location->next = insn;
+}
+
+char x86_operand_size_character(x86_insn_size_t size)
+{
+    switch (size)
+    {
+        case X86SZ_BYTE: return 'b';
+        case X86SZ_WORD: return 'w';
+        case X86SZ_DWORD: return 'l';
+        case X86SZ_QWORD: return 'q';
+        default: return '?';
+    }
+}
+
+x86_insn_size_t c_type_to_x86_operand_size(c_type_t* ct)
+{
+    long long size = type_size(ct);
+    switch (size)
+    {
+        case 1: return X86SZ_BYTE;
+        case 2: return X86SZ_WORD;
+        case 4: return X86SZ_DWORD;
+        case 8: return X86SZ_QWORD;
+        default: return X86SZ_QWORD;
+    }
+}
+
+void x86_write_register(regid_t reg, x86_insn_size_t size, FILE* file)
+{
+    fprintf(file, "%%%s", register_name(reg, size));
+}
+
+void x86_write_operand(x86_operand_t* op, x86_insn_size_t size, FILE* file)
+{
+    if (!op) return;
+    switch (op->type)
+    {
+        case X86OP_REGISTER:
+            x86_write_register(op->reg, size, file);
+            break;
+        case X86OP_PTR_REGISTER:
+            fprintf(file, "*");
+            x86_write_register(op->reg, size, file);
+            break;
+        case X86OP_DEREF_REGISTER:
+            if (op->deref_reg.offset != 0)
+                fprintf(file, "%lld", op->deref_reg.offset);
+            fprintf(file, "(");
+            x86_write_register(op->deref_reg.reg_addr, X86SZ_QWORD, file);
+            fprintf(file, ")");
+            break;
+        case X86OP_ARRAY:
+            if (op->array.offset != 0)
+                fprintf(file, "%lld", op->array.offset);
+            fprintf(file, "(");
+            if (op->array.reg_base != INVALID_VREGID)
+                x86_write_register(op->array.reg_base, X86SZ_QWORD, file);
+            fprintf(file, ", ");
+            if (op->array.reg_offset != INVALID_VREGID)
+                x86_write_register(op->array.reg_offset, X86SZ_QWORD, file);
+            fprintf(file, ", %lld)", op->array.scale);
+            break;
+        case X86OP_LABEL:
+            fprintf(file, "%s", op->label);
+            break;
+        case X86OP_TEXT:
+            fprintf(file, "%s", op->text);
+            break;
+        case X86OP_STRING:
+            fprintf(file, "\"%s\"", op->string);
+            break;
+        case X86OP_LABEL_REF:
+            fprintf(file, "%s(%%rip)", op->label);
+            break;
+        case X86OP_IMMEDIATE:
+            fprintf(file, "$%llu", op->immediate);
+            break;
+        default:
+            break;
+    }
+}
+
+void x86_write_insn(x86_insn_t* insn, FILE* file)
+{
+    if (!insn) return;
+    #define INDENT "    "
+    #define USUAL_1OP(name) fprintf(file, INDENT name "%c ", x86_operand_size_character(insn->size)); goto op1;
+    #define USUAL_2OP(name) fprintf(file, INDENT name "%c ", x86_operand_size_character(insn->size)); goto op2;
+    switch (insn->type)
+    {
+        case X86I_LABEL:
+            fprintf(file, "%s:", insn->op1->label);
+            break;
+        
+        case X86I_LEAVE:
+            fprintf(file, INDENT "leave");
+            break;
+
+        case X86I_RET:
+            fprintf(file, INDENT "ret");
+            break;
+
+        case X86I_NOP:
+            fprintf(file, INDENT "nop");
+            break;
+        
+        case X86I_CALL:
+            fprintf(file, INDENT "call ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_JMP:
+            fprintf(file, INDENT "jmp ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_JE:
+            fprintf(file, INDENT "je ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_JNE:
+            fprintf(file, INDENT "jne ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_SETE:
+            fprintf(file, INDENT "sete ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETL:
+            fprintf(file, INDENT "setl ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+        
+        case X86I_PUSH: USUAL_1OP("push")
+
+        case X86I_MOV: USUAL_2OP("mov")
+        case X86I_LEA: USUAL_2OP("lea")
+        case X86I_XOR: USUAL_2OP("xor")
+        case X86I_ADD: USUAL_2OP("add")
+        case X86I_SUB: USUAL_2OP("sub")
+        case X86I_CMP: USUAL_2OP("cmp")
+        case X86I_NOT: USUAL_2OP("not")
+
+        op1:
+            x86_write_operand(insn->op1, insn->size, file);
+            break;
+        
+        op2:
+            x86_write_operand(insn->op1, insn->size, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
+
+        default:
+            break;
+    }
+    #undef INDENT
+    fprintf(file, "\n");
+}
+
+void x86_write_data(x86_asm_data_t* data, FILE* out)
+{
+    fprintf(out, "    .align %lu\n", data->alignment);
+    fprintf(out, "%s:\n", data->label);
+    for (size_t i = 0; i < data->length;)
+    {
+        if (i + UNSIGNED_LONG_LONG_INT_WIDTH <= data->length)
+            fprintf(out, "    .quad 0x%llX\n", *((unsigned long long*) (data->data + i))), i += UNSIGNED_LONG_LONG_INT_WIDTH;
+        else if (i + UNSIGNED_INT_WIDTH <= data->length)
+            fprintf(out, "    .long 0x%X\n", *((unsigned*) (data->data + i))), i += UNSIGNED_INT_WIDTH;
+        else if (i + UNSIGNED_SHORT_INT_WIDTH <= data->length)
+            fprintf(out, "    .word 0x%X\n", *((unsigned short*) (data->data + i))), i += UNSIGNED_SHORT_INT_WIDTH;
+        else
+            fprintf(out, "    .byte 0x%X\n", *((unsigned char*) (data->data + i))), i += UNSIGNED_CHAR_WIDTH;
+    }
+}
+
+void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
+{
+    if (routine->global)
+        fprintf(out, "    .globl %s\n", routine->label);
+    fprintf(out, "%s:\n", routine->label);
+    fprintf(out, "    pushq %%rbp\n");
+    fprintf(out, "    movq %%rsp, %%rbp\n");
+    for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
+        x86_write_insn(insn, out);
+    fprintf(out, "    leave\n");
+    fprintf(out, "    ret\n");
+}
+
+void x86_asm_file_write(x86_asm_file_t* file, FILE* out)
+{
+    if (file->data->size)
+        fprintf(out, "    .data\n");
+    VECTOR_FOR(x86_asm_data_t*, data, file->data)
+        x86_write_data(data, out);
+    if (file->rodata->size)
+        fprintf(out, "    .section .rodata\n");
+    VECTOR_FOR(x86_asm_data_t*, rodata, file->rodata)
+        x86_write_data(rodata, out);
+    if (file->routines->size)
+        fprintf(out, "    .text\n");
+    VECTOR_FOR(x86_asm_routine_t*, routine, file->routines)
+        x86_write_routine(routine, out);
+}
+
+x86_operand_t* make_basic_x86_operand(x86_operand_type_t type)
+{
+    x86_operand_t* op = calloc(1, sizeof *op);
+    op->type = type;
+    return op;
+}
+
+x86_operand_t* make_operand_label(char* label)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_LABEL);
+    op->label = strdup(label);
+    return op;
+}
+
+x86_operand_t* make_operand_label_ref(char* label)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_LABEL_REF);
+    op->label = strdup(label);
+    return op;
+}
+
+x86_operand_t* make_operand_string(char* string)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_STRING);
+    op->string = strdup(string);
+    return op;
+}
+
+x86_operand_t* make_operand_register(regid_t reg)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_REGISTER);
+    op->reg = reg;
+    return op;
+}
+
+x86_operand_t* make_operand_ptr_register(regid_t reg)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_PTR_REGISTER);
+    op->reg = reg;
+    return op;
+}
+
+x86_operand_t* make_operand_deref_register(regid_t reg, long long offset)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_DEREF_REGISTER);
+    op->deref_reg.offset = offset;
+    op->deref_reg.reg_addr = reg;
+    return op;
+}
+
+x86_operand_t* make_operand_immediate(unsigned long long immediate)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_IMMEDIATE);
+    op->immediate = immediate;
+    return op;
+}
+
+x86_operand_t* make_operand_array(regid_t reg_base, regid_t reg_offset, long long scale, long long offset)
+{
+    x86_operand_t* op = make_basic_x86_operand(X86OP_ARRAY);
+    op->array.reg_base = reg_base;
+    op->array.reg_offset = reg_offset;
+    op->array.scale = scale;
+    op->array.offset = offset;
+    return op;
+}
+
+x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop)
+{
+    switch (aop->type)
+    {
+        case AOP_INDIRECT_REGISTER:
+        {
+            if (aop->content.inreg.roffset != INVALID_VREGID || aop->content.inreg.factor != 0)
+                return make_operand_array(aop->content.inreg.id, aop->content.inreg.roffset, aop->content.inreg.factor, aop->content.inreg.offset);
+            return make_operand_deref_register(aop->content.inreg.id, aop->content.inreg.offset);
+        }
+        case AOP_REGISTER:
+            return make_operand_register(aop->content.reg);
+        case AOP_INTEGER_CONSTANT:
+            return make_operand_immediate(aop->content.ic);
+        case AOP_SYMBOL:
+        {
+            if (symbol_get_storage_duration(aop->content.sy) == SD_STATIC)
+                return make_operand_label_ref(symbol_get_name(aop->content.sy));
+            // TODO
+            report_return_value(NULL);
+        }
+        case AOP_INDIRECT_SYMBOL:
+        case AOP_LABEL:
+        case AOP_FLOATING_CONSTANT:
+            // TODO
+            report_return_value(NULL);
+    }
+    report_return_value(NULL);
+}
+
+x86_insn_t* make_basic_x86_insn(x86_insn_type_t type)
+{
+    x86_insn_t* insn = calloc(1, sizeof *insn);
+    insn->type = type;
+    return insn;
+}
+
+x86_insn_t* make_x86_insn_clear_register(regid_t reg)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_XOR);
+    insn->size = X86SZ_QWORD;
+    insn->op1 = make_operand_register(reg);
+    insn->op2 = make_operand_register(reg);
+    return insn;
+}
+
+x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    x86_insn_type_t itype = X86I_MOV;
+    x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    // TODO: handle third operand
+    return insn;
+}
+
+x86_insn_t* x86_generate_load_addr(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_LEA);
+    insn->size = X86SZ_QWORD;
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    // TODO: handle third operand
+    return insn;
+}
+
+x86_insn_t* x86_generate_assign(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    return insn;
+}
+
+x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_CALL);
+    insn->size = X86SZ_QWORD;
+    air_insn_operand_t* aop = ainsn->ops[1];
+    switch (aop->type)
+    {
+        case AOP_REGISTER:
+            insn->op1 = make_operand_ptr_register(aop->content.reg);
+            break;
+        case AOP_SYMBOL:
+            insn->op1 = make_operand_label(symbol_get_name(aop->content.sy));
+            break;
+        default:
+            report_return_value(NULL);
+    }
+    return insn;
+}
+
+x86_insn_t* x86_generate_nop(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    return make_basic_x86_insn(X86I_NOP);
+}
+
+x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_file_t* file)
+{
+    if (!ainsn) return NULL;
+    switch (ainsn->type)
+    {
+        case AIR_LOAD: return x86_generate_load(ainsn, file);
+        case AIR_LOAD_ADDR: return x86_generate_load_addr(ainsn, file);
+        case AIR_ASSIGN: return x86_generate_assign(ainsn, file);
+        case AIR_FUNC_CALL: return x86_generate_func_call(ainsn, file);
+        case AIR_NOP: return x86_generate_nop(ainsn, file);
+
+        case AIR_DECLARE:
+        case AIR_RETURN:
+        case AIR_JZ:
+        case AIR_JNZ:
+        case AIR_JMP:
+        case AIR_LABEL:
+        case AIR_PUSH:
+        case AIR_DIRECT_ADD:
+        case AIR_DIRECT_SUBTRACT:
+        case AIR_DIRECT_MULTIPLY:
+        case AIR_DIRECT_DIVIDE:
+        case AIR_DIRECT_MODULO:
+        case AIR_DIRECT_SHIFT_LEFT:
+        case AIR_DIRECT_SHIFT_RIGHT:
+        case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
+        case AIR_DIRECT_AND:
+        case AIR_DIRECT_XOR:
+        case AIR_DIRECT_OR:
+        case AIR_ADD:
+        case AIR_PHI:
+        case AIR_NEGATE:
+        case AIR_MULTIPLY:
+        case AIR_POSATE:
+        case AIR_COMPLEMENT:
+        case AIR_NOT:
+        case AIR_SEXT:
+        case AIR_ZEXT:
+        case AIR_S2D:
+        case AIR_D2S:
+        case AIR_S2SI:
+        case AIR_S2UI:
+        case AIR_D2SI:
+        case AIR_D2UI:
+        case AIR_SI2S:
+        case AIR_UI2S:
+        case AIR_SI2D:
+        case AIR_UI2D:
+        case AIR_DIVIDE:
+        case AIR_MODULO:
+        case AIR_SHIFT_LEFT:
+        case AIR_SHIFT_RIGHT:
+        case AIR_SIGNED_SHIFT_RIGHT:
+        case AIR_LESS_EQUAL:
+        case AIR_LESS:
+        case AIR_GREATER_EQUAL:
+        case AIR_GREATER:
+        case AIR_EQUAL:
+        case AIR_INEQUAL:
+        case AIR_AND:
+        case AIR_XOR:
+        case AIR_OR:
+            warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
+            return NULL;
+    }
+    return NULL;
+}
+
+x86_asm_routine_t* x86_generate_routine(air_routine_t* aroutine, x86_asm_file_t* file)
+{
+    x86_asm_routine_t* routine = calloc(1, sizeof *routine);
+    routine->global = symbol_get_linkage(aroutine->sy) == LK_EXTERNAL;
+    routine->label = strdup(symbol_get_name(aroutine->sy));
+    routine->stackalloc = 0;
+    x86_insn_t* last = NULL;
+    for (air_insn_t* ainsn = aroutine->insns; ainsn; ainsn = ainsn->next)
+    {
+        x86_insn_t* insn = x86_generate_insn(ainsn, file);
+        if (!insn) continue;
+        if (!last)
+            routine->insns = last = insn;
+        else
+            last = last->next = insn;
+    }
+    return routine;
+}
+
+x86_asm_data_t* x86_generate_data(air_data_t* adata, x86_asm_file_t* file)
+{
+    x86_asm_data_t* data = calloc(1, sizeof *data);
+    data->alignment = type_alignment(adata->sy->type);
+    long long size = type_size(adata->sy->type);
+    if (size == -1)
+        report_return_value(NULL);
+    data->data = malloc(size);
+    memcpy(data->data, adata->data, size);
+    data->length = size;
+    // TODO: something w/ static fields maybe here or earlier idk
+    data->label = strdup(symbol_get_name(adata->sy));
+    data->readonly = adata->readonly;
+    return data;
+}
+
+x86_asm_file_t* x86_generate(air_t* air, symbol_table_t* st)
+{
+    x86_asm_file_t* file = calloc(1, sizeof *file);
+    file->st = st;
+    file->air = air;
+    file->data = vector_init();
+    file->rodata = vector_init();
+    file->routines = vector_init();
+
+    VECTOR_FOR(air_data_t*, data, air->data)
+        vector_add(file->data, x86_generate_data(data, file));
+
+    VECTOR_FOR(air_data_t*, rodata, air->rodata)
+        vector_add(file->rodata, x86_generate_data(rodata, file));
+
+    VECTOR_FOR(air_routine_t*, routine, air->routines)
+        vector_add(file->routines, x86_generate_routine(routine, file));
+
+    return file;
+}

@@ -216,12 +216,11 @@ token_t* tokenize_character_constant(preprocessing_token_t* pp_token, tokenizing
     return token;
 }
 
-// translation phase 7 (part I)
-token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* settings)
+token_t* tokenize_sequence(preprocessing_token_t* pp_tokens, preprocessing_token_t* end, tokenizing_settings_t* settings)
 {
     token_t* head = NULL;
     token_t* current = NULL;
-    for (; pp_tokens; pp_tokens = pp_tokens->next)
+    for (; pp_tokens && pp_tokens != end; pp_tokens = pp_tokens->next)
     {
         token_t* token = NULL;
         switch (pp_tokens->type)
@@ -256,4 +255,10 @@ token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* setti
             head = current = token;
     }
     return head;
+}
+
+// translation phase 7 (part I)
+token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* settings)
+{
+    return tokenize_sequence(pp_tokens, NULL, settings);
 }

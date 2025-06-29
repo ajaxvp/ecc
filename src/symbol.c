@@ -96,6 +96,8 @@ bool scope_is_file(syntax_component_t* scope)
 
 storage_duration_t symbol_get_storage_duration(symbol_t* sy)
 {
+    if (sy->declarer->type == SC_STRING_LITERAL)
+        return SD_STATIC;
     syntax_component_t* scope = symbol_get_scope(sy);
     if (!scope) return SD_UNKNOWN;
     if (scope_is_block(scope))

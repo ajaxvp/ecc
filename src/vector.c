@@ -50,6 +50,7 @@ void* vector_peek(vector_t* v)
     return vector_get(v, v->size - 1);
 }
 
+// returns the index of the element if found, -1 otherwise
 int vector_contains(vector_t* v, void* el, int (*c)(void*, void*))
 {
     return contains(v->data, v->size, el, c);
@@ -106,4 +107,23 @@ void vector_deep_delete(vector_t* v, void (*deleter)(void*))
         if (v->data[i])
             deleter(v->data[i]);
     vector_delete(v);
+}
+
+void vector_concat(vector_t* v, vector_t* u)
+{
+    for (unsigned i = 0; i < u->size; ++i)
+        vector_add(v, vector_get(u, i));
+}
+
+vector_t* vector_add_if_new(vector_t* v, void* el, int (*c)(void*, void*))
+{
+    if (vector_contains(v, el, c) == -1)
+        vector_add(v, el);
+    return v;
+}
+
+void vector_merge(vector_t* v, vector_t* u, int (*c)(void*, void*))
+{
+    for (unsigned i = 0; i < u->size; ++i)
+        vector_add_if_new(v, vector_get(u, i), c);
 }

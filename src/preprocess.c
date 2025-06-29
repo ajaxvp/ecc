@@ -25,10 +25,13 @@ typedef enum pp_status_code
 
 // goes to the next non-whitespace token (since
 // technically whitespace are not preprocessing tokens)
-#define advance_token do token = (token ? token->next : NULL); while (token != NULL && !is_pp_token(token));
+#define advance_token advance_token_impl(&token)
 
 // goes to the next element of the token list no matter what it is
 #define advance_token_list token = (token ? token->next : NULL)
+
+// goes to the next non-whitespace token except if it's whitespace containing a newline
+#define advance_token_without_newline do { token = (token ? token->next : NULL); } while (token && !is_pp_token(token) && !is_whitespace_containing_newline(token))
 
 #define fail(token, fmt, ...) ((token) ? snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s:%d:%d] " fmt "\n", get_file_name(state->settings->filepath, false), (token)->row, (token)->col, ## __VA_ARGS__) : snerrorf(state->settings->error, MAX_ERROR_LENGTH, "[%s] " fmt "\n", get_file_name(state->settings->filepath, false), ## __VA_ARGS__), NULL)
 #define fallthrough_fail NULL
@@ -215,6 +218,16 @@ static bool is_whitespace_containing_newline(preprocessing_token_t* token)
     return is_whitespace(token) && contains_char(token->whitespace, '\n');
 }
 
+static preprocessing_token_t* advance_token_impl(preprocessing_token_t** t)
+{
+    if (!t) return NULL;
+    preprocessing_token_t* token = *t;
+    do
+        token = (token ? token->next : NULL);
+    while (token != NULL && !is_pp_token(token));
+    return *t = token;
+}
+
 // inserting next
 // inserting token next
 
@@ -227,6 +240,21 @@ static preprocessing_token_t* insert_token_after(preprocessing_token_t* token, p
     token->next = next;
     if (next)
         next->prev = token;
+    return token;
+}
+
+// prev inserting
+// prev token inserting
+
+static preprocessing_token_t* insert_token_before(preprocessing_token_t* token, preprocessing_token_t* inserting)
+{
+    if (!token || !inserting) return NULL;
+    preprocessing_token_t* prev = inserting->prev;
+    inserting->prev = token;
+    token->next = inserting;
+    token->prev = prev;
+    if (prev)
+        prev->next = token;
     return token;
 }
 
@@ -398,7 +426,7 @@ static bool can_start_text_line(preprocessing_state_t* state, preprocessing_toke
     return token;
 }
 
-static bool can_start_standard_directive(preprocessing_state_t* state, preprocessing_token_t* token, char* name)\
+static bool can_start_standard_directive(preprocessing_state_t* state, preprocessing_token_t* token, char* name)
 {
     if (!is_punctuator(token, P_HASH))
         return false;
@@ -409,6 +437,19 @@ static bool can_start_standard_directive(preprocessing_state_t* state, preproces
     advance_token;
 
     return is_identifier(token, name);
+}
+
+static bool can_start_null_directive(preprocessing_state_t* state, preprocessing_token_t* token)
+{
+    if (!is_punctuator(token, P_HASH))
+        return false;
+    
+    if (!token->can_start_directive)
+        return false;
+
+    advance_token_list;
+
+    return is_whitespace_containing_newline(token);
 }
 
 static bool can_start_if_group(preprocessing_state_t* state, preprocessing_token_t* token)
@@ -505,7 +546,7 @@ typedef struct preprocessing_component
         // PPC_IF_GROUP
         struct
         {
-            syntax_component_t* ifg_condition; // PPC_CONDITIONAL_EXPRESSION (constant expression)
+            preprocessing_component_t* ifg_condition; // PPC_TOKEN_SEQUENCE
             vector_t* ifg_parts; // vector_t<preprocessing_component_t* (PPC_GROUP_PART)>
         };
         // PPC_IFDEF_GROUP
@@ -523,7 +564,7 @@ typedef struct preprocessing_component
         // PPC_ELIF_GROUP
         struct
         {
-            syntax_component_t* elifg_condition; // PPC_CONDITIONAL_EXPRESSION (constant expression)
+            preprocessing_component_t* elifg_condition; // PPC_TOKEN_SEQUENCE
             vector_t* elifg_parts; // vector_t<preprocessing_component_t* (PPC_GROUP_PART)>
         };
         // PPC_ELSE_GROUP
@@ -563,7 +604,7 @@ void pp_component_delete(preprocessing_component_t* comp)
             pp_component_delete(comp->ifs_endif_line);
             break;
         case PPC_IF_GROUP:
-            free_syntax(comp->ifg_condition, NULL);
+            pp_component_delete(comp->ifg_condition);
             vector_deep_delete(comp->ifg_parts, (void (*)(void*)) pp_component_delete);
             break;
         case PPC_IFDEF_GROUP:
@@ -575,7 +616,7 @@ void pp_component_delete(preprocessing_component_t* comp)
             vector_deep_delete(comp->ifndg_parts, (void (*)(void*)) pp_component_delete);
             break;
         case PPC_ELIF_GROUP:
-            free_syntax(comp->elifg_condition, NULL);
+            pp_component_delete(comp->elifg_condition);
             vector_deep_delete(comp->elifg_parts, (void (*)(void*)) pp_component_delete);
             break;
         case PPC_ELSE_GROUP:
@@ -605,6 +646,7 @@ void pp_component_delete(preprocessing_component_t* comp)
         case PPC_ENDIF_LINE:
         case PPC_TOKEN_SEQUENCE:
         case PPC_NON_DIRECTIVE:
+        case PPC_EMPTY_CONTROL_LINE:
             // no free'ing to be done
             break;
         default:
@@ -676,7 +718,8 @@ static void pp_component_print_indented(preprocessing_component_t* comp, unsigne
             break;
         case PPC_IF_GROUP:
             ps(sty("if group") "\n");
-            pf("condition: [omitted]\n");
+            pf("condition:\n");
+            pp_component_print_indented(comp->ifg_condition, next_indent, printer);
             pf("group:\n");
             print_vector_indented(comp->ifg_parts, next_indent, printer);
             break;
@@ -694,7 +737,8 @@ static void pp_component_print_indented(preprocessing_component_t* comp, unsigne
             break;
         case PPC_ELIF_GROUP:
             ps(sty("elif group") "\n");
-            pf("condition: [omitted]\n");
+            pf("condition:\n");
+            pp_component_print_indented(comp->elifg_condition, next_indent, printer);
             pf("group:\n");
             print_vector_indented(comp->elifg_parts, next_indent, printer);
             break;
@@ -799,11 +843,47 @@ void pp_component_print(preprocessing_component_t* comp, int (*printer)(const ch
     pp_component_print_indented(comp, 0, printer);
 }
 
+preprocessing_component_t* pp_parse_token_sequence(preprocessing_token_t** tokens, preprocessing_state_t* state, bool (*terminator)(preprocessing_token_t* token))
+{
+    init_preprocess(PPC_TOKEN_SEQUENCE);
+    for (; !terminator(token); advance_token_list);
+    return found;
+}
+
 preprocessing_component_t* pp_parse_group_part(preprocessing_token_t** tokens, preprocessing_state_t* state);
 
 preprocessing_component_t* pp_parse_if_group(preprocessing_token_t** tokens, preprocessing_state_t* state)
 {
-    return fail(*tokens, "#if directives are not supported yet");
+    init_preprocess(PPC_IF_GROUP);
+
+    // skip '#' and 'if' (both checked when checking if it can start an if)
+    advance_token;
+    advance_token_without_newline;
+
+    comp->ifg_condition = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (!token)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#if directive must end with a newline");
+    }
+
+    advance_token_list; // move past whitespace
+    comp->directive_end = token;
+
+    while (can_start_group_part(state, token))
+    {
+        preprocessing_component_t* part = pp_parse_group_part(&token, state);
+        if (!part)
+        {
+            pp_component_delete(comp);
+            return fallthrough_fail;
+        }
+        if (!comp->ifg_parts) comp->ifg_parts = vector_init();
+        vector_add(comp->ifg_parts, part);
+    }
+
+    return found;
 }
 
 preprocessing_component_t* pp_parse_ifdef_group(preprocessing_token_t** tokens, preprocessing_state_t* state)
@@ -812,7 +892,7 @@ preprocessing_component_t* pp_parse_ifdef_group(preprocessing_token_t** tokens, 
     
     // skip '#' and 'ifdef' (both checked when checking if it can start an ifdef)
     advance_token;
-    advance_token;
+    advance_token_without_newline;
 
     if (!is_pp_type(token, PPT_IDENTIFIER))
     {
@@ -852,7 +932,7 @@ preprocessing_component_t* pp_parse_ifndef_group(preprocessing_token_t** tokens,
     
     // skip '#' and 'ifndef' (both checked when checking if it can start an ifndef)
     advance_token;
-    advance_token;
+    advance_token_without_newline;
 
     if (!is_pp_type(token, PPT_IDENTIFIER))
     {
@@ -888,7 +968,36 @@ preprocessing_component_t* pp_parse_ifndef_group(preprocessing_token_t** tokens,
 
 preprocessing_component_t* pp_parse_elif_group(preprocessing_token_t** tokens, preprocessing_state_t* state)
 {
-    return fail(*tokens, "#elif directives are not supported yet");
+    init_preprocess(PPC_ELIF_GROUP);
+
+    // skip '#' and 'elif' (both checked when checking if it can start an elif)
+    advance_token;
+    advance_token_without_newline;
+
+    comp->elifg_condition = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (!token)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#elif directive must end with a newline");
+    }
+
+    advance_token_list; // move past whitespace
+    comp->directive_end = token;
+
+    while (can_start_group_part(state, token))
+    {
+        preprocessing_component_t* part = pp_parse_group_part(&token, state);
+        if (!part)
+        {
+            pp_component_delete(comp);
+            return fallthrough_fail;
+        }
+        if (!comp->elifg_parts) comp->elifg_parts = vector_init();
+        vector_add(comp->elifg_parts, part);
+    }
+
+    return found;
 }
 
 preprocessing_component_t* pp_parse_else_group(preprocessing_token_t** tokens, preprocessing_state_t* state)
@@ -897,7 +1006,7 @@ preprocessing_component_t* pp_parse_else_group(preprocessing_token_t** tokens, p
     
     // skip '#' and 'else' (both checked when checking if it can start an else)
     advance_token;
-    advance_token_list;
+    advance_token_without_newline;
 
     if (!is_whitespace_containing_newline(token))
     {
@@ -929,7 +1038,7 @@ preprocessing_component_t* pp_parse_endif_line(preprocessing_token_t** tokens, p
     // move past hash
     advance_token;
     // move past endif
-    advance_token_list;
+    advance_token_without_newline;
     if (!is_whitespace_containing_newline(token))
     {
         pp_component_delete(comp);
@@ -987,22 +1096,21 @@ preprocessing_component_t* pp_parse_if_section(preprocessing_token_t** tokens, p
     return found;
 }
 
-preprocessing_component_t* pp_parse_token_sequence(preprocessing_token_t** tokens, preprocessing_state_t* state, bool (*terminator)(preprocessing_token_t* token))
-{
-    init_preprocess(PPC_TOKEN_SEQUENCE);
-    for (; !terminator(token); advance_token_list);
-    return found;
-}
-
 preprocessing_component_t* pp_parse_include_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
 {
     init_preprocess(PPC_INCLUDE_LINE);
     // move past hash
     advance_token;
     // move past include
-    advance_token;
+    advance_token_without_newline;
     
     comp->incl_sequence = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (comp->incl_sequence->start == comp->incl_sequence->end)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#include directive requires a header name or a sequence which, after macro replacement, resolves to one");
+    }
 
     if (!token)
     {
@@ -1020,7 +1128,7 @@ preprocessing_component_t* pp_parse_define_line(preprocessing_token_t** tokens, 
     // move past hash
     advance_token;
     // move past define
-    advance_token;
+    advance_token_without_newline;
     if (!is_pp_type(token, PPT_IDENTIFIER))
     {
         pp_component_delete(comp);
@@ -1084,7 +1192,7 @@ preprocessing_component_t* pp_parse_undef_line(preprocessing_token_t** tokens, p
     // move past hash
     advance_token;
     // move past undef
-    advance_token;
+    advance_token_without_newline;
 
     if (!is_pp_type(token, PPT_IDENTIFIER))
     {
@@ -1106,6 +1214,82 @@ preprocessing_component_t* pp_parse_undef_line(preprocessing_token_t** tokens, p
     return found;
 }
 
+preprocessing_component_t* pp_parse_error_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
+{
+    init_preprocess(PPC_ERROR_LINE);
+    // move past hash
+    advance_token;
+    // move past error
+    advance_token_without_newline;
+
+    comp->errl_sequence = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (!token)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#error directive must end with a newline");
+    }
+
+    advance_token_list; // move past whitespace
+    return found;
+}
+
+preprocessing_component_t* pp_parse_pragma_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
+{
+    init_preprocess(PPC_PRAGMA_LINE);
+    // move past hash
+    advance_token;
+    // move past pragma
+    advance_token_without_newline;
+
+    comp->pragl_sequence = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (!token)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#pragma directive must end with a newline");
+    }
+
+    advance_token_list; // move past whitespace
+    return found;
+}
+
+preprocessing_component_t* pp_parse_line_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
+{
+    init_preprocess(PPC_LINE_LINE);
+    // move past hash
+    advance_token;
+    // move past line
+    advance_token_without_newline;
+
+    comp->linel_sequence = pp_parse_token_sequence(&token, state, is_whitespace_containing_newline);
+
+    if (comp->linel_sequence->start == comp->linel_sequence->end)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#line directive requires a line number, a line number and a filename, or a sequence resolving to one of those two after macro replacement");
+    }
+
+    if (!token)
+    {
+        pp_component_delete(comp);
+        return fail(token, "#line directive must end with a newline");
+    }
+
+    advance_token_list; // move past whitespace
+    return found;
+}
+
+preprocessing_component_t* pp_parse_null_directive(preprocessing_token_t** tokens, preprocessing_state_t* state)
+{
+    init_preprocess(PPC_EMPTY_CONTROL_LINE);
+    // move past hash
+    advance_token_without_newline;
+
+    advance_token_list;
+    return found;
+}
+
 preprocessing_component_t* pp_parse_control_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
 {
     if (can_start_standard_directive(state, *tokens, "include"))
@@ -1114,7 +1298,15 @@ preprocessing_component_t* pp_parse_control_line(preprocessing_token_t** tokens,
         return pp_parse_define_line(tokens, state);
     if (can_start_standard_directive(state, *tokens, "undef"))
         return pp_parse_undef_line(tokens, state);
-    return fail(*tokens, "#line, #error, #pragma, and the null directive are not supported yet");
+    if (can_start_standard_directive(state, *tokens, "line"))
+        return pp_parse_line_line(tokens, state);
+    if (can_start_standard_directive(state, *tokens, "error"))
+        return pp_parse_error_line(tokens, state);
+    if (can_start_standard_directive(state, *tokens, "pragma"))
+        return pp_parse_pragma_line(tokens, state);
+    if (can_start_null_directive(state, *tokens))
+        return pp_parse_null_directive(tokens, state);
+    return fail(*tokens, "unknown control line encountered");
 }
 
 preprocessing_component_t* pp_parse_text_line(preprocessing_token_t** tokens, preprocessing_state_t* state)
@@ -1184,14 +1376,88 @@ preprocessing_component_t* pp_parse_preprocessing_file(preprocessing_token_t** t
 
 bool preprocess_group(vector_t* group, preprocessing_state_t* state);
 
+// 0 - false, 1 - true, 2 - error
+static int check_if_condition(preprocessing_component_t* condition, preprocessing_state_t* state)
+{
+    // expand all tokens in the controlling expression
+    for (preprocessing_token_t* token = condition->start; token && token != condition->end; token = token->next)
+        if (!(token = expand(token, state, NULL)))
+            return 2;
+    
+    // replace "defined" macro with constants
+    for (preprocessing_token_t* token = condition->start; token && token != condition->end; token = token->next)
+    {
+        if (token->type != PPT_IDENTIFIER || !streq(token->identifier, "defined"))
+            continue;
+        preprocessing_token_t* defined_token = token;
+        if (!advance_token)
+            break;
+        bool paren = false;
+        if (token->type == PPT_PUNCTUATOR && token->punctuator == P_LEFT_PARENTHESIS)
+        {
+            paren = true;
+            if (!advance_token)
+                break;
+        }
+        if (token->type != PPT_IDENTIFIER)
+            continue;
+        preprocessing_token_t* id = token;
+        if (paren)
+        {
+            preprocessing_token_t* next = token;
+            advance_token_impl(&next);
+            if (!next || next->type != PPT_PUNCTUATOR || next->punctuator != P_RIGHT_PARENTHESIS)
+                continue;
+            token = next;
+        }
+        if (!token->next)
+            report_return_value(2);
+        preprocessing_token_t* repl = calloc(1, sizeof *repl);
+        repl->type = PPT_PP_NUMBER;
+        repl->row = defined_token->row;
+        repl->col = defined_token->col;
+        bool exists = preprocessing_table_get(state->table, id->identifier, NULL, NULL);
+        repl->pp_number = strdup(exists ? "1" : "0");
+        bool update_start = defined_token == condition->start;
+        preprocessing_token_t* inserting = remove_token_sequence(defined_token, token->next);
+        insert_token_before(repl, inserting);
+        if (update_start)
+            condition->start = repl;
+        token = repl;
+    }
+
+    tokenizing_settings_t settings;
+    settings.error = state->settings->error;
+    settings.filepath = state->settings->filepath;
+    token_t* tokens = tokenize_sequence(condition->start, condition->end, &settings);
+    if (settings.error[0])
+        return 2;
+    
+    syntax_component_t* expr = parse_if_directive_expression(tokens, settings.error);
+
+    constexpr_t* ce = ce_evaluate(expr, CE_INTEGER);
+    unsigned long long value = ce->ivalue;
+
+    constexpr_delete(ce);
+    token_delete_all(tokens);
+    free_syntax(expr, NULL);
+
+    return value != 0;
+}
+
 bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
     bool held = false;
     switch (comp->ifs_if_group->type)
     {
         case PPC_IF_GROUP:
-            (void) fail(comp->start, "#if directives are not supported yet");
-            return false;
+        {
+            int result = check_if_condition(comp->ifs_if_group->ifg_condition, state);
+            if (result == 2)
+                return false;
+            held = result;
+            break;
+        }
         case PPC_IFDEF_GROUP:
         case PPC_IFNDEF_GROUP:
             bool f = preprocessing_table_get(state->table, comp->ifs_if_group->ifndg_id, NULL, NULL);
@@ -1218,8 +1484,26 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
     }
     if (comp->ifs_elif_groups)
     {
-        (void) fail(comp->start, "#elif directives are not supported yet");
-        return false;
+        VECTOR_FOR(preprocessing_component_t*, group, comp->ifs_elif_groups)
+        {
+            int result = check_if_condition(group->elifg_condition, state);
+            if (result == 2)
+                return false;
+            if (!result)
+                continue;
+            // delete #if group, every #elif group besides this one, the #elif directive of this group, the #else directive, and the #endif directive
+            remove_token_sequence(comp->ifs_if_group->start, comp->ifs_if_group->end);
+            VECTOR_FOR(preprocessing_component_t*, g, comp->ifs_elif_groups)
+                if (group == g)
+                    remove_token_sequence(g->start, g->directive_end);
+                else
+                    remove_token_sequence(g->start, g->end);
+            if (comp->ifs_else_group)
+                remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->end);
+            remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
+            preprocess_group(group->elifg_parts, state);
+            return true;
+        }
     }
     // delete #if group, every #elif group, #else directive, and #endif directive
     remove_token_sequence(comp->ifs_if_group->start, comp->ifs_if_group->end);
@@ -1335,17 +1619,33 @@ bool preprocess_undef_line(preprocessing_component_t* comp, preprocessing_state_
 
 bool preprocess_line_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
-    return false;
+    warnf("[%s:%d:%d] #line directives are currently ignored by the compiler. they will be supported in a later version\n",
+        state->settings->filepath, comp->start->row, comp->start->col);
+    remove_token_sequence(comp->start, comp->end);
+    return true;
 }
 
 bool preprocess_error_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
+    if (comp->errl_sequence->start == comp->errl_sequence->end)
+    {
+        (void) fail(comp->start, "#error directive");
+        return false;
+    }
+    quickbuffer_setup(MAX_ERROR_LENGTH);
+    pp_token_normal_print_range(comp->errl_sequence->start, comp->errl_sequence->end, quickbuffer_printf);
+    (void) fail(comp->start, "#error directive: %s", quickbuffer());
+    quickbuffer_release();
+    remove_token_sequence(comp->start, comp->end);
     return false;
 }
 
 bool preprocess_pragma_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
-    return false;
+    warnf("[%s:%d:%d] #pragma directives are currently ignored by the compiler. they will be supported in a later version\n",
+        state->settings->filepath, comp->start->row, comp->start->col);
+    remove_token_sequence(comp->start, comp->end);
+    return true;
 }
 
 bool preprocess_control_line(preprocessing_component_t* comp, preprocessing_state_t* state)
@@ -1364,6 +1664,9 @@ bool preprocess_control_line(preprocessing_component_t* comp, preprocessing_stat
             return preprocess_error_line(comp, state);
         case PPC_PRAGMA_LINE:
             return preprocess_pragma_line(comp, state);
+        case PPC_EMPTY_CONTROL_LINE:
+            remove_token_sequence(comp->start, comp->end);
+            return true;
         default:
             (void) fail(comp->start, "unexpected control line type");
             return false;
@@ -1395,6 +1698,7 @@ bool preprocess_group_part(preprocessing_component_t* comp, preprocessing_state_
         case PPC_LINE_LINE:
         case PPC_ERROR_LINE:
         case PPC_PRAGMA_LINE:
+        case PPC_EMPTY_CONTROL_LINE:
             return preprocess_control_line(comp, state);
         case PPC_TEXT_LINE:
             return preprocess_text_line(comp, state);

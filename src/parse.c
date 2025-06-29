@@ -1401,6 +1401,7 @@ syntax_component_t* parse_character_constant(token_t** tokens, parse_request_cod
     init_syn(SC_CHARACTER_CONSTANT);
     syn->charc_value = token->character_constant.value;
     syn->charc_wide = token->character_constant.wide;
+    syn->ctype = make_basic_type(CTC_INT);
     advance_token;
     update_status(FOUND);
     return syn;
@@ -2150,6 +2151,32 @@ syntax_component_t* parse_conditional_expression(token_t** tokens, parse_request
     }
     update_status(FOUND);
     return syn;
+}
+
+syntax_component_t* parse_if_directive_expression(token_t* tokens, char* error)
+{
+    if (!tokens)
+        return NULL;
+    
+    // dummy translation unit
+    syntax_component_t* tlu = calloc(1, sizeof *tlu);
+    tlu->type = SC_TRANSLATION_UNIT;
+    tlu->tlu_errors = vector_init();
+    tlu->tlu_external_declarations = vector_init();
+    tlu->tlu_st = symbol_table_init();
+
+    parse_status_code_t stat = UNKNOWN_STATUS;
+    syntax_component_t* expr = parse_conditional_expression(&tokens, EXPECTED, &stat, tlu, 1, tlu, SC_CONDITIONAL_EXPRESSION);
+    if (stat == ABORT)
+    {
+        syntax_component_t* err = NULL;
+        VECTOR_FOR(syntax_component_t*, s, tlu->tlu_errors)
+            if (!err || s->err_depth > err->err_depth)
+                err = s;
+        snerrorf(error, MAX_ERROR_LENGTH, "[%d:%d] %s\n", err->row, err->col, err->err_message);
+    }
+    free_syntax(tlu, tlu);
+    return expr;
 }
 
 syntax_component_t* parse_actual_assignment_expression(token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)

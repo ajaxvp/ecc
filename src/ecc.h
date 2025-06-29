@@ -12,7 +12,7 @@
 #define report_continue { printf("bad (%s:%d)\n", __FILE__, __LINE__); continue; }
 #define report_return_value(x) { printf("bad (%s:%d)\n", __FILE__, __LINE__); return (x); }
 
-#define VECTOR_FOR(type, var, vec) type var = vector_get((vec), 0); for (unsigned i = 0; i < vec->size; ++i, var = vector_get((vec), i))
+#define VECTOR_FOR(type, var, vec) type var = (type) vector_get((vec), 0); for (unsigned i = 0; i < (vec)->size; ++i, var = (type) vector_get((vec), i))
 #define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var, tlu); vector_delete((vec)); }
 #define SYMBOL_TABLE_FOR_ENTRIES_START(KEY_VAR, VALUE_VAR, CONTAINER) \
     for (unsigned i = 0; i < (CONTAINER)->capacity; ++i) \
@@ -22,6 +22,9 @@
         symbol_t* VALUE_VAR = (CONTAINER)->value[i]; \
 
 #define SYMBOL_TABLE_FOR_ENTRIES_END }
+
+#define MAP_FOR(ktype, vtype, map) ktype k = (ktype) (map)->key[0]; vtype v = (vtype) (map)->value[0]; for (unsigned i = 0; i < (map)->capacity; ++i, k = (ktype) (map)->key[i], v = (vtype) (map)->value[i])
+#define MAP_IS_BAD_KEY (!k || (void*) k == (void*) (-1))
 
 #define MAX_ERROR_LENGTH 512
 #define MAX_STRINGIFIED_INTEGER_LENGTH 30
@@ -55,6 +58,10 @@
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 #define max(x, y) ((x) > (y) ? (x) : (y))
+
+typedef int (*comparator_t)(void*, void*);
+typedef void (*deleter_t)(void*);
+typedef unsigned long (*hash_function_t)(void*);
 
 typedef unsigned long long regid_t;
 
@@ -674,112 +681,6 @@ typedef struct air {
     unsigned long long next_available_lv;
 } air_t;
 
-typedef enum ir_insn_operand_type
-{
-    IIOP_VIRTUAL_REGISTER,
-    IIOP_PHYSICAL_REGISTER,
-    IIOP_IDENTIFIER,
-    IIOP_LABEL,
-    IIOP_IMMEDIATE,
-    IIOP_FLOAT,
-    IIOP_STRING_LITERAL,
-    IIOP_DESIGNATION,
-    IIOP_TYPE
-} ir_insn_operand_type_t;
-
-typedef struct ir_insn_operand
-{
-    ir_insn_operand_type_t type;
-    bool result;
-    union
-    {
-        regid_t vreg;
-        regid_t preg;
-        symbol_t* id_symbol;
-        unsigned long long immediate;
-        long double fl;
-        char* label;
-        struct
-        {
-            char* normal;
-            int* wide;
-            unsigned long long length;
-        } string_literal;
-        struct
-        {
-            symbol_t* base;
-            designation_t* desig;
-        } designation;
-        c_type_t* ct;
-    };
-} ir_insn_operand_t;
-
-typedef enum ir_insn_type
-{
-    II_UNKNOWN = 0,
-    II_FUNCTION_LABEL,
-    II_LOCAL_LABEL,
-    II_LOAD,
-    II_LOAD_ADDRESS,
-    II_RETURN,
-    II_STORE_ADDRESS,
-    II_SUBSCRIPT,
-    II_SUBSCRIPT_ADDRESS,
-    II_MEMBER,
-    II_MEMBER_ADDRESS,
-    II_ADDITION,
-    II_SUBTRACTION,
-    II_MULTIPLICATION,
-    II_DIVISION,
-    II_JUMP,
-    II_JUMP_IF_ZERO,
-    II_JUMP_NOT_ZERO,
-    II_EQUALITY,
-    II_MODULAR,
-    II_LESS,
-    II_GREATER,
-    II_LESS_EQUAL,
-    II_GREATER_EQUAL,
-    II_CAST,
-    II_DEREFERENCE,
-    II_DEREFERENCE_ADDRESS,
-    II_NOT,
-    II_FUNCTION_CALL,
-    II_LEAVE,
-    II_ENDPROC,
-    II_DECLARE,
-
-    // LOW-LEVEL INSTRUCTIONS
-    II_RETAIN,
-    II_RESTORE,
-
-    II_NO_ELEMENTS
-} ir_insn_type_t;
-
-typedef struct ir_insn ir_insn_t;
-
-typedef struct ir_insn
-{
-    ir_insn_type_t type;
-    ir_insn_t* function_label;
-    c_type_t* ctype;
-    size_t noops;
-    ir_insn_operand_t** ops;
-    ir_insn_t* prev;
-    ir_insn_t* next;
-    union
-    {
-        struct
-        {
-            size_t noparams;
-            symbol_t** params;
-            bool knr;
-            bool ellipsis;
-            linkage_t linkage;
-        } function_label;
-    } metadata;
-} ir_insn_t;
-
 typedef enum x86_operand_type
 {
     X86OP_REGISTER,
@@ -809,6 +710,7 @@ typedef struct x86_operand
             regid_t reg_base;
             regid_t reg_offset;
             long long scale;
+            long long offset;
         } array;
         char* label;
         char* text;
@@ -846,13 +748,7 @@ typedef enum x86_insn_type
     X86I_SETL,
     X86I_XOR,
     X86I_NOT,
-
-    /* directives */
-    X86I_GLOBL,
-    X86I_STRING,
-    X86I_TEXT,
-    X86I_DATA,
-    X86I_SECTION,
+    X86I_NOP,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
@@ -866,6 +762,33 @@ typedef struct x86_insn
     x86_operand_t* op3;
     x86_insn_t* next;
 } x86_insn_t;
+
+typedef struct x86_asm_data
+{
+    size_t alignment;
+    char* label;
+    bool readonly;
+    unsigned char* data;
+    size_t length;
+} x86_asm_data_t;
+
+typedef struct x86_asm_routine
+{
+    bool global;
+    char* label;
+    size_t stackalloc;
+    x86_insn_t* insns;
+} x86_asm_routine_t;
+
+typedef struct x86_asm_file
+{
+    vector_t* rodata; // vector_t<x86_asm_data_t>
+    vector_t* data; // vector_t<x86_asm_data_t>
+    vector_t* routines; // vector_t<x86_asm_routine_t>
+    symbol_table_t* st;
+    air_t* air;
+    size_t next_constant_local_label;
+} x86_asm_file_t;
 
 typedef struct ir_opt_options
 {
@@ -1073,8 +996,7 @@ typedef struct syntax_component_t
 
     // additional information
     c_type_t* ctype;
-    ir_insn_t* code;
-    air_insn_t* acode;
+    air_insn_t* code;
 
     // type-specific additional info for linear IR transformation
 
@@ -1529,19 +1451,27 @@ typedef struct syntax_traverser
     traversal_function after[SC_NO_ELEMENTS];
 } syntax_traverser_t;
 
-typedef struct binary_node_t
+typedef struct map_t
 {
-    void* value;
-    struct binary_node_t* left;
-    struct binary_node_t* right;
-} binary_node_t;
-
-typedef struct set_t
-{
-    binary_node_t* root;
-    unsigned size;
+    void** key;
+    void** value;
+    size_t size;
+    size_t capacity;
     int (*comparator)(void*, void*);
-} set_t;
+    unsigned long (*hash)(void*);
+    int (*key_printer)(void* key, int (*printer)(const char* fmt, ...));
+    int (*value_printer)(void* value, int (*printer)(const char* fmt, ...));
+    void (*key_deleter)(void* key);
+    void (*value_deleter)(void* value);
+} map_t;
+
+typedef struct graph
+{
+    map_t* lists; // map_t<void*, set_t<void*>*>*
+    int (*comparator)(void*, void*);
+    unsigned long (*hash)(void*);
+    void (*vertex_deleter)(void*);
+} graph_t;
 
 /* log.c */
 int infof(char* fmt, ...);
@@ -1562,6 +1492,7 @@ char* buffer_export(buffer_t* b);
 /* vector.c */
 vector_t* vector_init(void);
 vector_t* vector_add(vector_t* v, void* el);
+vector_t* vector_add_if_new(vector_t* v, void* el, int (*c)(void*, void*));
 void* vector_get(vector_t* v, unsigned index);
 int vector_contains(vector_t* v, void* el, int (*c)(void*, void*));
 vector_t* vector_copy(vector_t* v);
@@ -1571,13 +1502,30 @@ void vector_delete(vector_t* v);
 void vector_deep_delete(vector_t* v, void (*deleter)(void*));
 void* vector_pop(vector_t* v);
 void* vector_peek(vector_t* v);
+void vector_concat(vector_t* v, vector_t* u);
+void vector_merge(vector_t* v, vector_t* u, int (*c)(void*, void*));
 
-/* set.c */
-set_t* set_init(int (*comparator)(void*, void*));
-set_t* set_add(set_t* s, void* value);
-bool set_contains(set_t* s, void* value);
-void set_delete(set_t* s);
-void set_print(set_t* s, void (*printer)(void*));
+/* map.c */
+map_t* map_init(int (*comparator)(void*, void*), unsigned long (*hash)(void*));
+void map_set_printers(map_t* m,
+    int (*key_printer)(void* key, int (*printer)(const char* fmt, ...)),
+    int (*value_printer)(void* value, int (*printer)(const char* fmt, ...)));
+void map_set_deleters(map_t* m, void (*key_deleter)(void* key), void (*value_deleter)(void* value));
+void* map_add(map_t* m, void* key, void* value);
+void* map_remove(map_t* m, void* key);
+bool map_contains_key(map_t* m, void* key);
+void* map_get(map_t* m, void* key);
+void map_delete(map_t* m);
+void map_print(map_t* m, int (*printer)(const char*, ...));
+
+map_t* set_init(int (*comparator)(void*, void*), unsigned long (*hash)(void*));
+void set_set_deleter(map_t* m, void (*deleter)(void*));
+bool set_add(map_t* m, void* key);
+bool set_remove(map_t* m, void* key);
+bool set_contains(map_t* m, void* key);
+void set_delete(map_t* m);
+void set_print(map_t* m, int (*printer)(const char*, ...));
+void* set_get(map_t* m, void *key);
 
 /* const.c */
 extern const char* KEYWORDS[37];
@@ -1609,8 +1557,11 @@ extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
 extern const char* TOKEN_NAMES[T_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
 extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
-extern const char* IR_INSN_NAMES[II_NO_ELEMENTS];
 extern const char* X86_INSN_NAMES[X86I_NO_ELEMENTS];
+extern const char* X86_64_BYTE_REGISTERS[];
+extern const char* X86_64_WORD_REGISTERS[];
+extern const char* X86_64_DOUBLE_REGISTERS[];
+extern const char* X86_64_QUAD_REGISTERS[];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
@@ -1628,6 +1579,7 @@ void charconvert(preprocessing_token_t* tokens);
 void strlitconcat(preprocessing_token_t* tokens);
 
 /* parse.c */
+syntax_component_t* parse_if_directive_expression(token_t* tokens, char* error);
 syntax_component_t* parse(token_t* toks);
 
 /* traverse.c */
@@ -1643,9 +1595,6 @@ void error_delete(analysis_error_t* err);
 void error_delete_all(analysis_error_t* errors);
 size_t error_list_size(analysis_error_t* errors, bool include_warnings);
 void dump_errors(analysis_error_t* errors);
-
-/* emit.c */
-bool emit(syntax_component_t* unit, FILE* out);
 
 /* symbol.c */
 symbol_t* symbol_init(syntax_component_t* declarer);
@@ -1791,33 +1740,14 @@ char* temp_filepath_gen(char* ext);
 void token_delete(token_t* token);
 void token_delete_all(token_t* token);
 void token_print(token_t* token, int (*printer)(const char* fmt, ...));
+token_t* tokenize_sequence(preprocessing_token_t* pp_tokens, preprocessing_token_t* end, tokenizing_settings_t* settings);
 token_t* tokenize(preprocessing_token_t* pp_tokens, tokenizing_settings_t* settings);
-
-/* linearize.c */
-
-locator_t* locator_copy(locator_t* loc);
-void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...));
-void locator_delete(locator_t* loc);
-void insn_delete(ir_insn_t* insn);
-void insn_delete_all(ir_insn_t* insn);
-void insert_ir_insn_before(ir_insn_t* location, ir_insn_t* inserting);
-void insert_ir_insn_after(ir_insn_t* location, ir_insn_t* inserting);
-void remove_ir_insn(ir_insn_t* insn);
-void insn_clike_print(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
-void insn_clike_print_all(ir_insn_t* insn, int (*printer)(const char* fmt, ...));
-ir_insn_t* linearize(syntax_component_t* tlu);
-ir_insn_operand_t* make_preg_insn_operand(regid_t preg, bool result);
-ir_insn_operand_t* make_identifier_insn_operand(symbol_t* sy);
-void insn_operand_delete(ir_insn_operand_t* op);
-ir_insn_t* make_1op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op);
-ir_insn_t* make_2op(ir_insn_type_t type, c_type_t* ctype, ir_insn_operand_t* op1, ir_insn_operand_t* op2);
-
-bool insn_operand_equals(ir_insn_operand_t* op1, ir_insn_operand_t* op2);
 
 /* air.c */
 
 air_t* airinize(syntax_component_t* tlu);
 void air_print(air_t* air, int (*printer)(const char* fmt, ...));
+void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt, ...));
 void air_insn_delete_all(air_insn_t* insns);
 air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting);
 air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting);
@@ -1832,6 +1762,11 @@ air_insn_operand_t* air_insn_floating_constant_operand_init(long double fc);
 air_insn_operand_t* air_insn_label_operand_init(unsigned long long label, char disambiguator);
 air_insn_t* air_insn_init(air_insn_type_t type, size_t noops);
 bool air_insn_creates_temporary(air_insn_t* insn);
+air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start);
+bool air_insn_assigns(air_insn_t* insn);
+locator_t* locator_copy(locator_t* loc);
+void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...));
+void locator_delete(locator_t* loc);
 
 /* localize.c */
 void localize(air_t* air, air_locale_t locale);
@@ -1843,17 +1778,13 @@ void ir_optimize(ir_insn_t* insns, ir_opt_options_t* options);
 
 /* allocate.c */
 
-void allocate(ir_insn_t* insns, allocator_options_t* options);
+void allocate(air_t* air);
 
-/* x86gen.c */
+/* x86asm.c */
 
-regid_t x86procregmap(long long index);
-
-void x86_write_all(x86_insn_t* insns, FILE* file);
-void x86_write(x86_insn_t* insn, FILE* file);
-void x86_insn_delete(x86_insn_t* insn);
-void x86_insn_delete_all(x86_insn_t* insns);
-x86_insn_t* x86_generate(ir_insn_t* insns, symbol_table_t* st);
+x86_asm_file_t* x86_generate(air_t* air, symbol_table_t* st);
+void x86_asm_file_write(x86_asm_file_t* file, FILE* out);
+void x86_asm_file_delete(x86_asm_file_t* file);
 
 /* constexpr.c */
 
@@ -1873,6 +1804,16 @@ void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** c
 
 /* ecc.c */
 program_options_t* get_program_options(void);
+
+/* graph.c */
+
+void graph_delete(graph_t* graph);
+graph_t* graph_init(int (*comparator)(void*, void*), unsigned long (*hash)(void*), void (*vertex_deleter)(void*));
+bool graph_add_vertex(graph_t* graph, void* item);
+bool graph_add_edge(graph_t* graph, void* from, void* to);
+bool graph_remove_vertex(graph_t* graph, void* item);
+bool graph_remove_edge(graph_t* graph, void* from, void* to);
+bool graph_has_edge(graph_t* graph, void* from, void* to);
 
 /* from somewhere */
 bool in_debug(void);
