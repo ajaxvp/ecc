@@ -1,5 +1,5 @@
 OUT=libc.a
-OBJS=puts.o strlen.o
+OBJS=putchar.o puts.o strlen.o
 BUILD=$(addprefix build/, $(OBJS))
 
 default: buildfolder $(OUT)

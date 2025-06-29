@@ -244,7 +244,7 @@ token_t* tokenize_character_constant(preprocessing_token_t* pp_token, tokenizing
     if (*con++ != '\'') report_return_value(NULL);
     if (*con == '\'') report_return_value(NULL);
     while (*con != '\'')
-        process_one_character(pp_token, settings, con, &value, &length);
+        con = process_one_character(pp_token, settings, con, &value, &length);
     if (length > C_TYPE_WCHAR_T_WIDTH * 8)
         return fail_token("character constant value too big for its type");
     init_token(T_CHARACTER_CONSTANT);
