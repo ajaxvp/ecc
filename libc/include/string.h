@@ -3,7 +3,6 @@
 
 typedef unsigned long int size_t;
 
-// TODO: add const
-size_t strlen(char* str);
+size_t strlen(const char* str);
 
 #endif

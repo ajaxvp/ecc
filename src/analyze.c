@@ -318,7 +318,7 @@ static bool can_assign(c_type_t* tlhs, c_type_t* trhs, syntax_component_t* rhs)
         pass = true;
     // ISO: 6.5.16.1 (1)
     // condition 3
-    else if (tlhs->class == CTC_POINTER && tlhs->class == CTC_POINTER &&
+    else if (tlhs->class == CTC_POINTER && trhs->class == CTC_POINTER &&
         type_is_compatible(tlhs->derived_from, trhs->derived_from))
         pass = true;
     // ISO: 6.5.16.1 (1)
@@ -384,12 +384,14 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
                 c_type_t* tlhs = vector_get(called_type->derived_from->function.param_types, i);
                 if (!tlhs) // variadic arguments aren't going to have a type attached to them
                     break;
-                if (!can_assign(tlhs, rhs->ctype, rhs))
+                c_type_t* unqualified_tlhs = strip_qualifiers(tlhs);
+                if (!can_assign(unqualified_tlhs, rhs->ctype, rhs))
                 {
                     // ISO: 6.5.2.2 (2)
                     ADD_ERROR(rhs, "invalid type for argument %d of this function call", i + 1);
                     pass = false;
                 }
+                type_delete(unqualified_tlhs);
             }
         }
     }
