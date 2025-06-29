@@ -1436,6 +1436,11 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
     syntax_component_t* expr = parse_if_directive_expression(tokens, settings.error);
 
     constexpr_t* ce = ce_evaluate(expr, CE_INTEGER);
+    if (!ce)
+    {
+        (void) fail(condition->start, "#if directive expression must be a constant expression");
+        return 2;
+    }
     unsigned long long value = ce->ivalue;
 
     constexpr_delete(ce);
