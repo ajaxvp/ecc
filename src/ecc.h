@@ -465,35 +465,12 @@ typedef struct c_type
     };
 } c_type_t;
 
-typedef enum locator_type
-{
-    L_OFFSET = 0,
-    L_LABEL,
-    L_ARRAY
-} locator_type_t;
-
 typedef enum linkage
 {
     LK_EXTERNAL,
     LK_INTERNAL,
     LK_NONE
 } linkage_t;
-
-typedef struct locator
-{
-    locator_type_t type;
-    union
-    {
-        long long stack_offset;
-        char* label;
-        struct
-        {
-            regid_t base_reg;
-            regid_t offset_reg;
-            int scale;
-        } array;
-    };
-} locator_t;
 
 typedef enum air_insn_operand_type {
     AOP_SYMBOL,
@@ -715,6 +692,11 @@ typedef struct x86_operand
             long long offset;
         } array;
         char* label;
+        struct
+        {
+            char* label;
+            long long offset;
+        } label_ref;
         char* text;
         char* string;
         unsigned long long immediate;
@@ -778,7 +760,7 @@ typedef struct x86_asm_routine
 {
     bool global;
     char* label;
-    size_t stackalloc;
+    long long stackalloc;
     x86_insn_t* insns;
 } x86_asm_routine_t;
 
@@ -1417,7 +1399,7 @@ typedef struct symbol_t
     syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
     c_type_t* type;
     c_namespace_t* ns;
-    locator_t* loc;
+    long long stack_offset;
     vector_t* designations;
     vector_t* initial_values;
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
@@ -1767,9 +1749,6 @@ air_insn_t* air_insn_init(air_insn_type_t type, size_t noops);
 bool air_insn_creates_temporary(air_insn_t* insn);
 air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start);
 bool air_insn_assigns(air_insn_t* insn);
-locator_t* locator_copy(locator_t* loc);
-void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...));
-void locator_delete(locator_t* loc);
 
 /* localize.c */
 void localize(air_t* air, air_locale_t locale);

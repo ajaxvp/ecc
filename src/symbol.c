@@ -236,7 +236,6 @@ void symbol_delete(symbol_t* sy)
     if (!sy) return;
     type_delete(sy->type);
     namespace_delete(sy->ns);
-    locator_delete(sy->loc);
     if (sy->designations)
         vector_deep_delete(sy->designations, (void (*)(void*)) designation_delete_all);
     if (sy->initial_values)

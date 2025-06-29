@@ -4,7 +4,7 @@
 
 #include "ecc.h"
 
-#define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 3
+#define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 5
 
 const char* register_name(regid_t reg, x86_insn_size_t size)
 {
@@ -25,6 +25,9 @@ void x86_operand_delete(x86_operand_t* op)
     {
         case X86OP_LABEL:
             free(op->label);
+            break;
+        case X86OP_LABEL_REF:
+            free(op->label_ref.label);
             break;
         case X86OP_TEXT:
             free(op->text);
@@ -158,7 +161,12 @@ void x86_write_operand(x86_operand_t* op, x86_insn_size_t size, FILE* file)
             fprintf(file, "\"%s\"", op->string);
             break;
         case X86OP_LABEL_REF:
-            fprintf(file, "%s(%%rip)", op->label);
+            if (op->label_ref.offset > 0)
+                fprintf(file, "%s+%lld(%%rip)", op->label_ref.label, op->label_ref.offset);
+            else if (op->label_ref.offset < 0)
+                fprintf(file, "%s-%lld(%%rip)", op->label_ref.label, llabs(op->label_ref.offset));
+            else
+                fprintf(file, "%s(%%rip)", op->label_ref.label);
             break;
         case X86OP_IMMEDIATE:
             fprintf(file, "$%llu", op->immediate);
@@ -273,6 +281,11 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
     fprintf(out, "%s:\n", routine->label);
     fprintf(out, "    pushq %%rbp\n");
     fprintf(out, "    movq %%rsp, %%rbp\n");
+    if (routine->stackalloc)
+    {
+        long long v = llabs(routine->stackalloc);
+        fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
+    }
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
         x86_write_insn(insn, out);
     fprintf(out, "    leave\n");
@@ -309,10 +322,11 @@ x86_operand_t* make_operand_label(char* label)
     return op;
 }
 
-x86_operand_t* make_operand_label_ref(char* label)
+x86_operand_t* make_operand_label_ref(char* label, long long offset)
 {
     x86_operand_t* op = make_basic_x86_operand(X86OP_LABEL_REF);
-    op->label = strdup(label);
+    op->label_ref.label = strdup(label);
+    op->label_ref.offset = offset;
     return op;
 }
 
@@ -362,7 +376,7 @@ x86_operand_t* make_operand_array(regid_t reg_base, regid_t reg_offset, long lon
     return op;
 }
 
-x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop)
+x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routine_t* routine)
 {
     switch (aop->type)
     {
@@ -377,16 +391,32 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop)
         case AOP_INTEGER_CONSTANT:
             return make_operand_immediate(aop->content.ic);
         case AOP_SYMBOL:
-        {
-            if (symbol_get_storage_duration(aop->content.sy) == SD_STATIC)
-                return make_operand_label_ref(symbol_get_name(aop->content.sy));
-            // TODO
-            report_return_value(NULL);
-        }
         case AOP_INDIRECT_SYMBOL:
+        {
+            symbol_t* sy = aop->type == AOP_SYMBOL ? aop->content.sy : aop->content.insy.sy;
+            long long offset = aop->type == AOP_INDIRECT_SYMBOL ? aop->content.insy.offset : 0;
+
+            // if it has static storage duration, we use a label
+            if (symbol_get_storage_duration(sy) == SD_STATIC)
+                return make_operand_label_ref(symbol_get_name(sy), offset);
+            
+            // if it has a stack offset already, use that
+            if (sy->stack_offset)
+                return make_operand_deref_register(X86R_RBP, sy->stack_offset);
+            
+            // otherwise, give it a stack offset
+            long long syoffset = routine->stackalloc;
+            long long size = type_size(sy->type);
+            long long alignment = type_alignment(sy->type);
+            syoffset -= size;
+            syoffset -= syoffset % alignment;
+            return make_operand_deref_register(X86R_RBP, (routine->stackalloc = sy->stack_offset = syoffset) + offset);
+        }
         case AOP_LABEL:
+            char label[MAX_CONSTANT_LOCAL_LABEL_LENGTH];
+            snprintf(label, MAX_CONSTANT_LOCAL_LABEL_LENGTH, ".L%c%llu", aop->content.label.disambiguator, aop->content.label.id);
+            return make_operand_label(label);
         case AOP_FLOATING_CONSTANT:
-            // TODO
             report_return_value(NULL);
     }
     report_return_value(NULL);
@@ -408,36 +438,36 @@ x86_insn_t* make_x86_insn_clear_register(regid_t reg)
     return insn;
 }
 
-x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_file_t* file)
+x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
-    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
-    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     // TODO: handle third operand
     return insn;
 }
 
-x86_insn_t* x86_generate_load_addr(air_insn_t* ainsn, x86_asm_file_t* file)
+x86_insn_t* x86_generate_load_addr(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_t* insn = make_basic_x86_insn(X86I_LEA);
     insn->size = X86SZ_QWORD;
-    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
-    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     // TODO: handle third operand
     return insn;
 }
 
-x86_insn_t* x86_generate_assign(air_insn_t* ainsn, x86_asm_file_t* file)
+x86_insn_t* x86_generate_assign(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
-    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0]);
-    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1]);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     return insn;
 }
 
-x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_file_t* file)
+x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_t* insn = make_basic_x86_insn(X86I_CALL);
     insn->size = X86SZ_QWORD;
@@ -456,23 +486,30 @@ x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_file_t* file)
     return insn;
 }
 
-x86_insn_t* x86_generate_nop(air_insn_t* ainsn, x86_asm_file_t* file)
+x86_insn_t* x86_generate_nop(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     return make_basic_x86_insn(X86I_NOP);
 }
 
-x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_file_t* file)
+// just letting the code generator know that the variable exists
+x86_insn_t* x86_generate_declare(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_operand_delete(air_operand_to_x86_operand(ainsn->ops[0], routine));
+    return NULL;
+}
+
+x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
     switch (ainsn->type)
     {
-        case AIR_LOAD: return x86_generate_load(ainsn, file);
-        case AIR_LOAD_ADDR: return x86_generate_load_addr(ainsn, file);
-        case AIR_ASSIGN: return x86_generate_assign(ainsn, file);
-        case AIR_FUNC_CALL: return x86_generate_func_call(ainsn, file);
-        case AIR_NOP: return x86_generate_nop(ainsn, file);
+        case AIR_LOAD: return x86_generate_load(ainsn, routine, file);
+        case AIR_LOAD_ADDR: return x86_generate_load_addr(ainsn, routine, file);
+        case AIR_ASSIGN: return x86_generate_assign(ainsn, routine, file);
+        case AIR_FUNC_CALL: return x86_generate_func_call(ainsn, routine, file);
+        case AIR_NOP: return x86_generate_nop(ainsn, routine, file);
 
-        case AIR_DECLARE:
+        case AIR_DECLARE: return x86_generate_declare(ainsn, routine, file);
         case AIR_RETURN:
         case AIR_JZ:
         case AIR_JNZ:
@@ -538,7 +575,10 @@ x86_asm_routine_t* x86_generate_routine(air_routine_t* aroutine, x86_asm_file_t*
     x86_insn_t* last = NULL;
     for (air_insn_t* ainsn = aroutine->insns; ainsn; ainsn = ainsn->next)
     {
-        x86_insn_t* insn = x86_generate_insn(ainsn, file);
+        // skip first nop
+        if (ainsn == aroutine->insns && ainsn->type == AIR_NOP)
+            continue;
+        x86_insn_t* insn = x86_generate_insn(ainsn, routine, file);
         if (!insn) continue;
         if (!last)
             routine->insns = last = insn;

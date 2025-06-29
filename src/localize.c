@@ -600,7 +600,7 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
 // handles return values w/ respect to the System V ABI
 void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-
+    warnf("return statements have not been localized for an x86 target, they will not behave as expected\n");
 }
 
 // assigns parameter locals

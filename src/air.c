@@ -17,63 +17,6 @@ typedef struct airinizing_syntax_traverser
 #define NEXT_VIRTUAL_REGISTER (AIRINIZING_TRAVERSER->air->next_available_temporary++)
 #define NEXT_LABEL (AIRINIZING_TRAVERSER->next_label++)
 
-locator_t* locator_copy(locator_t* loc)
-{
-    if (!loc) return NULL;
-    locator_t* n = calloc(1, sizeof *loc);
-    n->type = loc->type;
-    switch (loc->type)
-    {
-        case L_OFFSET:
-            n->stack_offset = loc->stack_offset;
-            break;
-        case L_LABEL:
-            n->label = strdup(loc->label);
-            break;
-        case L_ARRAY:
-            n->array.base_reg = loc->array.base_reg;
-            n->array.offset_reg = loc->array.offset_reg;
-            n->array.scale = loc->array.scale;
-            break;
-    }
-    return n;
-}
-
-void locator_delete(locator_t* loc)
-{
-    if (!loc) return;
-    switch (loc->type)
-    {
-        case L_LABEL:
-            free(loc->label);
-            break;
-        default:
-            break;
-    }
-    free(loc);
-}
-
-void locator_print(locator_t* loc, int (*printer)(const char* fmt, ...))
-{
-    if (!loc)
-    {
-        printer("(null)");
-        return;
-    }
-    switch (loc->type)
-    {
-        case L_OFFSET:
-            printer("local[%lld]", loc->stack_offset);
-            break;
-        case L_LABEL:
-            printer("%s", loc->label);
-            break;
-        case L_ARRAY:
-            printer("array[_%lld, _%lld, %d]", loc->array.base_reg, loc->array.offset_reg, loc->array.scale);
-            break;
-    }
-}
-
 void air_data_delete(air_data_t* ad)
 {
     if (!ad) return;
