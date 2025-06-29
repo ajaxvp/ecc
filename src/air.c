@@ -213,20 +213,10 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             RPAREN SEMICOLON
             break;
         case AIR_LOAD:
-            TYPE OP(0) EQUALS OP(1)
-            if (insn->noops >= 3 && insn->ops[2]->content.ic != 0)
-            {
-                OPERATOR(+) OP(2)
-            }
-            SEMICOLON
+            TYPE OP(0) EQUALS OP(1) SEMICOLON
             break;
         case AIR_LOAD_ADDR:
-            TYPE OP(0) EQUALS AMP OP(1)
-            if (insn->noops >= 3 && insn->ops[2]->content.ic != 0)
-            {
-                OPERATOR(+) OP(2)
-            }
-            SEMICOLON
+            TYPE OP(0) EQUALS AMP OP(1) SEMICOLON
             break;
         case AIR_RETURN:
             printer("return "); OP(0) SEMICOLON
@@ -872,17 +862,16 @@ static void linearize_primary_expression_identifier_after(syntax_traverser_t* tr
     air_insn_t* insn = NULL;
     if (!syntax_is_in_lvalue_context(syn) && !type_is_sua(sy->type) && sy->type->class != CTC_FUNCTION)
     {
-        insn = air_insn_init(AIR_LOAD, 3);
+        insn = air_insn_init(AIR_LOAD, 2);
         insn->ct = type_copy(syn->ctype);
     }
     else
     {
-        insn = air_insn_init(AIR_LOAD_ADDR, 3);
+        insn = air_insn_init(AIR_LOAD_ADDR, 2);
         insn->ct = make_reference_type(sy->type);
     }
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
     insn->ops[1] = air_insn_symbol_operand_init(sy);
-    insn->ops[2] = air_insn_integer_constant_operand_init(0);
     ADD_CODE(insn);
     FINALIZE_LINEARIZE;
 }
@@ -1244,12 +1233,11 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
         sy = symbol_table_get_syn_id(SYMBOL_TABLE, enclosing);
     if (!sy) report_return;
     SETUP_LINEARIZE;
-    air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 3);
+    air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
     regid_t la_result = NEXT_VIRTUAL_REGISTER;
     loadaddr->ct = make_reference_type(sy->type);
     loadaddr->ops[0] = air_insn_register_operand_init(la_result);
     loadaddr->ops[1] = air_insn_symbol_operand_init(sy);
-    loadaddr->ops[2] = air_insn_integer_constant_operand_init(0);
     ADD_CODE(loadaddr);
     initialize(trav, sy, syn, sy->type, la_result, &code);
     FINALIZE_LINEARIZE;
