@@ -243,6 +243,9 @@ static void replace_registers_x86_64(air_routine_t* routine, allocator_t* a, air
                         repl = alias;
                         break;
                     }
+                    repl = (regid_t) map_get(a->replacements, (void*) alias);
+                    if (repl != INVALID_VREGID)
+                        break;
                 }
 
                 // if there isn't a physical register in the aliases

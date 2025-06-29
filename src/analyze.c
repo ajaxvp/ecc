@@ -1578,8 +1578,22 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
-void analyze_static_initializer_list_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, designation_t* prefix)
+void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, designation_t* prefix)
 {
+    if (syn->type != SC_INITIALIZER_LIST)
+    {
+        constexpr_t* ce = ce_evaluate(syn, CE_ANY);
+        if (!ce)
+        {
+            // ISO: 6.7.8 (4)
+            ADD_ERROR(syn, "initializer for object with static storage duration must be constant");
+            return;
+        }
+        symbol_init_initializer(sy);
+        vector_add(sy->designations, NULL);
+        vector_add(sy->initial_values, ce);
+        return;
+    }
     symbol_init_initializer(sy);
     VECTOR_FOR(syntax_component_t*, d, syn->inlist_designations)
     {
@@ -1601,8 +1615,18 @@ void analyze_static_initializer_list_after(syntax_traverser_t* trav, syntax_comp
             continue;
         }
         designation_t* desig = syntax_to_designation(d);
-        analyze_static_initializer_list_after(trav, init, sy, desig);
+        analyze_static_initializer_after(trav, init, sy, desig);
         designation_delete_all(desig);
+    }
+}
+
+void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
+    if (syn->type == SC_STRING_LITERAL && sy->type->class == CTC_ARRAY && !sy->type->array.length_expression)
+    {
+        symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+        if (!strsy) report_return;
+        sy->type->array.length_expression = strsy->type->array.length_expression;
     }
 }
 
@@ -1615,22 +1639,10 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     if (!sy) report_return;
     storage_duration_t sd = symbol_get_storage_duration(sy);
-    if (sd != SD_STATIC) return;
-    if (init->type != SC_INITIALIZER_LIST)
-    {
-        constexpr_t* ce = ce_evaluate(init, CE_ANY);
-        if (!ce)
-        {
-            // ISO: 6.7.8 (4)
-            ADD_ERROR(init, "initializer for object with static storage duration must be constant");
-            return;
-        }
-        symbol_init_initializer(sy);
-        vector_add(sy->designations, NULL);
-        vector_add(sy->initial_values, ce);
-        return;
-    }
-    analyze_static_initializer_list_after(trav, init, sy, NULL);
+    if (sd == SD_STATIC)
+        analyze_static_initializer_after(trav, init, sy, NULL);
+    else if (sd == SD_AUTOMATIC)
+        analyze_automatic_initializer_after(trav, init, sy);
 }
 
 void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)

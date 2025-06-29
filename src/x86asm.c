@@ -382,7 +382,7 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
     {
         case AOP_INDIRECT_REGISTER:
         {
-            if (aop->content.inreg.roffset != INVALID_VREGID || aop->content.inreg.factor != 0)
+            if (aop->content.inreg.roffset != INVALID_VREGID || aop->content.inreg.factor != 1)
                 return make_operand_array(aop->content.inreg.id, aop->content.inreg.roffset, aop->content.inreg.factor, aop->content.inreg.offset);
             return make_operand_deref_register(aop->content.inreg.id, aop->content.inreg.offset);
         }
