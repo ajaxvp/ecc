@@ -100,7 +100,6 @@ char* work(char* filename)
         return NULL;
     }
 
-    charconvert(tokens);
     strlitconcat(tokens);
 
     tokenizing_settings_t tk_settings;

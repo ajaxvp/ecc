@@ -402,7 +402,7 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
             
             // if it has a stack offset already, use that
             if (sy->stack_offset)
-                return make_operand_deref_register(X86R_RBP, sy->stack_offset);
+                return make_operand_deref_register(X86R_RBP, sy->stack_offset + offset);
             
             // otherwise, give it a stack offset
             long long syoffset = routine->stackalloc;

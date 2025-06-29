@@ -1784,12 +1784,6 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     return success;
 }
 
-// translation phase 5
-void charconvert(preprocessing_token_t* tokens)
-{
-
-}
-
 // translation phase 6
 void strlitconcat(preprocessing_token_t* tokens)
 {

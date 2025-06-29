@@ -56,6 +56,10 @@
 #define C_TYPE_PTRSIZE_T CTC_LONG_INT
 #define C_TYPE_WCHAR_T CTC_INT
 
+#define C_TYPE_SIZE_T_WIDTH 8
+#define C_TYPE_PTRSIZE_T_WIDTH 8
+#define C_TYPE_WCHAR_T_WIDTH 4
+
 #define min(x, y) ((x) < (y) ? (x) : (y))
 #define max(x, y) ((x) > (y) ? (x) : (y))
 
@@ -1559,7 +1563,6 @@ void pp_token_normal_print_range(preprocessing_token_t* token, preprocessing_tok
 
 /* preprocess.c */
 bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settings);
-void charconvert(preprocessing_token_t* tokens);
 void strlitconcat(preprocessing_token_t* tokens);
 
 /* parse.c */

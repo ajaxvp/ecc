@@ -25,6 +25,67 @@ static bool is_hexadecimal_digit(int c)
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+char* process_one_character(preprocessing_token_t* pp_token, tokenizing_settings_t* settings, char* str, unsigned long long* v, int* l)
+{
+    if (!v) return NULL;
+    if (!l) return NULL;
+    unsigned long long value = *v;
+    int length = *l;
+    if (*str == '\\')
+    {
+        ++str;
+        if (*str == '\'' ||
+            *str == '"' ||
+            *str == '?' ||
+            *str == '\\')
+            value = (value << (length += 8, 8)) | *str;
+        else if (*str == 'a')
+            value = (value << (length += 8, 8)) | '\a';
+        else if (*str == 'b')
+            value = (value << (length += 8, 8)) | '\b';
+        else if (*str == 'f')
+            value = (value << (length += 8, 8)) | '\f';
+        else if (*str == 'n')
+            value = (value << (length += 8, 8)) | '\n';
+        else if (*str == 'r')
+            value = (value << (length += 8, 8)) | '\r';
+        else if (*str == 't')
+            value = (value << (length += 8, 8)) | '\t';
+        else if (*str == 'v')
+            value = (value << (length += 8, 8)) | '\v';
+        else if (is_octal_digit(*str))
+        {
+            value = *str - '0';
+            if (is_octal_digit(str[1]))
+                value = (value << (length += 3, 3)) | (*(++str) - '0');
+            if (is_octal_digit(str[1]))
+                value = (value << (length += 3, 3)) | (*(++str) - '0');
+        }
+        else if (*str == 'x')
+        {
+            while (is_hexadecimal_digit(*(++str)))
+                value = (value << (length += 4, 4)) | hexadecimal_digit_value(*str);
+            --str;
+        }
+        else if (*str == 'u' || *str == 'U')
+        {
+            unsigned v = get_universal_character_hex_value(str - 1, *str == 'u' ? 6 : 10);
+            value = (value << (length += 32, 32)) | get_universal_character_utf8_encoding(v);
+            str += (*str == 'u' ? 4 : 8);
+        }
+        else
+            report_return_value(NULL);
+    }
+    else if (*str == '\n')
+        report_return_value(NULL)
+    else
+        value = (value << (length += 8, 8)) | *str;
+    *v = value;
+    *l = length;
+    ++str;
+    return str;
+}
+
 void token_print(token_t* token, int (*printer)(const char* fmt, ...))
 {
     if (!token) return;
@@ -113,13 +174,41 @@ token_t* tokenize_string_literal(preprocessing_token_t* pp_token, tokenizing_set
     if (!pp_token || pp_token->type != PPT_STRING_LITERAL)
         return fail_token("expected string literal");
     init_token(T_STRING_LITERAL);
-    // TODO: do escape sequence replacement
-    if (contains_substr(pp_token->string_literal.value, "\\"))
-        warnf("[%s:%d:%d] escape sequences in string literals are not yet supported\n", get_file_name(settings->filepath, false), token->row, token->col);
     if (pp_token->string_literal.wide)
-        token->string_literal.value_wide = strdup_widen(pp_token->string_literal.value);
+    {
+        vector_t* v = vector_init();
+        for (char* str = pp_token->string_literal.value; *str;)
+        {
+            unsigned long long value = 0;
+            int length = 0;
+            str = process_one_character(pp_token, settings, str, &value, &length);
+            if (!str)
+                return NULL;
+            if (length > C_TYPE_WCHAR_T_WIDTH * 8)
+                warnf("[%s:%d:%d] character in wide string literal out of representable range\n", get_file_name(settings->filepath, false), token->row, token->col);
+            vector_add(v, (void*) (value = (int) value));
+        }
+        vector_add(v, (void*) '\0');
+        token->string_literal.value_wide = strdup_wide((int*) v->data);
+        vector_delete(v);
+    }
     else
-        token->string_literal.value_reg = strdup(pp_token->string_literal.value);
+    {
+        buffer_t* buf = buffer_init();
+        for (char* str = pp_token->string_literal.value; *str;)
+        {
+            unsigned long long value = 0;
+            int length = 0;
+            str = process_one_character(pp_token, settings, str, &value, &length);
+            if (!str)
+                return NULL;
+            if (length > UNSIGNED_CHAR_WIDTH * 8)
+                warnf("[%s:%d:%d] character in string literal out of representable range\n", get_file_name(settings->filepath, false), token->row, token->col);
+            buffer_append(buf, (char) value);
+        }
+        token->string_literal.value_reg = buffer_export(buf);
+        buffer_delete(buf);
+    }
     return token;
 }
 
@@ -155,60 +244,8 @@ token_t* tokenize_character_constant(preprocessing_token_t* pp_token, tokenizing
     if (*con++ != '\'') report_return_value(NULL);
     if (*con == '\'') report_return_value(NULL);
     while (*con != '\'')
-    {
-        if (*con == '\\')
-        {
-            ++con;
-            if (*con == '\'' ||
-                *con == '"' ||
-                *con == '?' ||
-                *con == '\\')
-                value = (value << (length += 8, 8)) | *con;
-            else if (*con == 'a')
-                value = (value << (length += 8, 8)) | '\a';
-            else if (*con == 'b')
-                value = (value << (length += 8, 8)) | '\b';
-            else if (*con == 'f')
-                value = (value << (length += 8, 8)) | '\f';
-            else if (*con == 'n')
-                value = (value << (length += 8, 8)) | '\n';
-            else if (*con == 'r')
-                value = (value << (length += 8, 8)) | '\r';
-            else if (*con == 't')
-                value = (value << (length += 8, 8)) | '\t';
-            else if (*con == 'v')
-                value = (value << (length += 8, 8)) | '\v';
-            else if (is_octal_digit(*con))
-            {
-                value = *con - '0';
-                if (is_octal_digit(con[1]))
-                    value = (value << (length += 3, 3)) | (*(++con) - '0');
-                if (is_octal_digit(con[1]))
-                    value = (value << (length += 3, 3)) | (*(++con) - '0');
-            }
-            else if (*con == 'x')
-            {
-                while (is_hexadecimal_digit(*(++con)))
-                    value = (value << (length += 4, 4)) | hexadecimal_digit_value(*con);
-                --con;
-            }
-            else if (*con == 'u' || *con == 'U')
-            {
-                unsigned v = get_universal_character_hex_value(con - 1, *con == 'u' ? 6 : 10);
-                value = (value << (length += 32, 32)) | get_universal_character_utf8_encoding(v);
-                con += (*con == 'u' ? 4 : 8);
-            }
-            else
-                report_return_value(NULL);
-        }
-        else if (*con == '\n')
-            report_return_value(NULL)
-        else
-            value = (value << (length += 8, 8)) | *con;
-        ++con;
-    }
-    // TODO: better checking on object size bounds
-    if (length > sizeof(int) * 8)
+        process_one_character(pp_token, settings, con, &value, &length);
+    if (length > C_TYPE_WCHAR_T_WIDTH * 8)
         return fail_token("character constant value too big for its type");
     init_token(T_CHARACTER_CONSTANT);
     token->character_constant.value = value;

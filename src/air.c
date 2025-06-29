@@ -1302,13 +1302,6 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     else if (is_char_array)
     {
         if (init->type != SC_STRING_LITERAL) report_return;
-        air_insn_t* loadptr = air_insn_init(AIR_LOAD_ADDR, 3);
-        loadptr->ct = make_reference_type(sy->type);
-        regid_t ptrreg = NEXT_VIRTUAL_REGISTER;
-        loadptr->ops[0] = air_insn_register_operand_init(ptrreg);
-        loadptr->ops[1] = air_insn_symbol_operand_init(sy);
-        loadptr->ops[2] = air_insn_integer_constant_operand_init(0);
-        ADD_CODE(loadptr);
         // +1 fo the null byte
         unsigned long long length = init->strl_length->intc + 1;
         if (sy->type->array.length_expression)
@@ -1330,7 +1323,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
                 class = CTC_UNSIGNED_INT;
             air_insn_t* loaddest = air_insn_init(AIR_ASSIGN, 2);
             loaddest->ct = make_basic_type(class);
-            loaddest->ops[0] = air_insn_indirect_register_operand_init(ptrreg, copied, INVALID_VREGID, 1);
+            loaddest->ops[0] = air_insn_indirect_symbol_operand_init(sy, copied);
             unsigned long long value = 0;
             switch (class)
             {
