@@ -573,6 +573,7 @@ typedef enum air_insn_type {
     AIR_LOAD,
     AIR_LOAD_ADDR,
     AIR_ADD,
+    AIR_SUBTRACT,
     AIR_RETURN,
     AIR_FUNC_CALL,
     AIR_PHI,
@@ -724,8 +725,6 @@ typedef enum x86_insn_type
     X86I_CALL,
     X86I_PUSH,
     X86I_POP,
-    X86I_ADD,
-    X86I_SUB,
     X86I_LEAVE,
     X86I_RET,
     X86I_JMP,
@@ -734,9 +733,23 @@ typedef enum x86_insn_type
     X86I_CMP,
     X86I_SETE,
     X86I_SETL,
+    X86I_AND,
+    X86I_OR,
     X86I_XOR,
     X86I_NOT,
     X86I_NOP,
+
+    X86I_ADD,
+    X86I_ADDSS,
+    X86I_ADDSD,
+
+    X86I_SUB,
+    X86I_SUBSS,
+    X86I_SUBSD,
+
+    X86I_IMUL,
+    X86I_MULSS,
+    X86I_MULSD,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;

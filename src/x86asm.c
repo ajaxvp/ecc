@@ -18,6 +18,79 @@ const char* register_name(regid_t reg, x86_insn_size_t size)
     }
 }
 
+/*
+
+    x86_operand_type_t type;
+    union
+    {
+        regid_t reg;
+        struct
+        {
+            regid_t reg_addr;
+            long long offset;
+        } deref_reg;
+        struct
+        {
+            regid_t reg_base;
+            regid_t reg_offset;
+            long long scale;
+            long long offset;
+        } array;
+        char* label;
+        struct
+        {
+            char* label;
+            long long offset;
+        } label_ref;
+        char* text;
+        char* string;
+        unsigned long long immediate;
+    };
+*/
+
+bool x86_operand_equals(x86_operand_t* op1, x86_operand_t* op2)
+{
+    if (!op1 && !op2) return true;
+    if (!op1 || !op2) return false;
+    #define check(condition) if (!(condition)) return false;
+    check(op1->type == op2->type);
+    switch (op1->type)
+    {
+        case X86OP_REGISTER:
+        case X86OP_PTR_REGISTER:
+            check(op1->reg == op2->reg);
+            break;
+        case X86OP_DEREF_REGISTER:
+            check(op1->deref_reg.offset == op2->deref_reg.offset);
+            check(op1->deref_reg.reg_addr == op2->deref_reg.reg_addr);
+            break;
+        case X86OP_ARRAY:
+            check(op1->array.reg_base == op2->array.reg_base);
+            check(op1->array.reg_offset == op2->array.reg_offset);
+            check(op1->array.scale == op2->array.scale);
+            check(op1->array.offset == op2->array.offset);
+            break;
+        case X86OP_LABEL:
+            check(streq(op1->label, op2->label));
+            break;
+        case X86OP_LABEL_REF:
+            check(streq(op1->label_ref.label, op2->label_ref.label));
+            check(op1->label_ref.offset == op2->label_ref.offset);
+            break;
+        case X86OP_TEXT:
+            check(streq(op1->text, op2->text));
+            break;
+        case X86OP_STRING:
+            check(streq(op1->string, op2->string));
+            break;
+        case X86OP_IMMEDIATE:
+            check(op1->immediate == op2->immediate);
+            break;
+    }
+    return true;
+    #undef check
+}
+
 void x86_operand_delete(x86_operand_t* op)
 {
     if (!op) return;
@@ -234,11 +307,23 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_MOV: USUAL_2OP("mov")
         case X86I_LEA: USUAL_2OP("lea")
+        case X86I_AND: USUAL_2OP("and")
+        case X86I_OR: USUAL_2OP("or")
         case X86I_XOR: USUAL_2OP("xor")
-        case X86I_ADD: USUAL_2OP("add")
-        case X86I_SUB: USUAL_2OP("sub")
         case X86I_CMP: USUAL_2OP("cmp")
         case X86I_NOT: USUAL_2OP("not")
+    
+        case X86I_ADD: USUAL_2OP("add")
+        case X86I_ADDSS: USUAL_2OP("addss")
+        case X86I_ADDSD: USUAL_2OP("addsd")
+
+        case X86I_SUB: USUAL_2OP("sub")
+        case X86I_SUBSS: USUAL_2OP("subss")
+        case X86I_SUBSD: USUAL_2OP("subsd")
+
+        case X86I_IMUL: USUAL_2OP("imul")
+        case X86I_MULSS: USUAL_2OP("mulss")
+        case X86I_MULSD: USUAL_2OP("mulsd")
 
         op1:
             x86_write_operand(insn->op1, insn->size, file);
@@ -286,10 +371,17 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         long long v = llabs(routine->stackalloc);
         fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
     }
+    x86_insn_t* last = NULL;
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
+    {
+        if (!insn->next) last = insn;
         x86_write_insn(insn, out);
-    fprintf(out, "    leave\n");
-    fprintf(out, "    ret\n");
+    }
+    if (!last || last->type != X86I_RET)
+    {
+        fprintf(out, "    leave\n");
+        fprintf(out, "    ret\n");
+    }
 }
 
 void x86_asm_file_write(x86_asm_file_t* file, FILE* out)
@@ -444,7 +536,6 @@ x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
-    // TODO: handle third operand
     return insn;
 }
 
@@ -454,7 +545,6 @@ x86_insn_t* x86_generate_load_addr(air_insn_t* ainsn, x86_asm_routine_t* routine
     insn->size = X86SZ_QWORD;
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
-    // TODO: handle third operand
     return insn;
 }
 
@@ -498,6 +588,113 @@ x86_insn_t* x86_generate_declare(air_insn_t* ainsn, x86_asm_routine_t* routine, 
     return NULL;
 }
 
+x86_insn_t* x86_generate_return(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* leave = make_basic_x86_insn(X86I_LEAVE);
+    x86_insn_t* ret = make_basic_x86_insn(X86I_RET);
+    leave->next = ret;
+    return leave;
+}
+
+x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_type_t type = X86I_UNKNOWN;
+    if (ainsn->ct->class == CTC_FLOAT)
+    {
+        switch (ainsn->type)
+        {
+            case AIR_ADD: type = X86I_ADDSS; break;
+            case AIR_SUBTRACT: type = X86I_SUBSS; break;
+            case AIR_MULTIPLY: type = X86I_MULSS; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else if (ainsn->ct->class == CTC_DOUBLE)
+    {
+        switch (ainsn->type)
+        {
+            case AIR_ADD: type = X86I_ADDSD; break;
+            case AIR_SUBTRACT: type = X86I_SUBSD; break;
+            case AIR_MULTIPLY: type = X86I_MULSD; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else if (type_is_integer(ainsn->ct))
+    {
+        switch (ainsn->type)
+        {
+            case AIR_ADD: type = X86I_ADD; break;
+            case AIR_SUBTRACT: type = X86I_SUB; break;
+            case AIR_MULTIPLY: type = X86I_IMUL; break;
+            case AIR_AND: type = X86I_AND; break;
+            case AIR_XOR: type = X86I_XOR; break;
+            case AIR_OR: type = X86I_OR; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else
+        report_return_value(NULL);
+    x86_insn_t* insn = make_basic_x86_insn(type);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+    x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
+    mov->size = c_type_to_x86_operand_size(ainsn->ct);
+    mov->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    mov->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    if (x86_operand_equals(mov->op1, mov->op2))
+        x86_insn_delete(mov);
+    else
+        insn->next = mov;
+    return insn;
+}
+
+x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_type_t type = X86I_UNKNOWN;
+    switch (ainsn->type)
+    {
+        case AIR_JZ: type = X86I_JE; break;
+        case AIR_JNZ: type = X86I_JNE; break;
+        default: report_return_value(NULL);
+    }
+
+    x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
+    cmp->size = c_type_to_x86_operand_size(ainsn->ct);
+    cmp->op1 = make_operand_immediate(0);
+    cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+    x86_insn_t* jmp = make_basic_x86_insn(type);
+    jmp->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    cmp->next = jmp;
+
+    return cmp;
+}
+
+x86_insn_t* x86_generate_jmp(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_JMP);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    return insn;
+}
+
+x86_insn_t* x86_generate_label(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_LABEL);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    return insn;
+}
+
+x86_insn_t* x86_generate_push(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_PUSH);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    return insn;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -508,14 +705,25 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_ASSIGN: return x86_generate_assign(ainsn, routine, file);
         case AIR_FUNC_CALL: return x86_generate_func_call(ainsn, routine, file);
         case AIR_NOP: return x86_generate_nop(ainsn, routine, file);
-
         case AIR_DECLARE: return x86_generate_declare(ainsn, routine, file);
-        case AIR_RETURN:
+        case AIR_RETURN: return x86_generate_return(ainsn, routine, file);
+
+        case AIR_ADD:
+        case AIR_SUBTRACT:
+        case AIR_MULTIPLY:
+        case AIR_AND:
+        case AIR_XOR:
+        case AIR_OR:
+            return x86_generate_binary_operator(ainsn, routine, file);
+
         case AIR_JZ:
         case AIR_JNZ:
-        case AIR_JMP:
-        case AIR_LABEL:
-        case AIR_PUSH:
+            return x86_generate_conditional_jump(ainsn, routine, file);
+
+        case AIR_JMP: return x86_generate_jmp(ainsn, routine, file);
+        case AIR_LABEL: return x86_generate_label(ainsn, routine, file);
+        case AIR_PUSH: return x86_generate_push(ainsn, routine, file);
+
         case AIR_DIRECT_ADD:
         case AIR_DIRECT_SUBTRACT:
         case AIR_DIRECT_MULTIPLY:
@@ -527,10 +735,8 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_DIRECT_AND:
         case AIR_DIRECT_XOR:
         case AIR_DIRECT_OR:
-        case AIR_ADD:
         case AIR_PHI:
         case AIR_NEGATE:
-        case AIR_MULTIPLY:
         case AIR_POSATE:
         case AIR_COMPLEMENT:
         case AIR_NOT:
@@ -557,9 +763,6 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_GREATER:
         case AIR_EQUAL:
         case AIR_INEQUAL:
-        case AIR_AND:
-        case AIR_XOR:
-        case AIR_OR:
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
     }
@@ -584,6 +787,7 @@ x86_asm_routine_t* x86_generate_routine(air_routine_t* aroutine, x86_asm_file_t*
             routine->insns = last = insn;
         else
             last = last->next = insn;
+        for (; last->next; last = last->next);
     }
     return routine;
 }

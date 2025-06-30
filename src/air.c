@@ -277,6 +277,9 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_ADD:
             TYPE OP(0) EQUALS OP(1) OPERATOR(+) OP(2) SEMICOLON
             break;
+        case AIR_SUBTRACT:
+            TYPE OP(0) EQUALS OP(1) OPERATOR(-) OP(2) SEMICOLON
+            break;
         case AIR_DIVIDE:
         case AIR_MODULO:
             TYPE OP(0) EQUALS
@@ -602,6 +605,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
         case AIR_ADD:
+        case AIR_SUBTRACT:
         case AIR_FUNC_CALL:
         case AIR_PHI:
         case AIR_NEGATE:
@@ -669,6 +673,7 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
         case AIR_ADD:
+        case AIR_SUBTRACT:
         case AIR_FUNC_CALL:
         case AIR_PHI:
         case AIR_NEGATE:
@@ -1810,6 +1815,25 @@ static void linearize_addition_expression_after(syntax_traverser_t* trav, syntax
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_subtraction_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    // TODO: handle other silly cases of subtraction expressions
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->bexpr_lhs);
+    COPY_CODE(syn->bexpr_rhs);
+    regid_t lreg = syn->bexpr_lhs->expr_reg;
+    regid_t rreg = syn->bexpr_rhs->expr_reg;
+    lreg = convert(trav, syn->bexpr_lhs->ctype, syn->ctype, lreg, &code);
+    rreg = convert(trav, syn->bexpr_rhs->ctype, syn->ctype, rreg, &code);
+    air_insn_t* insn = air_insn_init(AIR_SUBTRACT, 3);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_register_operand_init(lreg);
+    insn->ops[2] = air_insn_register_operand_init(rreg);
+    ADD_CODE(insn);
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_logical_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
@@ -1822,6 +1846,7 @@ static void linearize_logical_expression_after(syntax_traverser_t* trav, syntax_
     COPY_CODE(syn->bexpr_lhs);
 
     air_insn_t* jzl = air_insn_init(or ? AIR_JNZ : AIR_JZ, 2);
+    jzl->ct = type_copy(syn->bexpr_lhs->ctype);
     jzl->ops[0] = air_insn_label_operand_init(first_label_no, 'E');
     jzl->ops[1] = air_insn_register_operand_init(syn->bexpr_lhs->expr_reg);
     ADD_CODE(jzl);
@@ -1829,6 +1854,7 @@ static void linearize_logical_expression_after(syntax_traverser_t* trav, syntax_
     COPY_CODE(syn->bexpr_rhs);
 
     air_insn_t* jzr = air_insn_init(or ? AIR_JNZ : AIR_JZ, 2);
+    jzr->ct = type_copy(syn->bexpr_rhs->ctype);
     jzr->ops[0] = air_insn_label_operand_init(first_label_no, 'E');
     jzr->ops[1] = air_insn_register_operand_init(syn->bexpr_rhs->expr_reg);
     ADD_CODE(jzr);
@@ -1882,6 +1908,7 @@ static void linearize_conditional_expression_after(syntax_traverser_t* trav, syn
     regid_t elsereg = syn->cexpr_else->expr_reg;
 
     air_insn_t* jz = air_insn_init(AIR_JZ, 2);
+    jz->ct = type_copy(syn->cexpr_condition->ctype);
     jz->ops[0] = air_insn_label_operand_init(else_label_no, 'E');
     jz->ops[1] = air_insn_register_operand_init(syn->cexpr_condition->expr_reg);
     ADD_CODE(jz);
@@ -1964,6 +1991,7 @@ static void linearize_if_statement_after(syntax_traverser_t* trav, syntax_compon
     COPY_CODE(syn->ifstmt_condition);
 
     air_insn_t* jz = air_insn_init(AIR_JZ, 2);
+    jz->ct = type_copy(syn->ifstmt_condition->ctype);
     jz->ops[0] = air_insn_label_operand_init(has_else ? else_label_no : end_label_no, 'S');
     jz->ops[1] = air_insn_register_operand_init(syn->ifstmt_condition->expr_reg);
     ADD_CODE(jz);
@@ -2057,6 +2085,7 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
     if (syn->forstmt_condition)
     {
         air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
+        jnz->ct = type_copy(syn->forstmt_condition->ctype);
         jnz->ops[0] = air_insn_label_operand_init(body_label_no, 'S');
         jnz->ops[1] = air_insn_register_operand_init(syn->forstmt_condition->expr_reg);
         ADD_CODE(jnz);
@@ -2095,6 +2124,7 @@ static void linearize_while_statement_after(syntax_traverser_t* trav, syntax_com
     COPY_CODE(syn->whstmt_condition);
 
     air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
+    jnz->ct = type_copy(syn->whstmt_condition->ctype);
     jnz->ops[0] = air_insn_label_operand_init(body_label_no, 'S');
     jnz->ops[1] = air_insn_register_operand_init(syn->whstmt_condition->expr_reg);
     ADD_CODE(jnz);
@@ -2117,6 +2147,7 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
     COPY_CODE(syn->dostmt_condition);
 
     air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
+    jnz->ct = type_copy(syn->dostmt_condition->ctype);
     jnz->ops[0] = air_insn_label_operand_init(body_label_no, 'S');
     jnz->ops[1] = air_insn_register_operand_init(syn->dostmt_condition->expr_reg);
     ADD_CODE(jnz);
@@ -2157,6 +2188,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_CHARACTER_CONSTANT] = linearize_character_constant_after;
     trav->after[SC_FLOATING_CONSTANT] = linearize_floating_constant_after;
     trav->after[SC_ADDITION_EXPRESSION] = linearize_addition_expression_after;
+    trav->after[SC_SUBTRACTION_EXPRESSION] = linearize_subtraction_expression_after;
     trav->after[SC_EXPRESSION] = linearize_expression_after;
     trav->after[SC_EXPRESSION_STATEMENT] = linearize_expression_statement_after;
     trav->after[SC_COMPOUND_STATEMENT] = linearize_compound_statement_after;

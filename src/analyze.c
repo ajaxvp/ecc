@@ -502,6 +502,8 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
     symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = type_copy(syn->ctype);
+    type_delete(syn->ctype);
+    syn->ctype = make_reference_type(sy->type);
     free(name);
 }
 
