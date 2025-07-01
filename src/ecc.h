@@ -720,7 +720,6 @@ typedef enum x86_insn_type
 {
     X86I_UNKNOWN,
     X86I_LABEL,
-    X86I_MOV,
     X86I_LEA,
     X86I_CALL,
     X86I_PUSH,
@@ -732,12 +731,23 @@ typedef enum x86_insn_type
     X86I_JNE,
     X86I_CMP,
     X86I_SETE,
+    X86I_SETNE,
+    X86I_SETLE,
     X86I_SETL,
+    X86I_SETGE,
+    X86I_SETG,
     X86I_AND,
     X86I_OR,
     X86I_XOR,
     X86I_NOT,
     X86I_NOP,
+    X86I_NEG,
+    
+    X86I_MOV,
+    X86I_MOVZX,
+    X86I_MOVSX,
+    X86I_MOVSS,
+    X86I_MOVSD,
 
     X86I_ADD,
     X86I_ADDSS,
@@ -747,9 +757,19 @@ typedef enum x86_insn_type
     X86I_SUBSS,
     X86I_SUBSD,
 
+    X86I_MUL,
     X86I_IMUL,
     X86I_MULSS,
     X86I_MULSD,
+
+    X86I_DIV,
+    X86I_IDIV,
+    X86I_DIVSS,
+    X86I_DIVSD,
+
+    X86I_SHL,
+    X86I_SHR,
+    X86I_SAR,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;

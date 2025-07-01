@@ -555,7 +555,7 @@ becomes:
 
 %eax = _1;
 %edx = 0;
-%edx = %edx:%eax % _2;
+%edx = %edx:%eax / _2;
 int _3 = %edx;
 
 (integer type only)
@@ -565,7 +565,7 @@ becomes:
 
 %eax = _1;
 %edx = 0;
-%eax = %edx:%eax % _2;
+%eax = %edx:%eax / _2;
 int _3 = %eax;
 
 */
@@ -595,6 +595,7 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     load_result->ops[0] = air_insn_register_operand_init(resultreg);
     load_result->ops[1] = air_insn_register_operand_init(hresultreg);
     air_insn_insert_after(load_result, insn);
+    insn->type = AIR_DIVIDE;
 }
 
 // handles return values w/ respect to the System V ABI

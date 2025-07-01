@@ -298,14 +298,37 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
             x86_write_operand(insn->op1, X86SZ_BYTE, file);
             break;
 
+        case X86I_SETNE:
+            fprintf(file, INDENT "setne ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETLE:
+            fprintf(file, INDENT "setle ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
         case X86I_SETL:
             fprintf(file, INDENT "setl ");
             x86_write_operand(insn->op1, X86SZ_BYTE, file);
             break;
+
+        case X86I_SETGE:
+            fprintf(file, INDENT "setge ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETG:
+            fprintf(file, INDENT "setg ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
         
         case X86I_PUSH: USUAL_1OP("push")
+        case X86I_NEG: USUAL_1OP("neg")
 
         case X86I_MOV: USUAL_2OP("mov")
+        case X86I_MOVSX: USUAL_2OP("movsx")
+        case X86I_MOVZX: USUAL_2OP("movzx")
         case X86I_LEA: USUAL_2OP("lea")
         case X86I_AND: USUAL_2OP("and")
         case X86I_OR: USUAL_2OP("or")
@@ -321,9 +344,19 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_SUBSS: USUAL_2OP("subss")
         case X86I_SUBSD: USUAL_2OP("subsd")
 
+        case X86I_MUL: USUAL_1OP("mul")
         case X86I_IMUL: USUAL_2OP("imul")
         case X86I_MULSS: USUAL_2OP("mulss")
         case X86I_MULSD: USUAL_2OP("mulsd")
+
+        case X86I_DIV: USUAL_1OP("div")
+        case X86I_IDIV: USUAL_1OP("idiv")
+        case X86I_DIVSS: USUAL_2OP("divss")
+        case X86I_DIVSD: USUAL_2OP("divsd")
+
+        case X86I_SHL: USUAL_2OP("shl")
+        case X86I_SHR: USUAL_2OP("shr")
+        case X86I_SAR: USUAL_2OP("sar")
 
         op1:
             x86_write_operand(insn->op1, insn->size, file);
@@ -599,8 +632,10 @@ x86_insn_t* x86_generate_return(air_insn_t* ainsn, x86_asm_routine_t* routine, x
 x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_type_t type = X86I_UNKNOWN;
+    x86_insn_type_t movtype = X86I_UNKNOWN;
     if (ainsn->ct->class == CTC_FLOAT)
     {
+        movtype = X86I_MOVSS;
         switch (ainsn->type)
         {
             case AIR_ADD: type = X86I_ADDSS; break;
@@ -611,6 +646,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
     }
     else if (ainsn->ct->class == CTC_DOUBLE)
     {
+        movtype = X86I_MOVSD;
         switch (ainsn->type)
         {
             case AIR_ADD: type = X86I_ADDSD; break;
@@ -619,8 +655,9 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             default: report_return_value(NULL);
         }
     }
-    else if (type_is_integer(ainsn->ct))
+    else if (type_is_signed_integer(ainsn->ct))
     {
+        movtype = X86I_MOV;
         switch (ainsn->type)
         {
             case AIR_ADD: type = X86I_ADD; break;
@@ -629,15 +666,155 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_AND: type = X86I_AND; break;
             case AIR_XOR: type = X86I_XOR; break;
             case AIR_OR: type = X86I_OR; break;
+            case AIR_SHIFT_LEFT: type = X86I_SHL; break;
+            case AIR_SHIFT_RIGHT: type = X86I_SHR; break;
+            case AIR_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
             default: report_return_value(NULL);
         }
     }
     else
+        // TODO: handle unsigned integers
         report_return_value(NULL);
+    
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+    x86_insn_t* mov = make_basic_x86_insn(movtype);
+    mov->size = c_type_to_x86_operand_size(ainsn->ct);
+    mov->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    mov->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    if (x86_operand_equals(mov->op1, mov->op2))
+        x86_insn_delete(mov);
+    else
+        insn->next = mov;
+    return insn;
+}
+
+x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_type_t type = X86I_UNKNOWN;
+    if (ainsn->ct->class == CTC_FLOAT)
+    {
+        switch (ainsn->type)
+        {
+            case AIR_DIRECT_ADD: type = X86I_ADDSS; break;
+            case AIR_DIRECT_SUBTRACT: type = X86I_SUBSS; break;
+            case AIR_DIRECT_MULTIPLY: type = X86I_MULSS; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else if (ainsn->ct->class == CTC_DOUBLE)
+    {
+        switch (ainsn->type)
+        {
+            case AIR_DIRECT_ADD: type = X86I_ADDSD; break;
+            case AIR_DIRECT_SUBTRACT: type = X86I_SUBSD; break;
+            case AIR_DIRECT_MULTIPLY: type = X86I_MULSD; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else if (type_is_signed_integer(ainsn->ct))
+    {
+        switch (ainsn->type)
+        {
+            case AIR_DIRECT_ADD: type = X86I_ADD; break;
+            case AIR_DIRECT_SUBTRACT: type = X86I_SUB; break;
+            case AIR_DIRECT_MULTIPLY: type = X86I_IMUL; break;
+            case AIR_DIRECT_AND: type = X86I_AND; break;
+            case AIR_DIRECT_XOR: type = X86I_XOR; break;
+            case AIR_DIRECT_OR: type = X86I_OR; break;
+            case AIR_DIRECT_SHIFT_LEFT: type = X86I_SHL; break;
+            case AIR_DIRECT_SHIFT_RIGHT: type = X86I_SHR; break;
+            case AIR_DIRECT_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else
+        // TODO: handle unsigned integers
+        report_return_value(NULL);
+    
+    x86_insn_t* insn = make_basic_x86_insn(type);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    return insn;
+}
+
+x86_insn_t* x86_generate_not(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    if (type_is_integer(ainsn->ct))
+    {
+        x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
+        cmp->size = c_type_to_x86_operand_size(ainsn->ct);
+        cmp->op1 = make_operand_immediate(0);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+        x86_insn_t* sete = make_basic_x86_insn(X86I_SETE);
+        sete->size = X86SZ_BYTE;
+        sete->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+        cmp->next = sete;
+        return cmp;
+    }
+    else
+        // TODO: support floats and doubles
+        report_return_value(NULL);
+}
+
+x86_insn_t* x86_generate_negate(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    if (type_is_integer(ainsn->ct))
+    {
+        x86_insn_t* insn = make_basic_x86_insn(X86I_NEG);
+        insn->size = c_type_to_x86_operand_size(ainsn->ct);
+        insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+        x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
+        mov->size = c_type_to_x86_operand_size(ainsn->ct);
+        mov->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        mov->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+        if (x86_operand_equals(mov->op1, mov->op2))
+            x86_insn_delete(mov);
+        else
+            insn->next = mov;
+
+        return insn;
+    }
+    else
+        // TODO: support floats and doubles
+        report_return_value(NULL);
+}
+
+x86_insn_t* x86_generate_posate(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_type_t type = X86I_UNKNOWN;
+    if (ainsn->ct->class == CTC_FLOAT)
+        type = X86I_MOVSS;
+    else if (ainsn->ct->class == CTC_DOUBLE)
+        type = X86I_MOVSD;
+    else if (type_is_integer(ainsn->ct))
+        type = X86I_MOV;
+    else
+        report_return_value(NULL);
+
+    x86_insn_t* insn = make_basic_x86_insn(type);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    return insn;
+}
+
+x86_insn_t* x86_generate_complement(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_NOT);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
 
     x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
     mov->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -648,6 +825,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
         x86_insn_delete(mov);
     else
         insn->next = mov;
+
     return insn;
 }
 
@@ -661,10 +839,18 @@ x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* 
         default: report_return_value(NULL);
     }
 
-    x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
-    cmp->size = c_type_to_x86_operand_size(ainsn->ct);
-    cmp->op1 = make_operand_immediate(0);
-    cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    x86_insn_t* cmp = NULL;
+    
+    if (type_is_integer(ainsn->ct))
+    {
+        cmp = make_basic_x86_insn(X86I_CMP);
+        cmp->size = c_type_to_x86_operand_size(ainsn->ct);
+        cmp->op1 = make_operand_immediate(0);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    }
+    else
+        // TODO: support floats and doubles
+        report_return_value(NULL);
 
     x86_insn_t* jmp = make_basic_x86_insn(type);
     jmp->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
@@ -695,6 +881,86 @@ x86_insn_t* x86_generate_push(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
     return insn;
 }
 
+x86_insn_t* x86_generate_relational_equality_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    if (type_is_integer(ainsn->ct))
+    {
+        x86_insn_type_t type = X86I_UNKNOWN;
+        switch (ainsn->type)
+        {
+            case AIR_LESS_EQUAL: type = X86I_SETLE; break;
+            case AIR_LESS: type = X86I_SETL; break;
+            case AIR_GREATER_EQUAL: type = X86I_SETGE; break;
+            case AIR_GREATER: type = X86I_SETG; break;
+            case AIR_EQUAL: type = X86I_SETE; break;
+            case AIR_INEQUAL: type = X86I_SETNE; break;
+            default: report_return_value(NULL);
+        }
+
+        x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
+        cmp->size = c_type_to_x86_operand_size(ainsn->ct);
+        cmp->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+        x86_insn_t* insn = make_basic_x86_insn(type);
+        insn->size = X86SZ_BYTE;
+        insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+        cmp->next = insn;
+
+        return cmp;
+    }
+    else
+        // TODO: support floats and doubles
+        report_return_value(NULL);
+}
+
+x86_insn_t* x86_generate_extension(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(ainsn->type == AIR_SEXT ? X86I_MOVSX : X86I_MOVZX);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    return insn;
+}
+
+x86_insn_t* x86_generate_divide(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* div = NULL;
+    x86_insn_type_t type = X86I_UNKNOWN;
+    if (ainsn->ct->class == CTC_FLOAT || ainsn->ct->class == CTC_DOUBLE)
+    {
+        type = ainsn->ct->class == CTC_FLOAT ? X86I_MOVSS : X86I_MOVSD;
+        div = make_basic_x86_insn(ainsn->ct->class == CTC_FLOAT ? X86I_DIVSS : X86I_DIVSD);
+        div->size = c_type_to_x86_operand_size(ainsn->ct);
+        div->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+        div->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    }
+    else if (type_is_integer(ainsn->ct))
+    {
+        bool sig = type_is_signed_integer(ainsn->ct);
+        type = X86I_MOV;
+        div = make_basic_x86_insn(sig ? X86I_IDIV : X86I_DIV);
+        div->size = c_type_to_x86_operand_size(ainsn->ct);
+        div->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+        return div;
+    }
+    else
+        report_return_value(NULL);
+    
+    x86_insn_t* insn = make_basic_x86_insn(type);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    if (x86_operand_equals(insn->op1, insn->op2))
+        x86_insn_delete(insn);
+    else
+        div->next = insn;
+
+    return div;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -714,7 +980,13 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_AND:
         case AIR_XOR:
         case AIR_OR:
+        case AIR_SHIFT_LEFT:
+        case AIR_SHIFT_RIGHT:
+        case AIR_SIGNED_SHIFT_RIGHT:
             return x86_generate_binary_operator(ainsn, routine, file);
+        
+        case AIR_DIVIDE:
+            return x86_generate_divide(ainsn, routine, file);
 
         case AIR_JZ:
         case AIR_JNZ:
@@ -724,24 +996,44 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_LABEL: return x86_generate_label(ainsn, routine, file);
         case AIR_PUSH: return x86_generate_push(ainsn, routine, file);
 
-        case AIR_DIRECT_ADD:
-        case AIR_DIRECT_SUBTRACT:
-        case AIR_DIRECT_MULTIPLY:
-        case AIR_DIRECT_DIVIDE:
-        case AIR_DIRECT_MODULO:
+        case AIR_DIRECT_ADD: 
+        case AIR_DIRECT_SUBTRACT: 
+        case AIR_DIRECT_MULTIPLY: 
+        case AIR_DIRECT_AND: 
+        case AIR_DIRECT_XOR: 
+        case AIR_DIRECT_OR:
         case AIR_DIRECT_SHIFT_LEFT:
         case AIR_DIRECT_SHIFT_RIGHT:
         case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
-        case AIR_DIRECT_AND:
-        case AIR_DIRECT_XOR:
-        case AIR_DIRECT_OR:
-        case AIR_PHI:
-        case AIR_NEGATE:
-        case AIR_POSATE:
-        case AIR_COMPLEMENT:
-        case AIR_NOT:
+            return x86_generate_direct_binary_operator(ainsn, routine, file);
+        
+        case AIR_NEGATE: return x86_generate_negate(ainsn, routine, file);
+
+        case AIR_NOT: return x86_generate_not(ainsn, routine, file);
+
+        case AIR_POSATE: return x86_generate_posate(ainsn, routine, file);
+        
+        case AIR_COMPLEMENT: return x86_generate_complement(ainsn, routine, file);
+
+        case AIR_LESS_EQUAL:
+        case AIR_LESS:
+        case AIR_GREATER_EQUAL:
+        case AIR_GREATER:
+        case AIR_EQUAL:
+        case AIR_INEQUAL:
+            return x86_generate_relational_equality_operator(ainsn, routine, file);
+        
         case AIR_SEXT:
         case AIR_ZEXT:
+            return x86_generate_extension(ainsn, routine, file);
+        
+        case AIR_DIRECT_DIVIDE:
+        
+        // modulo operations get converted to division operations during x86 localization
+        case AIR_MODULO:
+        case AIR_DIRECT_MODULO:
+
+        case AIR_PHI:
         case AIR_S2D:
         case AIR_D2S:
         case AIR_S2SI:
@@ -752,17 +1044,6 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_UI2S:
         case AIR_SI2D:
         case AIR_UI2D:
-        case AIR_DIVIDE:
-        case AIR_MODULO:
-        case AIR_SHIFT_LEFT:
-        case AIR_SHIFT_RIGHT:
-        case AIR_SIGNED_SHIFT_RIGHT:
-        case AIR_LESS_EQUAL:
-        case AIR_LESS:
-        case AIR_GREATER_EQUAL:
-        case AIR_GREATER:
-        case AIR_EQUAL:
-        case AIR_INEQUAL:
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
     }
