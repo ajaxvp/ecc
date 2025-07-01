@@ -335,3 +335,23 @@ char* temp_filepath_gen(char* ext)
     filepath[pathlen - 1] = '\0';
     return filepath;
 }
+
+int regid_comparator(regid_t r1, regid_t r2)
+{
+    return r2 - r1;
+}
+
+unsigned long regid_hash(regid_t x)
+{
+    return (unsigned long) x;
+}
+
+int regid_print(regid_t reg, int (*printer)(const char*, ...))
+{
+    if (reg > NO_PHYSICAL_REGISTERS)
+        return printer("_%llu", reg - NO_PHYSICAL_REGISTERS);
+    else if (reg == INVALID_VREGID)
+        return printer("(invalid register)");
+    else
+        return printer("R%llu", reg);
+}

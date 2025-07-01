@@ -751,6 +751,24 @@ air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting)
     return insn;
 }
 
+// prev insn next
+air_insn_t* air_insn_remove(air_insn_t* insn)
+{
+    if (!insn) return NULL;
+
+    if (insn->prev)
+        insn->prev->next = insn->next;
+
+    if (insn->next)
+        insn->next->prev = insn->prev;
+
+    air_insn_t* prev = insn->prev;
+
+    air_insn_delete(insn);
+
+    return prev;
+}
+
 static air_insn_t* copy_code_impl(syntax_component_t* dest, syntax_component_t* src, air_insn_t* start)
 {
     if (!start)
@@ -2263,6 +2281,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_IDENTIFIER] = linearize_no_action_after;
     trav->after[SC_DESIGNATION] = linearize_no_action_after;
     trav->after[SC_POINTER] = linearize_no_action_after;
+    trav->after[SC_TYPE_QUALIFIER] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

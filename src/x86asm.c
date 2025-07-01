@@ -1033,7 +1033,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_MODULO:
         case AIR_DIRECT_MODULO:
 
+        // phi instructions get deleted in an earlier stage
         case AIR_PHI:
+
         case AIR_S2D:
         case AIR_D2S:
         case AIR_S2SI:

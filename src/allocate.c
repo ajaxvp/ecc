@@ -15,26 +15,6 @@ typedef struct allocator
     map_t* replacements; // map_t<regid_t, regid_t>
 } allocator_t;
 
-int regid_comparator(regid_t r1, regid_t r2)
-{
-    return r2 - r1;
-}
-
-unsigned long regid_hash(regid_t x)
-{
-    return (unsigned long) x;
-}
-
-static int regid_print(regid_t reg, int (*printer)(const char*, ...))
-{
-    if (reg > NO_PHYSICAL_REGISTERS)
-        return printer("_%llu", reg - NO_PHYSICAL_REGISTERS);
-    else if (reg == INVALID_VREGID)
-        return printer("(invalid register)");
-    else
-        return printer("R%llu", reg);
-}
-
 static int allocinfo_print(allocinfo_t* info, int (*printer)(const char*, ...))
 {
     int rv = printer("allocinfo { conflicts: [");

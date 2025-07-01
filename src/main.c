@@ -44,9 +44,10 @@ int usage(void)
     printf("  %-*sPreprocess\n", OPTION_DESCRIPTION_LENGTH, "-P");
     printf("  %-*sParse\n", OPTION_DESCRIPTION_LENGTH, "-p");
     printf("  %-*sStatic analysis\n", OPTION_DESCRIPTION_LENGTH, "-a");
+    printf("  %-*sAIR\n", OPTION_DESCRIPTION_LENGTH, "-A");
     printf("  %-*sLocalized AIR\n", OPTION_DESCRIPTION_LENGTH, "-L");
-    printf("  %-*sRegister-allocated AIR\n", OPTION_DESCRIPTION_LENGTH, "-A");
-    printf("  %-*sBleeding edge work\n", OPTION_DESCRIPTION_LENGTH, "-x");
+    printf("  %-*sRegister-allocated AIR\n", OPTION_DESCRIPTION_LENGTH, "-r");
+    printf("  %-*sBleeding edge work, if any\n", OPTION_DESCRIPTION_LENGTH, "-x");
     return EXIT_FAILURE;
 }
 
@@ -192,6 +193,14 @@ char* work(char* filename)
         air_print(air, printf);
     }
 
+    if (opts.aaflag)
+    {
+        air_delete(air);
+        free_syntax(tlu, tlu);
+        token_delete_all(ts);
+        return NULL;
+    }
+
     localize(air, LOC_X86_64);
 
     if (opts.iflag)
@@ -216,7 +225,7 @@ char* work(char* filename)
         air_print(air, printf);
     }
 
-    if (opts.aaflag)
+    if (opts.rflag)
     {
         air_delete(air);
         free_syntax(tlu, tlu);
@@ -299,7 +308,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpaxLA")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpaxLAr")) != -1;)
     {
         switch (c)
         {
@@ -325,6 +334,9 @@ int main(int argc, char** argv)
                 break;
             case 'A':
                 opts.aaflag = true;
+                break;
+            case 'r':
+                opts.rflag = true;
                 break;
             case '?':
             default:

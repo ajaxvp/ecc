@@ -803,9 +803,71 @@ void localize_x86_64(air_t* air)
     }
 }
 
+void remove_phi_instructions(air_t* air)
+{
+    map_t* map = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
+
+    VECTOR_FOR(air_routine_t*, routine, air->routines)
+    {
+        air_insn_t* last = routine->insns;
+        for (; last && last->next; last = last->next);
+
+        for (air_insn_t* insn = last; insn;)
+        {
+            if (insn->type == AIR_PHI)
+            {
+                air_insn_operand_t* op1 = insn->ops[0];
+                if (!op1 || op1->type != AOP_REGISTER) report_return;
+                regid_t reg = op1->content.reg;
+
+                for (int i = 1; i < insn->noops; ++i)
+                {
+                    air_insn_operand_t* op = insn->ops[i];
+                    if (!op || op->type != AOP_REGISTER) report_return;
+                    regid_t opreg = op->content.reg;
+
+                    map_add(map, (void*) opreg, (void*) reg);
+                }
+
+                insn = air_insn_remove(insn);
+                continue;
+            }
+
+            for (int i = 0; i < insn->noops; ++i)
+            {
+                air_insn_operand_t* op = insn->ops[i];
+                if (!op) continue;
+
+                regid_t reg = INVALID_VREGID;
+                if (op->type == AOP_REGISTER)
+                    reg = op->content.reg;
+                else if (op->type == AOP_INDIRECT_REGISTER)
+                    reg = op->content.inreg.id;
+                else
+                    continue;
+                
+                regid_t alt = (regid_t) map_get(map, (void*) reg);
+                if (alt == INVALID_VREGID)
+                    continue;
+                
+                if (op->type == AOP_REGISTER)
+                    op->content.reg = alt;
+                else if (op->type == AOP_INDIRECT_REGISTER)
+                    op->content.inreg.id = alt;
+            }
+
+            insn = insn->prev;
+        }
+    }
+
+    map_delete(map);
+}
+
 // "localize" an AIR instance to a particular architecture
 void localize(air_t* air, air_locale_t locale)
 {
+    remove_phi_instructions(air);
+
     air->locale = locale;
     switch (locale)
     {

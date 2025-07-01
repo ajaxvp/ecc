@@ -973,6 +973,8 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
     }
         
     // TODO: ISO: 6.5.15 (6)
+
+    syn->ctype = ft;
 }
 
 void analyze_simple_assignment_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)

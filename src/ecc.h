@@ -288,6 +288,7 @@ typedef struct program_options
     bool xflag;
     bool llflag;
     bool aaflag;
+    bool rflag;
 } program_options_t;
 
 typedef struct preprocessing_token
@@ -1743,6 +1744,9 @@ unsigned long hash(char* str);
 char* get_directory_path(char* path);
 char* get_file_name(char* path, bool m);
 int contains(void** array, unsigned length, void* el, int (*c)(void*, void*));
+int regid_comparator(regid_t r1, regid_t r2);
+unsigned long regid_hash(regid_t x);
+int regid_print(regid_t reg, int (*printer)(const char*, ...));
 
 int quickbuffer_printf(const char* fmt, ...);
 void quickbuffer_setup(size_t size);
@@ -1772,6 +1776,7 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
 void air_insn_delete_all(air_insn_t* insns);
 air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting);
 air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting);
+air_insn_t* air_insn_remove(air_insn_t* insn);
 air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op);
 void air_insn_operand_delete(air_insn_operand_t* op);
 air_insn_operand_t* air_insn_symbol_operand_init(symbol_t* sy);

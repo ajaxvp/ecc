@@ -1025,6 +1025,7 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
         return token;
     }
 
+    single_check('?', P_QUESTION_MARK)
     single_check(';', P_SEMICOLON)
     single_check(',', P_COMMA)
     if (peek == '#')
