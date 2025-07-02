@@ -517,6 +517,7 @@ typedef struct air_insn_operand {
 
 // examples:
 //  AIR_DECLARE:                     i32 x;
+//  AIR_DECLARE_REGISTER:            i32 %eax;
 //  AIR_LOAD:                        i32 _1 = x;
 //  AIR_LOAD_ADDR:                   i32 _1 = &x + 16;
 //  AIR_ADD:                         i32 _3 = _1 + _2;
@@ -571,6 +572,7 @@ typedef struct air_insn_operand {
 
 typedef enum air_insn_type {
     AIR_DECLARE,
+    AIR_DECLARE_REGISTER,
     AIR_LOAD,
     AIR_LOAD_ADDR,
     AIR_ADD,

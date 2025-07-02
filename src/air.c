@@ -195,6 +195,9 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             printer(" ");
             OP(0) SEMICOLON
             break;
+        case AIR_DECLARE_REGISTER:
+            TYPE OP(0) SEMICOLON
+            break;
         case AIR_FUNC_CALL:
             if (air->locale == LOC_X86_64 && insn->ops[0]->type == AOP_REGISTER && insn->ops[0]->content.reg == INVALID_VREGID)
             {
@@ -582,6 +585,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
     switch (insn->type)
     {
         case AIR_DECLARE:
+        case AIR_DECLARE_REGISTER:
         case AIR_RETURN:
         case AIR_NOP:
         case AIR_ASSIGN:
@@ -650,6 +654,7 @@ bool air_insn_assigns(air_insn_t* insn)
     switch (insn->type)
     {
         case AIR_DECLARE:
+        case AIR_DECLARE_REGISTER:
         case AIR_RETURN:
         case AIR_NOP:
         case AIR_JZ:

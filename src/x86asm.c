@@ -1036,6 +1036,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         // phi instructions get deleted in an earlier stage
         case AIR_PHI:
 
+        // this instruction is symbolic for earlier stages
+        case AIR_DECLARE_REGISTER:
+
         case AIR_S2D:
         case AIR_D2S:
         case AIR_S2SI:

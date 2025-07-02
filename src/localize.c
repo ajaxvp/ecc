@@ -19,7 +19,17 @@ typedef enum arg_class
     ARG_MEMORY
 } arg_class_t;
 
-// [ %rdi ][ %rsi ][ %rdx ][ %rcx ][ %r8 ][ %r9 ][ sp ][ sp + 8 ]
+static c_type_class_t largest_type_class_for_eightbyte(long long remaining)
+{
+    if (remaining < UNSIGNED_SHORT_INT_WIDTH)
+        return CTC_UNSIGNED_CHAR;
+    else if (remaining < UNSIGNED_INT_WIDTH)
+        return CTC_UNSIGNED_SHORT_INT;
+    else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
+        return CTC_UNSIGNED_INT;
+    else
+        return CTC_UNSIGNED_LONG_LONG_INT;
+}
 
 static arg_class_t* arg_class_singleton(arg_class_t class)
 {
@@ -35,14 +45,24 @@ static arg_class_t* find_classes(c_type_t* ct, size_t* count)
     if (count) *count = 0;
     if (!ct) return NULL;
     if (count) *count = 1;
+    // if the argument is an integer, it only has one class, INTEGER
     if (type_is_integer(ct))
         return arg_class_singleton(ARG_INTEGER);
+    
     // shouldn't have array types as args (they get implicitly converted to ptrs) but whatever
+    // pointers also have the INTEGER class
     if (ct->class == CTC_POINTER || ct->class == CTC_ARRAY)
         return arg_class_singleton(ARG_INTEGER);
+    
+    // floats and doubles are SSE
+    // float _Complex is treated as a struct of two floats, in which the class becomes SSE
     if (ct->class == CTC_FLOAT || ct->class == CTC_DOUBLE || ct->class == CTC_FLOAT_COMPLEX)
         return arg_class_singleton(ARG_SSE);
+
     if (count) *count = 2;
+
+    // the lower byte of the long double is classified as X87
+    // the higher byte is classified as X87UP
     if (ct->class == CTC_LONG_DOUBLE)
     {
         arg_class_t* r = calloc(2, sizeof *r);
@@ -50,13 +70,18 @@ static arg_class_t* find_classes(c_type_t* ct, size_t* count)
         r[1] = ARG_X87UP;
         return r;
     }
+
+    // both bytes get classified as SSE for double _Complex because it's treated as as struct of two doubles
     if (ct->class == CTC_DOUBLE_COMPLEX)
     {
         arg_class_t* r = calloc(2, sizeof *r);
         r[0] = r[1] = ARG_SSE;
         return r;
     }
+
     if (count) *count = 4;
+
+    // long double _Complex has all four of its classes (32 bytes) set to COMPLEX_X87
     if (ct->class == CTC_LONG_DOUBLE_COMPLEX)
     {
         arg_class_t* r = calloc(4, sizeof *r);
@@ -64,44 +89,84 @@ static arg_class_t* find_classes(c_type_t* ct, size_t* count)
             r[i] = ARG_COMPLEX_X87;
         return r;
     }
+
+    // beyond this, we have an aggregate or union type
     return find_aggregate_union_classes(ct, count);
 }
 
 static arg_class_t* find_aggregate_union_classes(c_type_t* ct, size_t* count)
 {
+    // get rid of any bad cookies
+    // this should actually probably get rid of arrays too
+    // because the function doesn't support it but eh, it's
+    // not like arrays can even be passed as params in C
     if (!ct) return NULL;
     if (ct->class != CTC_ARRAY && ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) report_return_value(NULL);
+
+    // get the size of the aggregate/union
     long long size = type_size(ct);
+
+    // the number of classes this type will have is the amount
+    // of eightbytes necessary to hold the object, rounded up
+    // to the nearest eightbyte
     *count = (size + (8 - (size % 8)) % 8) >> 3;
+
     arg_class_t* classes = calloc(*count, sizeof *classes);
+
+    // if the aggregate/union is over 8 eightbytes wide, all
+    // of its eightbytes get classified as MEMORY
     if (size > 64)
     {
         for (size_t i = 0; i < *count; ++i)
             classes[i] = ARG_MEMORY;
         return classes;
     }
+
+    // all eightbytes are initialized with NO_CLASS
     for (size_t i = 0; i < *count; ++i)
         classes[i] = ARG_NO_CLASS;
+
+    // offset (in bytes) of where we are within the struct/union
     long long offset = 0;
+
+    // go thru all member types
     VECTOR_FOR(c_type_t*, mt, ct->struct_union.member_types)
     {
+        // get their sizes and alignments
         long long ms = type_size(mt); 
         long long ma = type_alignment(mt);
+
+        // jump to the member's alignment, if necessary
         offset += (ma - (size % ma)) % ma;
 
+        // collect the classes of this member's type
         size_t subclasses_count = 0;
         arg_class_t* subclasses = find_classes(mt, &subclasses_count);
+
+        // go thru all 'em
         for (size_t j = 0; j < subclasses_count; ++j)
         {
+            // find the class within the whole struct/union type which
+            // our current subclass (the "new" class) would apply to
             long long class_idx = (offset >> 3) + j;
             arg_class_t class = classes[class_idx];
             arg_class_t subclass = subclasses[j];
+            // then we begin to compare the subclass with the current class
+            // we have for this eightbyte
+
+            // ignore if they're the same
             if (class == subclass)
                 continue;
+            
+            // ignore if the new class type is NO_CLASS
             if (subclass == ARG_NO_CLASS)
                 continue;
+            
+            // if we currently have NO_CLASS, take whatever the subclass is
+            // if the new class is MEMORY or INTEGER, take that class
             if (class == ARG_NO_CLASS || subclass == ARG_MEMORY || subclass == ARG_INTEGER)
                 classes[class_idx] = subclass;
+            // if the anything is an X87 class, put it in memory
             else if (class == ARG_X87 ||
                 class == ARG_X87UP ||
                 class == ARG_COMPLEX_X87 ||
@@ -110,13 +175,21 @@ static arg_class_t* find_aggregate_union_classes(c_type_t* ct, size_t* count)
                 subclass == ARG_COMPLEX_X87)
                 classes[class_idx] = ARG_MEMORY;
             else
+            // otherwise, make it SSE
                 classes[class_idx] = ARG_SSE;
         }
         free(subclasses);
 
+        // jump the offset to after the type
         offset += ms;
     }
-    // post-merger
+
+    // "post-merger" from the ABI:
+    // if any of the classes are MEMORY, everything becomes MEMORY
+    // if the X87UP does not have an X87 before it, everything becomes MEMORY
+    // if the type's size is >16 bytes and the first class isn't SSE or any other class isn't SSEUP, everything becomes MEMORY
+    // if an SSEUP does not have an SSE or SSEUP before it, it becomes SSE
+
     bool first_sse = classes[0] == ARG_SSE;
     bool has_sseup = false;
     for (size_t i = 0; i < *count; ++i)
@@ -140,6 +213,7 @@ static arg_class_t* find_aggregate_union_classes(c_type_t* ct, size_t* count)
         for (size_t i = 0; i < *count; ++i)
             classes[i] = ARG_MEMORY;   
     }
+
     return classes;
 }
 
@@ -158,11 +232,20 @@ push(*p);
 // return is the first instruction inserted
 air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_type_t* ct, size_t eightbyte_idx, air_t* air)
 {
+    // get the argument register, this is where we are going to be copying data from
     regid_t argreg = tempdef->ops[0]->type == AOP_REGISTER ? tempdef->ops[0]->content.reg : tempdef->ops[0]->content.inreg.id;
+
+    // if the type of the argument is struct/union
     if (ct->class == CTC_STRUCTURE || ct->class == CTC_UNION)
     {
+        // get its type
         long long size = type_size(ct);
+
+        // progress begins at the start of the eightbyte we're storing
         size_t progress = eightbyte_idx << 3;
+
+        // if the amount of bytes remaining in the entire argument is greater than 8,
+        // then just push those eight bytes onto the stack
         long long total_remaining = size - progress;
         if (total_remaining >= UNSIGNED_LONG_LONG_INT_WIDTH)
         {
@@ -172,29 +255,38 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
             air_insn_insert_before(push, loc);
             return push;
         }
+
+        // if the amount of bytes remaining in the entire argument is less than 8,
+        // then we gotta do this garbage
+        // (i.e., load a temporary with the remaining bytes)
+
         air_insn_t* first = NULL;
+
+        // create a temporary with zero as its value
+
         regid_t tmpreg = NEXT_VIRTUAL_REGISTER;
 
-        air_insn_t* xor = air_insn_init(AIR_DIRECT_XOR, 2);
-        xor->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-        xor->ops[0] = air_insn_register_operand_init(tmpreg);
-        xor->ops[1] = air_insn_register_operand_init(tmpreg);
-        air_insn_insert_before(xor, loc);
+        air_insn_t* init = air_insn_init(AIR_LOAD, 2);
+        init->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+        init->ops[0] = air_insn_register_operand_init(tmpreg);
+        init->ops[1] = air_insn_integer_constant_operand_init(0);
+        air_insn_insert_before(init, loc);
 
-        first = xor;
+        first = init;
 
+        // continue to take the largest amount of bytes possible
+        // shift and or the temporary with the values loaded
         for (long long copied = 0; copied < total_remaining;)
         {
+            // remaining of the stuff we've already copied
             long long remaining = total_remaining - copied;
-            c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
-            if (remaining < UNSIGNED_SHORT_INT_WIDTH)
-                class = CTC_UNSIGNED_CHAR;
-            else if (remaining < UNSIGNED_INT_WIDTH)
-                class = CTC_UNSIGNED_SHORT_INT;
-            else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
-                class = CTC_UNSIGNED_INT;
-            c_type_t* cyt = make_basic_type(class);
 
+            // create the type that can fit the largest number of bytes we still need to copy
+            c_type_t* cyt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+
+            // if this isn't the first time adding to the temporary,
+            // we need to shift the bits over by the bit size of the type
+            // we just made
             if (copied)
             {
                 air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
@@ -204,21 +296,28 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
                 air_insn_insert_before(shl, loc);
             }
 
+            // then or the bytes we're copying with the temporary
             air_insn_t* or = air_insn_init(AIR_DIRECT_OR, 2);
             or->ct = cyt;
             or->ops[0] = air_insn_register_operand_init(tmpreg);
             or->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + copied, INVALID_VREGID, 1);
             air_insn_insert_before(or, loc);
 
+            // move copied forwad
             copied += type_size(cyt);
         }
         
+        // move the bytes into place
+        // e.g., if we copied 6 bytes in the previous sequence,
+        // then we need to shift left by 2 bytes to move those
+        // 6 bytes into place
         air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
         shl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
         shl->ops[0] = air_insn_register_operand_init(tmpreg);
         shl->ops[1] = air_insn_integer_constant_operand_init((8 - total_remaining) << 3);
         air_insn_insert_before(shl, loc);
 
+        // then push the temporary
         air_insn_t* push = air_insn_init(AIR_PUSH, 1);
         push->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
         push->ops[0] = air_insn_register_operand_init(tmpreg);
@@ -226,6 +325,9 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
 
         return first;
     }
+
+    // look how easy it is when we don't have to do dumb garbage!
+    // just a quick push onto the stack!
     air_insn_t* push = air_insn_init(AIR_PUSH, 1);
     push->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
     push->ops[0] = air_insn_register_operand_init(argreg);
@@ -233,36 +335,54 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
     return push;
 }
 
+// loc is the location to insert the instructions ABOVE
+// tempdef is where the temporary was defined that holds the argument
+// ct is the type of the argument
+// eightbyte_idx is this eightbyte's index in the current sequence of eightbyte classifications
+// dest is the register that the eightbyte will get loaded into
+// return is the first instruction inserted
 air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_type_t* ct, size_t eightbyte_idx, regid_t dest, air_t* air)
 {
+    // this is where we copying data from
     regid_t argreg = tempdef->ops[0]->type == AOP_REGISTER ? tempdef->ops[0]->content.reg : tempdef->ops[0]->content.inreg.id;
+
+    // if it's a struct/union
     if (ct->class == CTC_STRUCTURE || ct->class == CTC_UNION)
     {
+        // get the type
         long long size = type_size(ct);
+
+        // get the progress of loading the entire struct/union, across eightbytes
         size_t progress = eightbyte_idx << 3;
+
+        // then get the total remaining from that progress
         long long total_remaining = size - progress;
+
+        // if there's over an eightbyte left, let's just copy 8 bytes from the source argument
         if (total_remaining >= UNSIGNED_LONG_LONG_INT_WIDTH)
         {
-            air_insn_t* deref = air_insn_init(AIR_ASSIGN, 2);
+            air_insn_t* deref = air_insn_init(AIR_LOAD, 2);
             deref->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
             deref->ops[0] = air_insn_register_operand_init(dest);
             deref->ops[1] = air_insn_indirect_register_operand_init(argreg, progress, INVALID_VREGID, 1);
             air_insn_insert_before(deref, loc);
             return deref;
         }
+
+        // otherwise, we gotta do the same garbage we did above,
+        // copy the largest amount of bytes we can repeatedly until
+        // we've copied the entire rest of the struct/union
+
         air_insn_t* first = NULL;
         for (long long copied = 0; copied < total_remaining;)
         {
             long long remaining = total_remaining - copied;
-            c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
-            if (remaining < UNSIGNED_SHORT_INT_WIDTH)
-                class = CTC_UNSIGNED_CHAR;
-            else if (remaining < UNSIGNED_INT_WIDTH)
-                class = CTC_UNSIGNED_SHORT_INT;
-            else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
-                class = CTC_UNSIGNED_INT;
-            c_type_t* cyt = make_basic_type(class);
 
+            // find the type that can fit the largest number of bytes
+            // for the amount remaining
+            c_type_t* cyt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+
+            // shift if we need to make space for the new data we copying
             if (copied)
             {
                 air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
@@ -272,7 +392,10 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
                 air_insn_insert_before(shl, loc);
             }
 
-            air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+            // skraight load those bytes into the register
+            // we can do it with a load this time instead of an OR
+            // because of how x86's <64-bit registers are just alias for the lower bytes of the 64-bit version
+            air_insn_t* assign = air_insn_init(AIR_LOAD, 2);
             assign->ct = cyt;
             assign->ops[0] = air_insn_register_operand_init(dest);
             assign->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + copied, INVALID_VREGID, 1);
@@ -280,9 +403,11 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
 
             if (!first) first = assign;
 
+            // move it forwad
             copied += type_size(cyt);
         }
 
+        // do tha final shift to get the bytes into place
         air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
         shl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
         shl->ops[0] = air_insn_register_operand_init(dest);
@@ -291,7 +416,9 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
 
         return first;
     }
-    air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+
+    // if there's no garbage, we just do a skraight load
+    air_insn_t* assign = air_insn_init(AIR_LOAD, 2);
     assign->ct = type_copy(ct);
     assign->ops[0] = air_insn_register_operand_init(dest);
     assign->ops[1] = air_insn_register_operand_init(argreg);
@@ -299,33 +426,49 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
     return assign;
 }
 
-// guyyyyy this sucks
+// guyyyyy this sucks (it really doesn't)
 void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
+    // ignore if there's no arguments
+    if (insn->noops <= 2) return;
+
+    // initialize the next integer register in the sequence
+    // %rdi normally, %rsi if %rdi is used as the return value for a struct
     regid_t nextintreg = X86R_RDI;
-    bool rdiret = insn->metadata.fcall_sret && type_size(insn->ct->derived_from) > 16;
-    if (rdiret)
+    bool rdi_ret = insn->metadata.fcall_sret && type_size(insn->ct->derived_from) > 16;
+    if (rdi_ret)
         nextintreg = X86R_RSI;
+
+    // initialize the next SSE register in the sequence
     regid_t nextssereg = X86R_XMM0;
     air_insn_t* inserting = insn;
+
+    // loop thru every argument to the function call
     for (size_t i = 2; i < insn->noops; ++i)
     {
         air_insn_operand_t* op = insn->ops[i];
+        // report any funky operands (not a register)
         if (op->type != AOP_REGISTER && op->type != AOP_INDIRECT_REGISTER) report_return;
+
+        // find the definition for the temporary used here as an argument
         air_insn_t* tempdef = air_insn_find_temporary_definition_above(op->type == AOP_REGISTER ? op->content.reg : op->content.inreg.id, insn);
         if (!tempdef) report_return;
 
+        // so that we can get its type
         c_type_t* at = tempdef->ct;
         if (op->type == AOP_INDIRECT_REGISTER)
             at = at->derived_from;
         
+        // get the ABI classes for this argument
         size_t ccount = 0;
         arg_class_t* classes = find_classes(at, &ccount);
         if (!classes) report_return;
 
+        // for each eightbyte/class, store it in a location
         for (size_t i = 0; i < ccount; ++i)
         {
             arg_class_t class = classes[i];
+            // if it's X87, MEMORY, or there aren't any more integer or SSE registers, store it on the stack
             if (class == ARG_MEMORY ||
                 class == ARG_X87 ||
                 class == ARG_X87UP ||
@@ -333,10 +476,13 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
                 (class == ARG_INTEGER && nextintreg > X86R_R9) ||
                 (class == ARG_SSE && nextssereg > X86R_XMM7))
                 inserting = store_eightbyte_on_stack(inserting, tempdef, at, i, air);
+            // if it has the INTEGER class, store it in an integer register
             else if (class == ARG_INTEGER)
                 inserting = store_eightbyte_in_register(inserting, tempdef, at, i, nextintreg++, air);
+            // if it has the SSE class, store it in an SSE register
             else if (class == ARG_SSE)
                 inserting = store_eightbyte_in_register(inserting, tempdef, at, i, nextssereg++, air);
+            // if it has the SSEUP class, store it in the previously used SSE register
             else if (class == ARG_SSEUP)
                 inserting = store_eightbyte_in_register(inserting, tempdef, at, i, nextssereg - 1, air);
         }
@@ -344,8 +490,10 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
         free(classes);
     }
 
-    if (rdiret)
+    // if we got a struct returned thru rdi
+    if (rdi_ret)
     {
+        // create and declare a local variable of the struct type
         symbol_t* sy = symbol_table_add(SYMBOL_TABLE, "__anonymous_lv__", symbol_init(NULL));
         sy->type = type_copy(insn->ct->derived_from);
 
@@ -353,6 +501,7 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
         decl->ops[0] = air_insn_symbol_operand_init(sy);
         air_insn_insert_before(decl, insn);
 
+        // and then give the address of that local variable to %rdi
         air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
         loadaddr->ct = type_copy(insn->ct);
         loadaddr->ops[0] = air_insn_register_operand_init(X86R_RDI);
@@ -370,6 +519,7 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
         air_insn_insert_before(assign, insn);
     }
 
+    // delete all the old temporary usages in the original call instruction
     for (size_t i = 2; i < insn->noops; ++i)
     {
         air_insn_operand_delete(insn->ops[i]);
@@ -404,84 +554,128 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 {
     if (insn->ops[0]->type != AOP_REGISTER) report_return;
 
+    // initialize the integer register return sequence
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
     size_t next_intretreg = 0;
     // regid_t next_sseretreg = X86R_XMM0;
 
+    // get the register where the result of the function call should end up in
     regid_t resreg = insn->ops[0]->content.reg;
+
+    // remove it from the call instruction itself
     air_insn_operand_delete(insn->ops[0]);
     insn->ops[0] = air_insn_register_operand_init(INVALID_VREGID);
 
     size_t ccount = 0;
+
+    // get the return type of the function call
     c_type_t* ct = insn->ct;
     if (insn->metadata.fcall_sret)
         ct = ct->derived_from;
+
+    // get the ABI classes of the return type
     arg_class_t* classes = find_classes(ct, &ccount);
     if (!classes) report_return;
+
+    // if there is a single class and it's INTEGER,
+    // then the return value is in %rax, so pull it into the result register
+
+    // if the classes are MEMORY,
+    // then the return value is a ptr that was passed in as %rdi initially
+    // now that ptr's value is in %rax, so pull it into the resulting register
     if (classes[0] == ARG_MEMORY ||
         (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION && classes[0] == ARG_INTEGER))
     {
         // TODO: support cases where there are multiple INTEGER classes
+
+        // declare the register (for the register-allocator)
+        air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        declreg->ct = type_copy(insn->ct);
+        declreg->ops[0] = air_insn_register_operand_init(X86R_RAX);
+        air_insn_insert_after(declreg, insn);
+
+        // load the actual value
         air_insn_t* load = air_insn_init(AIR_LOAD, 2);
         load->ct = type_copy(insn->ct);
         load->ops[0] = air_insn_register_operand_init(resreg);
         load->ops[1] = air_insn_register_operand_init(X86R_RAX);
-        air_insn_insert_after(load, insn);
+        air_insn_insert_after(load, declreg);
         free(classes);
         return;
     }
+
+    // if there is a single class and it's SSE,
+    // then the return value is in %xmm0, so pull it into the result register
     if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION && classes[0] == ARG_SSE)
     {
+        // declare the register (for the register-allocator)
+        air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        declreg->ct = type_copy(insn->ct);
+        declreg->ops[0] = air_insn_register_operand_init(X86R_XMM0);
+        air_insn_insert_after(declreg, insn);
+
+        // load the actual value
         air_insn_t* load = air_insn_init(AIR_LOAD, 2);
         load->ct = type_copy(insn->ct);
         load->ops[0] = air_insn_register_operand_init(resreg);
         load->ops[1] = air_insn_register_operand_init(X86R_XMM0);
-        air_insn_insert_after(load, insn);
+        air_insn_insert_after(load, declreg);
         free(classes);
         return;
     }
     // TODO: all the x87 stuff
 
-    // handling struct returns <16 bytes in width
+    // beyond here handles struct/union returns that are <16 bytes in width
     if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION)
         report_return;
     
     long long size = type_size(ct);
 
+    // bad, obviously
     if (size > 16)
         report_return;
 
+    // create and declare a local variable to load the struct data into
     symbol_t* lv = symbol_table_add(SYMBOL_TABLE, "__anonymous_lv__", symbol_init(NULL));
     lv->type = type_copy(ct);
 
     air_insn_t* decl = air_insn_init(AIR_DECLARE, 1);
     decl->ops[0] = air_insn_symbol_operand_init(lv);
+
     air_insn_t* pos = air_insn_insert_after(decl, insn);
 
+    // load the address of the local variable we just created
     air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
     loadaddr->ct = make_reference_type(ct);
     loadaddr->ops[0] = air_insn_register_operand_init(resreg);
     loadaddr->ops[1] = air_insn_symbol_operand_init(lv);
     pos = air_insn_insert_after(loadaddr, pos);
     
+    // go thru all the classes/eightbytes of the return value
     for (size_t i = 0; i < ccount; ++i)
     {
+        // keep track of how many bytes we got left
         long long total_remaining = size - (i * 8);
+
         arg_class_t class = classes[i];
+
+        // if the class is INTEGER
         if (class == ARG_INTEGER)
         {
+            // declare the register before use (for register-allocator)
+            air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
+            declreg->ct = type_copy(insn->ct);
+            declreg->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+            air_insn_insert_after(declreg, insn);
+            pos = air_insn_insert_after(declreg, pos);
+
+            // copy at most 8 bytes at a time
             long long to_be_copied = min(total_remaining, 8);
             for (long long copied = 0; copied < to_be_copied;)
             {
                 long long remaining = to_be_copied - copied;
-                c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
-                if (remaining < UNSIGNED_SHORT_INT_WIDTH)
-                    class = CTC_UNSIGNED_CHAR;
-                else if (remaining < UNSIGNED_INT_WIDTH)
-                    class = CTC_UNSIGNED_SHORT_INT;
-                else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
-                    class = CTC_UNSIGNED_INT;
                 long long shift = (8 - remaining) * 8;
+                // if bits need to be shifted, do it
                 if (shift)
                 {
                     air_insn_t* shr = air_insn_init(AIR_DIRECT_SHIFT_RIGHT, 2);
@@ -490,14 +684,16 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
                     shr->ops[1] = air_insn_integer_constant_operand_init(shift);
                     pos = air_insn_insert_after(shr, pos);
                 }
+                // keep on loading!
                 air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-                assign->ct = make_basic_type(class);
+                assign->ct = make_basic_type(largest_type_class_for_eightbyte(remaining));
                 long long csize = type_size(assign->ct);
                 assign->ops[0] = air_insn_indirect_register_operand_init(resreg, (i * 8) + remaining - csize, INVALID_VREGID, 1);
                 assign->ops[1] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
                 pos = air_insn_insert_after(assign, pos);
                 copied += csize;
             }
+            // move up the integer register
             ++next_intretreg;
         }
         else
@@ -510,9 +706,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 void localize_x86_64_func_call(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     localize_x86_64_func_call_return(insn, routine, air);
-
-    if (insn->noops > 2)
-        localize_x86_64_func_call_args(insn, routine, air);
+    localize_x86_64_func_call_args(insn, routine, air);
 }
 
 /*
@@ -601,42 +795,107 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
 // handles return values w/ respect to the System V ABI
 void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    warnf("return statements have not been localized for an x86 target, they will not behave as expected\n");
+    warnf("return statements have not been localized for an x86-64 target, they will not behave as expected\n");
 }
+
+
+/*
+
+%rdi: 05 06 00 00 00 00 00 00 : 0x0605
+p:    01 02 03 04 00 00
+
+void f(struct point{6} p);
+
+p = %edi;
+%rdi >>>= 32;
+p + 4 = %di;
+
+void f(struct point{16} p);
+
+p = %rdi;
+p + 8 = %rsi;
+
+void f(struct point{14} p);
+
+%rdi: 01 02 03 04 05 06 07 08 | %rsi: 09 0A 0B 0C 0D 0E 00 00
+p:    01 02 03 04 05 06 07 08 |       09 0A 0B 0C 0D 0E
+
+p = %rdi;
+p + 8 = %esi;
+%rsi >>>= 32;
+p + 12 = %si;
+
+void f(struct point{22} p);
+
+%rbp + 16: 01 02 03 04 05 06 07 08 | %rbp + 24: 09 0A 0B 0C 0D 0E 0F 10 | %rbp + 32: 11 12 13 14 15 16 00 00
+p:         01 02 03 04 05 06 07 08 |            09 0A 0B 0C 0D 0E 0F 10 |            00 00 13 14 15 16
+
+unsigned long long int _1 = *(%rbp + 16);
+p = _1;
+unsigned long long int _2 = *(%rbp + 24);
+p + 8 = _2;
+unsigned long long int _3 = *(%rbp + 32);
+p + 16 = _3; (int)
+_3 >>>= 32;
+p + 20 = _3; (short int)
+
+void f(int x);
+
+%rdi: 01 02 03 04 00 00 00 00 : 0x04030201
+p:    00 00 00 00
+
+p = %edi;
+
+void f(integer i);
+i = %rdi;
+
+void f(fp f);
+f = %xmm0;
+*/
 
 // assigns parameter locals
 void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
 {
+    // get the function's type
     c_type_t* ftype = routine->sy->type;
+
+    // get its return type
     c_type_t* rettype = ftype->derived_from;
 
+    // initialize location references for pulling parameters
     regid_t nextintreg = X86R_RDI;
     regid_t nextssereg = X86R_XMM0;
     long long nexteightbyteoffset = 16;
 
     air_insn_t* inserting = routine->insns;
 
+    // if the return type is a struct/union larger than two eightbytes,
+    // we need to make a variable to hold it
     if ((rettype->class == CTC_STRUCTURE || rettype->class == CTC_UNION) && type_size(rettype) > 16)
     {
         /*
         struct point* __anonymous_lv__;
         __anonymous_lv__ = %rdi;
-        */
-       symbol_t* sy = symbol_table_add(air->st, "__anonymous_lv__", symbol_init(NULL));
-       sy->type = make_reference_type(rettype);
+         */
 
-       air_insn_t* decl = air_insn_init(AIR_DECLARE, 1);
-       decl->ops[0] = air_insn_symbol_operand_init(sy);
+        // create and declare a local variable to store the ptr for the return value
+        symbol_t* sy = symbol_table_add(air->st, "__anonymous_lv__", symbol_init(NULL));
+        sy->type = make_reference_type(rettype);
 
-       air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-       assign->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-       assign->ops[0] = air_insn_symbol_operand_init(sy);
-       assign->ops[1] = air_insn_register_operand_init(nextintreg++);
+        air_insn_t* decl = air_insn_init(AIR_DECLARE, 1);
+        decl->ops[0] = air_insn_symbol_operand_init(sy);
 
-       inserting = air_insn_insert_after(assign, inserting);
-       inserting = air_insn_insert_after(decl, inserting);
+        // assign %rdi to the local variable
+        air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+        assign->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+        assign->ops[0] = air_insn_symbol_operand_init(sy);
+        assign->ops[1] = air_insn_register_operand_init(nextintreg++);
 
-       routine->retptr = sy;
+        inserting = air_insn_insert_after(assign, inserting);
+        inserting = air_insn_insert_after(decl, inserting);
+
+        // keep track of the local variable so we can return it l8r
+        routine->retptr = sy;
     }
 
     syntax_component_t* fdeclr = syntax_get_full_declarator(routine->sy->declarer);
@@ -647,133 +906,77 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
         // TODO: need to handle K&R functions (maybe?)
         report_return;
 
+    // loop thru all parameters of the function
     VECTOR_FOR(syntax_component_t*, pdecl, fdeclr->fdeclr_parameter_declarations)
     {
         syntax_component_t* pid = syntax_get_declarator_identifier(pdecl->pdecl_declr);
         if (!pid) continue;
+
+        // get the symbol and type associated with the current parameter
         symbol_t* psy = symbol_table_get_syn_id(air->st, pid);
         c_type_t* pt = vector_get(ftype->function.param_types, i);
 
+        long long ptsize = type_size(pt);
+        long long total_copied = 0;
+
+        // get the argument classes associated with this parameter's type
         size_t ccount = 0;
         arg_class_t* classes = find_classes(pt, &ccount);
-        free(classes);
 
-        /*
-        
-        void f(struct point{16} p);
-
-        p = %rdi;
-        p + 8 = %rsi;
-
-        void f(struct point{14} p);
-
-        p = %rdi;
-        %rsi >>>= 16;
-        p + 8 = %esi;
-
-        void f(struct point{20} p);
-
-        unsigned long long int _1 = *(%rbp + 16);
-        p = _1;
-        unsigned long long int _2 = *(%rbp + 24);
-        p + 8 = _2;
-        unsigned int _3 = *(%rbp + 32);
-        p + 16 = _3;
-
-        void f(integer i);
-        i = %rdi;
-
-        void f(fp f);
-        f = %xmm0;
-        
-        */
-
-        if (type_is_integer(pt) || pt->class == CTC_POINTER || pt->class == CTC_ARRAY)
+        for (size_t i = 0; i < ccount; ++i)
         {
-            if (ccount > 1) report_return;
-            bool noreg = nextintreg > X86R_R9;
-            regid_t reg = noreg ? NEXT_VIRTUAL_REGISTER : nextintreg++;
-            if (noreg)
+            arg_class_t class = classes[i];
+
+            regid_t reg = INVALID_VREGID;
+            if (class == ARG_INTEGER && nextintreg <= X86R_R9)
+            {
+                reg = nextintreg++;
+                air_insn_t* insn = air_insn_init(AIR_DECLARE_REGISTER, 1);
+                insn->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+                insn->ops[0] = air_insn_register_operand_init(reg);
+                inserting = air_insn_insert_after(insn, inserting);
+            }
+            else if (class == ARG_SSE && nextssereg <= X86R_XMM7)
+                // TODO: handle SSE
+                report_return
+            else if (class == ARG_MEMORY || class == ARG_INTEGER || class == ARG_SSE)
             {
                 air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
-                insn->ct = pt->class == CTC_ARRAY ? make_reference_type(pt) : type_copy(pt);
-                insn->ops[0] = air_insn_register_operand_init(reg);
+                insn->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+                insn->ops[0] = air_insn_register_operand_init(reg = NEXT_VIRTUAL_REGISTER);
                 insn->ops[1] = air_insn_indirect_register_operand_init(X86R_RBP, nexteightbyteoffset, INVALID_VREGID, 1);
-                inserting = air_insn_insert_after(insn, inserting);
                 nexteightbyteoffset += 8;
-            }
-            air_insn_t* insn = air_insn_init(AIR_ASSIGN, 2);
-            insn->ct = pt->class == CTC_ARRAY ? make_reference_type(pt) : type_copy(pt);
-            insn->ops[0] = air_insn_symbol_operand_init(psy);
-            insn->ops[1] = air_insn_register_operand_init(reg);
-            inserting = air_insn_insert_after(insn, inserting);
-            break;
-        }
-        
-        if (type_is_real_floating(pt))
-        {
-            if (ccount > 1) report_return;
-            bool noreg = nextintreg > X86R_XMM7;
-            regid_t reg = noreg ? NEXT_VIRTUAL_REGISTER : nextssereg++;
-            if (noreg)
-            {
-                air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
-                insn->ct = type_copy(pt);
-                insn->ops[0] = air_insn_register_operand_init(reg);
-                insn->ops[1] = air_insn_indirect_register_operand_init(X86R_RBP, nexteightbyteoffset, INVALID_VREGID, 1);
                 inserting = air_insn_insert_after(insn, inserting);
-                nexteightbyteoffset += 8;
             }
-            air_insn_t* insn = air_insn_init(AIR_ASSIGN, 2);
-            insn->ct = type_copy(pt);
-            insn->ops[0] = air_insn_symbol_operand_init(psy);
-            insn->ops[1] = air_insn_register_operand_init(reg);
-            inserting = air_insn_insert_after(insn, inserting);
-            break;
-        }
 
-        if (pt->class != CTC_STRUCTURE && pt->class != CTC_UNION)
-            report_return;
-        
-        long long psize = type_size(pt);
-        bool vreg = psize > 16 || nextintreg > X86R_R9;
-        regid_t reg = vreg ? NEXT_VIRTUAL_REGISTER : nextintreg++;
-        for (long long copied = 0; copied < psize;)
-        {
-            long long remaining = psize - copied;
-            c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
-            if (remaining < UNSIGNED_SHORT_INT_WIDTH)
-                class = CTC_UNSIGNED_CHAR;
-            else if (remaining < UNSIGNED_INT_WIDTH)
-                class = CTC_UNSIGNED_SHORT_INT;
-            else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
-                class = CTC_UNSIGNED_INT;
-            if (remaining < 8 && !vreg)
+            long long to_be_copied = min(ptsize - total_copied, UNSIGNED_LONG_LONG_INT_WIDTH);
+            for (long long copied = 0; copied < to_be_copied;)
             {
+                long long remaining = to_be_copied - copied;
+                c_type_t* tt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+                long long ttsize = type_size(tt);
+
+                air_insn_t* insn = air_insn_init(AIR_ASSIGN, 2);
+                insn->ct = tt;
+                insn->ops[0] = air_insn_indirect_symbol_operand_init(psy, total_copied);
+                insn->ops[1] = air_insn_register_operand_init(reg);
+
+                inserting = air_insn_insert_after(insn, inserting);
+
+                copied += ttsize;
+                total_copied += ttsize;
+
+                if (copied >= to_be_copied)
+                    continue;
+                
                 air_insn_t* shr = air_insn_init(AIR_DIRECT_SHIFT_RIGHT, 2);
                 shr->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
                 shr->ops[0] = air_insn_register_operand_init(reg);
-                shr->ops[1] = air_insn_integer_constant_operand_init((8 - type_size(shr->ct)) * 8);
+                shr->ops[1] = air_insn_integer_constant_operand_init(ttsize << 3);
+
                 inserting = air_insn_insert_after(shr, inserting);
             }
-            if (vreg)
-            {
-                air_insn_t* load = air_insn_init(AIR_LOAD, 2);
-                load->ct = make_basic_type(class);
-                load->ops[0] = air_insn_register_operand_init(reg);
-                load->ops[1] = air_insn_indirect_register_operand_init(X86R_RBP, nexteightbyteoffset + copied, INVALID_VREGID, 1);
-                inserting = air_insn_insert_after(load, inserting);
-            }
-            air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-            assign->ct = make_basic_type(class);
-            assign->ops[0] = air_insn_indirect_symbol_operand_init(psy, copied);
-            assign->ops[1] = air_insn_register_operand_init(reg);
-            inserting = air_insn_insert_after(assign, inserting);
-            copied += type_size(assign->ct);
         }
-        // round up to next eight byte boundary if not there
-        // (8 - (24 % 8) % 8)
-        nexteightbyteoffset = nexteightbyteoffset + (8 - (nexteightbyteoffset % 8) % 8);
     }
 }
 
@@ -878,3 +1081,10 @@ void localize(air_t* air, air_locale_t locale)
             report_return;
     }
 }
+
+/*
+
+LOCALIZATION RULES:
+    - the live ranges of a physical register being used for two separate calculations may not overlap
+
+*/
