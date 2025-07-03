@@ -1028,16 +1028,6 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
             return x86_generate_extension(ainsn, routine, file);
         
         case AIR_DIRECT_DIVIDE:
-        
-        // modulo operations get converted to division operations during x86 localization
-        case AIR_MODULO:
-        case AIR_DIRECT_MODULO:
-
-        // phi instructions get deleted in an earlier stage
-        case AIR_PHI:
-
-        // this instruction is symbolic for earlier stages
-        case AIR_DECLARE_REGISTER:
 
         case AIR_S2D:
         case AIR_D2S:
@@ -1051,6 +1041,18 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_UI2D:
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
+        
+        // this instruction is symbolic for earlier stages
+        case AIR_DECLARE_REGISTER:
+
+        // modulo operations get converted to division operations during x86 localization
+        case AIR_MODULO:
+        case AIR_DIRECT_MODULO:
+
+        // phi instructions get deleted in an earlier stage
+        case AIR_PHI:
+
+            break;
     }
     return NULL;
 }
