@@ -652,6 +652,33 @@ bool syntax_has_initializer(syntax_component_t* id)
     return true;
 }
 
+typedef struct contains_traverser
+{
+    syntax_traverser_t base;
+    syntax_component_type_t type;
+    bool found;
+} contains_traverser_t;
+
+void contains_default_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    contains_traverser_t* ctrav = (contains_traverser_t*) trav;
+    if (syn->type == ctrav->type)
+        ctrav->found = true;
+}
+
+bool syntax_contains_subelement(syntax_component_t* syn, syntax_component_type_t type)
+{
+    contains_traverser_t* trav = (contains_traverser_t*) traverse_init(syn, sizeof(contains_traverser_t));
+    trav->type = type;
+    trav->found = false;
+
+    traverse((syntax_traverser_t*) trav);
+
+    bool found = trav->found;
+    traverse_delete((syntax_traverser_t*) trav);
+    return found;
+}
+
 // ps - print structure
 // pf - print field
 #define ps(fmt, ...) { for (unsigned i = 0; i < indent; ++i) printer("  "); printer(fmt, ##__VA_ARGS__); }

@@ -187,6 +187,8 @@ char* work(char* filename)
 
     air_t* air = airinize(tlu);
 
+    opt1(air, opt1_profile_basic());
+
     if (opts.iflag)
     {
         printf("<<AIR>>\n");

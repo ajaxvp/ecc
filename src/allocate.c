@@ -1,38 +1,49 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #include "ecc.h"
 
 typedef struct allocinfo
 {
-    vector_t* conflicts; // vector_t<regid_t>
+    vector_t* live_starts; // vector_t<uint64_t>
+    vector_t* live_ends; // vector_t<uint64_t>
     vector_t* aliases; // vector_t<regid_t>
 } allocinfo_t;
 
 typedef struct allocator
 {
     map_t* map; // map_t<regid_t, allocinfo_t>
+    map_t* aliases; // map_t<regid_t, regid_t>
     map_t* replacements; // map_t<regid_t, regid_t>
 } allocator_t;
 
 static int allocinfo_print(allocinfo_t* info, int (*printer)(const char*, ...))
 {
-    int rv = printer("allocinfo { conflicts: [");
-    for (size_t i = 0; i < info->conflicts->size; ++i)
-    {
-        if (i) rv += printer(", ");
-        rv += regid_print((regid_t) vector_get(info->conflicts, i), printer);
-    }
-    rv += printer("], aliases: [");
+    int rv = printer("allocinfo { aliases: [");
     for (size_t i = 0; i < info->aliases->size; ++i)
     {
         if (i) rv += printer(", ");
         rv += regid_print((regid_t) vector_get(info->aliases, i), printer);
     }
+    rv += printer("], live ranges: [");
+    for (size_t i = 0; i < info->live_starts->size; ++i)
+    {
+        if (i) rv += printer(", ");
+        rv += printer("%llu:%llu", (uint64_t) vector_get(info->live_starts, i), (uint64_t) vector_get(info->live_ends, i));
+    }
     rv += printer("] }");
     return rv;
 }
 
+void allocinfo_delete(allocinfo_t* info)
+{
+    if (!info) return;
+    vector_delete(info->aliases);
+    vector_delete(info->live_starts);
+    vector_delete(info->live_ends);
+    free(info);
+}
 
 void allocator_delete(allocator_t* a)
 {
@@ -42,36 +53,34 @@ void allocator_delete(allocator_t* a)
     free(a);
 }
 
-void allocinfo_delete(allocinfo_t* info)
-{
-    if (!info) return;
-    vector_delete(info->conflicts);
-    vector_delete(info->aliases);
-    free(info);
-}
-
-static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air)
+static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air, uint64_t* end_mark)
 {
     if (!def) return NULL;
     air_insn_t* last = def;
-    for (air_insn_t* insn = def->next; insn; insn = insn->next)
+    uint64_t e = *end_mark + 1;
+    for (air_insn_t* insn = def->next; insn; insn = insn->next, ++e)
     {
+        if (air_insn_creates_temporary(insn) && insn->ops[0]->content.reg == reg)
+            break;
         if (insn->type == AIR_FUNC_CALL &&
             air->locale == LOC_X86_64 &&
-            reg != X86R_RBX && reg != X86R_RBP && (reg < X86R_R12 || reg > X86R_R15) &&
+            reg != X86R_RAX && reg != X86R_RBX && reg != X86R_RBP && (reg < X86R_R12 || reg > X86R_R15) &&
             reg <= NO_PHYSICAL_REGISTERS)
         {
             last = insn;
+            *end_mark = e;
             continue;
         }
         for (size_t i = 0; i < insn->noops; ++i)
         {
             air_insn_operand_t* op = insn->ops[i];
             if (!op) continue;
-            if (op->type == AOP_INDIRECT_REGISTER && op->content.inreg.id == reg)
+            if ((op->type == AOP_INDIRECT_REGISTER && op->content.inreg.id == reg) ||
+                (op->type == AOP_REGISTER && op->content.reg == reg))
+            {
                 last = insn;
-            if (op->type == AOP_REGISTER && op->content.reg == reg)
-                last = insn;
+                *end_mark = e;
+            }
         }
     }
     if (get_program_options()->iflag)
@@ -87,55 +96,58 @@ static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air)
 
 static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* air)
 {
-    for (air_insn_t* insn = routine->insns; insn; insn = insn->next)
+    uint64_t i = 0;
+    for (air_insn_t* insn = routine->insns; insn; insn = insn->next, ++i)
     {
-        if (!air_insn_creates_temporary(insn) &&
-            (insn->type != AIR_ASSIGN || insn->noops < 1 || insn->ops[0]->type != AOP_REGISTER || insn->ops[0]->content.reg > NO_PHYSICAL_REGISTERS))
+        if (!air_insn_creates_temporary(insn))
             continue;
 
         if (insn->noops < 1 || insn->ops[0]->type != AOP_REGISTER) report_return;
 
         regid_t reg = insn->ops[0]->content.reg;
 
-        if (air->locale == LOC_X86_64 && insn->type == AIR_FUNC_CALL && reg == INVALID_VREGID)
-            reg = X86R_RAX;
-
         if (reg == INVALID_VREGID) continue;
 
-        allocinfo_t* info = calloc(1, sizeof *info);
-        info->conflicts = vector_init();
-        info->aliases = vector_init();
-        
-        map_add(a->map, (void*) reg, info);
+        allocinfo_t* info = map_get(a->map, (void*) reg);
 
-        air_insn_t* end = find_liveness_end(reg, insn, air);
-
-        for (air_insn_t* btinsn = end; btinsn && btinsn != insn; btinsn = btinsn->prev)
+        if (!info)
         {
-            for (size_t i = 0; i < btinsn->noops; ++i)
-            {
-                if (air_insn_assigns(btinsn) && btinsn == end && i == 0)
-                    continue;
-                air_insn_operand_t* op = btinsn->ops[i];
-                if (!op) continue;
-                regid_t btreg = INVALID_VREGID;
-                if (op->type == AOP_INDIRECT_REGISTER)
-                    btreg = op->content.inreg.id;
-                else if (op->type == AOP_REGISTER)
-                    btreg = op->content.reg;
-                else
-                    continue;
-                
-                if (btreg == INVALID_VREGID)
-                    continue;
-                
-                if (btreg == reg)
-                    continue;
-                
-                vector_add_if_new(info->conflicts, (void*) btreg, (comparator_t) regid_comparator);
-            }
+            info = calloc(1, sizeof *info);
+            info->aliases = vector_init();
+            info->live_starts = vector_init();
+            info->live_ends = vector_init();
+            vector_add(info->aliases, (void*) reg);
+            map_add(a->map, (void*) reg, info);
+        }
+        
+        uint64_t end_mark = i;
+        find_liveness_end(reg, insn, air, &end_mark);
+
+        vector_add(info->live_starts, (void*) (i + 1));
+        vector_add(info->live_ends, (void*) end_mark);
+    }
+}
+
+static bool live_range_conflicts(allocator_t* a, regid_t r1, regid_t r2)
+{
+    allocinfo_t* info1 = map_get(a->map, (void*) r1);
+    allocinfo_t* info2 = map_get(a->map, (void*) r2);
+    if (!info1 || !info2)
+        return false;
+    for (int i = 0; i < info1->live_starts->size; ++i)
+    {
+        uint64_t start1 = (uint64_t) vector_get(info1->live_starts, i);
+        uint64_t end1 = (uint64_t) vector_get(info1->live_ends, i);
+        for (int j = 0; j < info2->live_starts->size; ++j)
+        {
+            uint64_t start2 = (uint64_t) vector_get(info2->live_starts, j);
+            uint64_t end2 = (uint64_t) vector_get(info2->live_ends, j);
+
+            if (max(start1, start2) <= min(end1, end2))
+                return true;
         }
     }
+    return false;
 }
 
 static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
@@ -156,14 +168,14 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
             if (ok <= NO_PHYSICAL_REGISTERS && k <= NO_PHYSICAL_REGISTERS) continue;
 
             // if this register has the register we're merging as a conflict, skip it
-            if (vector_contains(v->conflicts, (void*) ok, (comparator_t) regid_comparator) != -1)
+            if (live_range_conflicts(a, k, ok))
                 continue;
             
             // if any of this register's aliases has the register we're merging as a conflict, skip it
             bool found_conflict = false;
             VECTOR_FOR(regid_t, alias, ov->aliases)
             {
-                if (vector_contains(v->conflicts, (void*) alias, (comparator_t) regid_comparator) != -1)
+                if (live_range_conflicts(a, k, alias))
                 {
                     found_conflict = true;
                     break;
@@ -171,13 +183,14 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
             }
             if (found_conflict)
                 continue;
-            
+
             // merge conflicts and add each other as aliases
             vector_add_if_new(ov->aliases, (void*) k, (comparator_t) regid_comparator);
-            vector_merge(ov->conflicts, v->conflicts, (comparator_t) regid_comparator);
+            vector_concat(ov->live_starts, v->live_starts);
+            vector_concat(ov->live_ends, v->live_ends);
 
-            vector_add_if_new(v->aliases, (void*) ok, (comparator_t) regid_comparator);
-            vector_merge(v->conflicts, ov->conflicts, (comparator_t) regid_comparator);
+            map_remove(a->map, (void*) k);
+            map_add(a->aliases, (void*) k, (void*) ok);
         }
     }
 }
@@ -209,6 +222,9 @@ static void replace_registers_x86_64(air_routine_t* routine, allocator_t* a, air
                 continue;
             
             // get allocation info and its replacement, if any
+            for (regid_t actual = INVALID_VREGID;
+                (actual = (regid_t) map_get(a->aliases, (void*) reg)) != INVALID_VREGID;
+                reg = actual);
             allocinfo_t* info = map_get(a->map, (void*) reg);
             regid_t repl = (regid_t) map_get(a->replacements, (void*) reg);
 
@@ -286,6 +302,7 @@ static void allocate_routine(air_routine_t* routine, air_t* air)
 
     allocator_t* a = calloc(1, sizeof *a);
     a->map = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
+    a->aliases = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
     a->replacements = map_init((comparator_t) regid_comparator, (hash_function_t) regid_hash);
 
     map_set_deleters(a->map, NULL, (deleter_t) allocinfo_delete);
@@ -293,6 +310,10 @@ static void allocate_routine(air_routine_t* routine, air_t* air)
     map_set_printers(a->map,
         (int (*)(void*, int (*)(const char*, ...))) regid_print,
         (int (*)(void*, int (*)(const char*, ...))) allocinfo_print);
+
+    map_set_printers(a->aliases,
+        (int (*)(void*, int (*)(const char*, ...))) regid_print,
+        (int (*)(void*, int (*)(const char*, ...))) regid_print);
     
     map_set_printers(a->replacements,
         (int (*)(void*, int (*)(const char*, ...))) regid_print,
@@ -306,7 +327,10 @@ static void allocate_routine(air_routine_t* routine, air_t* air)
     coalesce(routine, a, air);
 
     if (get_program_options()->iflag)
+    {
         map_print(a->map, printf);
+        map_print(a->aliases, printf);
+    }
 
     replace_registers(routine, a, air);
 

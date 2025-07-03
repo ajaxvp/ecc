@@ -283,6 +283,7 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
 
             // create the type that can fit the largest number of bytes we still need to copy
             c_type_t* cyt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+            long long cytsize = type_size(cyt);
 
             // if this isn't the first time adding to the temporary,
             // we need to shift the bits over by the bit size of the type
@@ -300,22 +301,12 @@ air_insn_t* store_eightbyte_on_stack(air_insn_t* loc, air_insn_t* tempdef, c_typ
             air_insn_t* or = air_insn_init(AIR_DIRECT_OR, 2);
             or->ct = cyt;
             or->ops[0] = air_insn_register_operand_init(tmpreg);
-            or->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + copied, INVALID_VREGID, 1);
+            or->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + (remaining - cytsize), INVALID_VREGID, 1);
             air_insn_insert_before(or, loc);
 
             // move copied forwad
             copied += type_size(cyt);
         }
-        
-        // move the bytes into place
-        // e.g., if we copied 6 bytes in the previous sequence,
-        // then we need to shift left by 2 bytes to move those
-        // 6 bytes into place
-        air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
-        shl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-        shl->ops[0] = air_insn_register_operand_init(tmpreg);
-        shl->ops[1] = air_insn_integer_constant_operand_init((8 - total_remaining) << 3);
-        air_insn_insert_before(shl, loc);
 
         // then push the temporary
         air_insn_t* push = air_insn_init(AIR_PUSH, 1);
@@ -381,6 +372,7 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
             // find the type that can fit the largest number of bytes
             // for the amount remaining
             c_type_t* cyt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+            long long cytsize = type_size(cyt);
 
             // shift if we need to make space for the new data we copying
             if (copied)
@@ -398,7 +390,7 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
             air_insn_t* assign = air_insn_init(AIR_LOAD, 2);
             assign->ct = cyt;
             assign->ops[0] = air_insn_register_operand_init(dest);
-            assign->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + copied, INVALID_VREGID, 1);
+            assign->ops[1] = air_insn_indirect_register_operand_init(argreg, progress + (remaining - cytsize), INVALID_VREGID, 1);
             air_insn_insert_before(assign, loc);
 
             if (!first) first = assign;
@@ -406,13 +398,6 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
             // move it forwad
             copied += type_size(cyt);
         }
-
-        // do tha final shift to get the bytes into place
-        air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
-        shl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-        shl->ops[0] = air_insn_register_operand_init(dest);
-        shl->ops[1] = air_insn_integer_constant_operand_init((8 - total_remaining) << 3);
-        air_insn_insert_before(shl, loc);
 
         return first;
     }
@@ -566,14 +551,13 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     air_insn_operand_delete(insn->ops[0]);
     insn->ops[0] = air_insn_register_operand_init(INVALID_VREGID);
 
-    size_t ccount = 0;
-
     // get the return type of the function call
     c_type_t* ct = insn->ct;
     if (insn->metadata.fcall_sret)
         ct = ct->derived_from;
 
     // get the ABI classes of the return type
+    size_t ccount = 0;
     arg_class_t* classes = find_classes(ct, &ccount);
     if (!classes) report_return;
 
@@ -664,9 +648,8 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
         {
             // declare the register before use (for register-allocator)
             air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
-            declreg->ct = type_copy(insn->ct);
+            declreg->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
             declreg->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
-            air_insn_insert_after(declreg, insn);
             pos = air_insn_insert_after(declreg, pos);
 
             // copy at most 8 bytes at a time
@@ -674,24 +657,25 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
             for (long long copied = 0; copied < to_be_copied;)
             {
                 long long remaining = to_be_copied - copied;
-                long long shift = (8 - remaining) * 8;
-                // if bits need to be shifted, do it
-                if (shift)
-                {
-                    air_insn_t* shr = air_insn_init(AIR_DIRECT_SHIFT_RIGHT, 2);
-                    shr->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-                    shr->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
-                    shr->ops[1] = air_insn_integer_constant_operand_init(shift);
-                    pos = air_insn_insert_after(shr, pos);
-                }
+
                 // keep on loading!
                 air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
                 assign->ct = make_basic_type(largest_type_class_for_eightbyte(remaining));
                 long long csize = type_size(assign->ct);
-                assign->ops[0] = air_insn_indirect_register_operand_init(resreg, (i * 8) + remaining - csize, INVALID_VREGID, 1);
+                assign->ops[0] = air_insn_indirect_register_operand_init(resreg, (i * 8) + copied, INVALID_VREGID, 1);
                 assign->ops[1] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
                 pos = air_insn_insert_after(assign, pos);
+
                 copied += csize;
+
+                if (copied >= to_be_copied)
+                    continue;
+
+                air_insn_t* shr = air_insn_init(AIR_DIRECT_SHIFT_RIGHT, 2);
+                shr->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+                shr->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                shr->ops[1] = air_insn_integer_constant_operand_init(csize << 3);
+                pos = air_insn_insert_after(shr, pos);
             }
             // move up the integer register
             ++next_intretreg;
@@ -792,66 +776,186 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     insn->type = AIR_DIVIDE;
 }
 
+/*
+
+    int _1 = 5;
+    return _1;
+
+    becomes:
+
+    int _1 = 5;
+    int %eax = _1;
+    return;
+
+    float _1 = 5.0f;
+    return _1;
+
+    becomes:
+
+    float _1 = 5.0f;
+    float %xmm0 = _1;
+    return;
+
+    struct point{22}* _1;
+    return *_1;
+
+    becomes:
+
+    struct point{22}* _1;
+    unsigned long long int _2 = *_1;
+    __anonymous_lv__ = _2;
+    unsigned long long int _3 = *(_1 + 8);
+    __anonymous_lv__ + 8 = _3;
+    unsigned int _4 = *(_1 + 16);
+    __anonymous_lv__ + 16 = _4;
+    unsigned short _5 = *(_1 + 20);
+    __anonymous_lv__ + 20 = _5;
+    return;
+
+    struct point{14}* _1;
+    return *_1;
+
+    becomes:
+
+    *_1:  01 02 03 04 05 06 07 08 |       09 0A 0B 0C 0D 0E
+    %rax: 01 02 03 04 05 06 07 08 | %rdx: 09 0A 0B 0C 0D 0E 00 00
+
+    struct point{14}* _1;
+    unsigned long long int %rax = *_1;
+    unsigned int %edx = *(_1 + 10);
+    %rdx <<= 16;
+    %dx = *(_1 + 8);
+
+*/
+
 // handles return values w/ respect to the System V ABI
 void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    warnf("return statements have not been localized for an x86-64 target, they will not behave as expected\n");
+    if (insn->noops < 1)
+        return;
+    
+    regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
+    size_t next_intretreg = 0;
+
+    // get the function's type
+    c_type_t* ftype = routine->sy->type;
+
+    // get its return type
+    c_type_t* rettype = ftype->derived_from;
+    long long rtsize = type_size(rettype);
+
+    air_insn_operand_t* retop = insn->ops[0];
+    regid_t retreg = INVALID_VREGID;
+    if (retop->type == AOP_REGISTER)
+        retreg = retop->content.reg;
+    else if (retop->type == AOP_INDIRECT_REGISTER)
+        retreg = retop->content.inreg.id;
+    else
+        report_return;
+    
+    air_insn_operand_delete(retop);
+    insn->noops = 0;
+
+    air_insn_t* pos = insn->prev;
+
+    if (!pos)
+        report_return;
+
+    if ((rettype->class == CTC_STRUCTURE || rettype->class == CTC_UNION) && type_size(rettype) > 16)
+    {
+        for (long long copied = 0; copied < rtsize;)
+        {
+            long long remaining = rtsize - copied;
+            c_type_t* copytype = make_basic_type(largest_type_class_for_eightbyte(remaining));
+
+            regid_t tempreg = NEXT_VIRTUAL_REGISTER;
+
+            air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+            ld->ct = copytype;
+            ld->ops[0] = air_insn_register_operand_init(tempreg);
+            ld->ops[1] = air_insn_indirect_register_operand_init(retreg, copied, INVALID_VREGID, 1);
+            pos = air_insn_insert_after(ld, pos);
+
+            air_insn_t* copy = air_insn_init(AIR_ASSIGN, 2);
+            copy->ct = type_copy(copytype);
+            copy->ops[0] = air_insn_indirect_symbol_operand_init(routine->retptr, copied);
+            copy->ops[1] = air_insn_register_operand_init(tempreg);
+            pos = air_insn_insert_after(copy, pos);
+
+            copied += type_size(copytype);
+        }
+        return;
+    }
+
+    if (type_is_integer(rettype) || rettype->class == CTC_ARRAY || rettype->class == CTC_POINTER)
+    {
+        air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+        ld->ct = type_copy(rettype);
+        ld->ops[0] = air_insn_register_operand_init(X86R_RAX);
+        ld->ops[1] = air_insn_register_operand_init(retreg);
+        pos = air_insn_insert_after(ld, pos);
+        return;
+    }
+
+    if (type_is_real_floating(rettype))
+    {
+        air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+        ld->ct = type_copy(rettype);
+        ld->ops[0] = air_insn_register_operand_init(X86R_XMM0);
+        ld->ops[1] = air_insn_register_operand_init(retreg);
+        pos = air_insn_insert_after(ld, pos);
+        return;
+    }
+
+    // TODO: handle the garbage
+
+    if (rettype->class != CTC_STRUCTURE && rettype->class != CTC_UNION)
+        report_return;
+
+    size_t ccount = 0;
+    arg_class_t* classes = find_classes(rettype, &ccount);
+    if (!classes) report_return;
+
+    for (size_t i = 0; i < ccount; ++i)
+    {
+        arg_class_t class = classes[i];
+
+        if (class == ARG_INTEGER)
+        {
+            long long copy_size = min(rtsize - (i * 8), UNSIGNED_LONG_LONG_INT_WIDTH);
+
+            for (long long copied = 0; copied < copy_size;)
+            {
+                long long remaining = copy_size - copied;
+                c_type_t* copytype = make_basic_type(largest_type_class_for_eightbyte(remaining));
+                long long cpytsize = type_size(copytype);
+
+                if (copied)
+                {
+                    air_insn_t* shl = air_insn_init(AIR_DIRECT_SHIFT_LEFT, 2);
+                    shl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+                    shl->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                    shl->ops[1] = air_insn_integer_constant_operand_init(cpytsize << 3);
+                    pos = air_insn_insert_after(shl, pos);
+                }
+
+                air_insn_t* copy = air_insn_init(copied ? AIR_ASSIGN : AIR_LOAD, 2);
+                copy->ct = copytype;
+                copy->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                copy->ops[1] = air_insn_indirect_register_operand_init(retreg, (i << 3) + remaining - cpytsize, INVALID_VREGID, 1);
+                pos = air_insn_insert_after(copy, pos);
+
+                copied += cpytsize;
+            }
+
+            ++next_intretreg;
+        }
+        else
+            report_return;
+    }
+    
+    free(classes);
 }
-
-
-/*
-
-%rdi: 05 06 00 00 00 00 00 00 : 0x0605
-p:    01 02 03 04 00 00
-
-void f(struct point{6} p);
-
-p = %edi;
-%rdi >>>= 32;
-p + 4 = %di;
-
-void f(struct point{16} p);
-
-p = %rdi;
-p + 8 = %rsi;
-
-void f(struct point{14} p);
-
-%rdi: 01 02 03 04 05 06 07 08 | %rsi: 09 0A 0B 0C 0D 0E 00 00
-p:    01 02 03 04 05 06 07 08 |       09 0A 0B 0C 0D 0E
-
-p = %rdi;
-p + 8 = %esi;
-%rsi >>>= 32;
-p + 12 = %si;
-
-void f(struct point{22} p);
-
-%rbp + 16: 01 02 03 04 05 06 07 08 | %rbp + 24: 09 0A 0B 0C 0D 0E 0F 10 | %rbp + 32: 11 12 13 14 15 16 00 00
-p:         01 02 03 04 05 06 07 08 |            09 0A 0B 0C 0D 0E 0F 10 |            00 00 13 14 15 16
-
-unsigned long long int _1 = *(%rbp + 16);
-p = _1;
-unsigned long long int _2 = *(%rbp + 24);
-p + 8 = _2;
-unsigned long long int _3 = *(%rbp + 32);
-p + 16 = _3; (int)
-_3 >>>= 32;
-p + 20 = _3; (short int)
-
-void f(int x);
-
-%rdi: 01 02 03 04 00 00 00 00 : 0x04030201
-p:    00 00 00 00
-
-p = %edi;
-
-void f(integer i);
-i = %rdi;
-
-void f(fp f);
-f = %xmm0;
-*/
 
 // assigns parameter locals
 void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)

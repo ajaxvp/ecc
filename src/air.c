@@ -222,7 +222,12 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             TYPE OP(0) EQUALS AMP OP(1) SEMICOLON
             break;
         case AIR_RETURN:
-            printer("return "); OP(0) SEMICOLON
+            printer("return");
+            if (insn->noops >= 1)
+            {
+                SPACE OP(0)
+            }
+            SEMICOLON
             break;
         case AIR_PHI:
             TYPE OP(0) EQUALS printer("phi"); LPAREN
@@ -585,7 +590,6 @@ bool air_insn_creates_temporary(air_insn_t* insn)
     switch (insn->type)
     {
         case AIR_DECLARE:
-        case AIR_DECLARE_REGISTER:
         case AIR_RETURN:
         case AIR_NOP:
         case AIR_ASSIGN:
@@ -608,6 +612,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
             return false;
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
+        case AIR_DECLARE_REGISTER:
         case AIR_ADD:
         case AIR_SUBTRACT:
         case AIR_FUNC_CALL:
@@ -964,7 +969,11 @@ static void linearize_return_statement_after(syntax_traverser_t* trav, syntax_co
     {
         COPY_CODE(syn->retstmt_expression);
         air_insn_t* insn = air_insn_init(AIR_RETURN, 1);
-        insn->ops[0] = air_insn_register_operand_init(syn->retstmt_expression->expr_reg);
+        if (syn->retstmt_expression->ctype->class == CTC_STRUCTURE ||
+            syn->retstmt_expression->ctype->class == CTC_UNION)
+            insn->ops[0] = air_insn_indirect_register_operand_init(syn->retstmt_expression->expr_reg, 0, INVALID_VREGID, 1);
+        else
+            insn->ops[0] = air_insn_register_operand_init(syn->retstmt_expression->expr_reg);
         ADD_CODE(insn);
     }
     else
@@ -1490,30 +1499,46 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
     FINALIZE_LINEARIZE;
 }
 
+static air_insn_t* add_function_call_arg(syntax_traverser_t* trav, syntax_component_t* syn, int i, air_insn_t* insn, air_insn_t* code)
+{
+    c_type_t* ftype = syn->fcallexpr_expression->ctype->derived_from;
+    syntax_component_t* arg = vector_get(syn->fcallexpr_args, i);
+    COPY_CODE(arg);
+    regid_t reg = arg->expr_reg;
+    if (ftype->function.param_types && i < ftype->function.param_types->size)
+        reg = convert(trav, arg->ctype, vector_get(ftype->function.param_types, i), reg, &code);
+    else
+    {
+        // default argument promotions
+        c_type_t* at = integer_promotions(arg->ctype);
+        if (at->class == CTC_FLOAT)
+            at->class = CTC_DOUBLE;
+        reg = convert(trav, arg->ctype, at, reg, &code);
+        type_delete(at);
+    }
+    if (arg->ctype->class == CTC_STRUCTURE || arg->ctype->class == CTC_UNION)
+        insn->ops[i + 2] = air_insn_indirect_register_operand_init(reg, 0, INVALID_VREGID, 1);
+    else
+        insn->ops[i + 2] = air_insn_register_operand_init(reg);
+    return code;
+}
+
 static void linearize_function_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_FUNC_CALL, syn->fcallexpr_args->size + 2);
-    c_type_t* ftype = syn->fcallexpr_expression->ctype->derived_from;
-    VECTOR_FOR(syntax_component_t*, arg, syn->fcallexpr_args)
+    for (int i = syn->fcallexpr_args->size - 1; i >= 0; --i)
     {
-        COPY_CODE(arg);
-        regid_t reg = arg->expr_reg;
-        if (ftype->function.param_types && i < ftype->function.param_types->size)
-            reg = convert(trav, arg->ctype, vector_get(ftype->function.param_types, i), reg, &code);
-        else
-        {
-            // default argument promotions
-            c_type_t* at = integer_promotions(arg->ctype);
-            if (at->class == CTC_FLOAT)
-                at->class = CTC_DOUBLE;
-            reg = convert(trav, arg->ctype, at, reg, &code);
-            type_delete(at);
-        }
-        if (arg->ctype->class == CTC_STRUCTURE || arg->ctype->class == CTC_UNION)
-            insn->ops[i + 2] = air_insn_indirect_register_operand_init(reg, 0, INVALID_VREGID, 1);
-        else
-            insn->ops[i + 2] = air_insn_register_operand_init(reg);
+        syntax_component_t* arg = vector_get(syn->fcallexpr_args, i);
+        if (!syntax_contains_subelement(arg, SC_FUNCTION_CALL_EXPRESSION))
+            continue;
+        code = add_function_call_arg(trav, syn, i, insn, code);
+    }
+    for (int i = 0; i < syn->fcallexpr_args->size; ++i)
+    {
+        if (insn->ops[i + 2])
+            continue;
+        code = add_function_call_arg(trav, syn, i, insn, code);
     }
     COPY_CODE(syn->fcallexpr_expression);
     if (syn->ctype->class == CTC_STRUCTURE || syn->ctype->class == CTC_UNION)

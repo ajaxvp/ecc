@@ -814,10 +814,10 @@ typedef struct x86_asm_file
     size_t next_constant_local_label;
 } x86_asm_file_t;
 
-typedef struct ir_opt_options
+typedef struct opt1_options
 {
     bool inline_fcalls;
-} ir_opt_options_t;
+} opt1_options_t;
 
 typedef enum c_namespace_class
 {
@@ -1539,6 +1539,7 @@ void* map_add(map_t* m, void* key, void* value);
 void* map_remove(map_t* m, void* key);
 bool map_contains_key(map_t* m, void* key);
 void* map_get(map_t* m, void* key);
+void* map_get_or_add(map_t* m, void* key, void* value);
 void map_delete(map_t* m);
 void map_print(map_t* m, int (*printer)(const char*, ...));
 
@@ -1676,6 +1677,7 @@ unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
 bool syntax_is_assignment_expression(syntax_component_type_t type);
 bool syntax_is_identifier(syntax_component_type_t type);
 bool syntax_is_in_lvalue_context(syntax_component_t* syn);
+bool syntax_contains_subelement(syntax_component_t* syn, syntax_component_type_t type);
 
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
@@ -1796,10 +1798,10 @@ bool air_insn_assigns(air_insn_t* insn);
 /* localize.c */
 void localize(air_t* air, air_locale_t locale);
 
-/* iropt.c */
+/* opt1.c */
 
-ir_opt_options_t* ir_opt_profile_basic(void);
-void ir_optimize(ir_insn_t* insns, ir_opt_options_t* options);
+opt1_options_t* opt1_profile_basic(void);
+void opt1(air_t* air, opt1_options_t* options);
 
 /* allocate.c */
 

@@ -129,6 +129,18 @@ void* map_get(map_t* m, void* key)
     return m->value[i];
 }
 
+// returns the given value if the key is not in the map, returns the result of map_get(m, key) otherwise
+void* map_get_or_add(map_t* m, void* key, void* value)
+{
+    int i = map_get_key_index(m, key);
+    if (i == -1)
+    {
+        map_add(m, key, value);
+        return value;
+    }
+    return m->value[i];
+}
+
 void map_delete(map_t* m)
 {
     if (!m) return;
