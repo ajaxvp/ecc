@@ -131,7 +131,7 @@ void air_insn_operand_print(air_insn_operand_t* op, c_type_t* ict, air_t* air, i
             if (op->type == AOP_INDIRECT_REGISTER)
             {
                 printer("*");
-                if (op->content.inreg.factor != 1 || op->content.inreg.offset != 0)
+                if (op->content.inreg.factor != 1 || op->content.inreg.offset != 0 || op->content.inreg.roffset != INVALID_VREGID)
                     printer("(");
             }
             register_print(op->content.reg, ict, air, printer);
@@ -146,7 +146,7 @@ void air_insn_operand_print(air_insn_operand_t* op, c_type_t* ict, air_t* air, i
                     printer(" + %lld", op->content.inreg.offset);
                 if (op->content.inreg.factor != 1)
                     printer(" * %lld", op->content.inreg.factor);
-                if (op->content.inreg.factor != 1 || op->content.inreg.offset != 0)
+                if (op->content.inreg.factor != 1 || op->content.inreg.offset != 0 || op->content.inreg.roffset != INVALID_VREGID)
                     printer(")");
             }
             break;
@@ -484,6 +484,7 @@ air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op)
             break;
         case AOP_INDIRECT_REGISTER:
             n->content.inreg.id = op->content.inreg.id;
+            n->content.inreg.roffset = op->content.inreg.roffset;
             n->content.inreg.offset = op->content.inreg.offset;
             n->content.inreg.factor = op->content.inreg.factor;
             break;

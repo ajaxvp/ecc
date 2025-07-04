@@ -1647,8 +1647,14 @@ bool preprocess_error_line(preprocessing_component_t* comp, preprocessing_state_
 
 bool preprocess_pragma_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
-    warnf("[%s:%d:%d] #pragma directives are currently ignored by the compiler. they will be supported in a later version\n",
-        state->settings->filepath, comp->start->row, comp->start->col);
+    preprocessing_token_t* seq = comp->pragl_sequence->start;
+    preprocessing_token_t* end = comp->pragl_sequence->end;
+    if (seq != end && seq->type == PPT_IDENTIFIER && streq(seq->identifier, "ripley"))
+    {
+        (void) fail(comp->start, "ripley detected, remove it or the program won't compile kthx");
+        remove_token_sequence(comp->start, comp->end);
+        return false;
+    }
     remove_token_sequence(comp->start, comp->end);
     return true;
 }

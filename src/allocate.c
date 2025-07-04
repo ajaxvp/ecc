@@ -75,7 +75,7 @@ static air_insn_t* find_liveness_end(regid_t reg, air_insn_t* def, air_t* air, u
         {
             air_insn_operand_t* op = insn->ops[i];
             if (!op) continue;
-            if ((op->type == AOP_INDIRECT_REGISTER && op->content.inreg.id == reg) ||
+            if ((op->type == AOP_INDIRECT_REGISTER && (op->content.inreg.id == reg || op->content.inreg.roffset == reg)) ||
                 (op->type == AOP_REGISTER && op->content.reg == reg))
             {
                 last = insn;
@@ -123,7 +123,16 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
         uint64_t end_mark = i;
         find_liveness_end(reg, insn, air, &end_mark);
 
-        vector_add(info->live_starts, (void*) (i + 1));
+        uint64_t start_mark = i + 1;
+
+        if (start_mark > end_mark)
+        {
+            map_remove(a->map, (void*) reg);
+            insn = air_insn_remove(insn);
+            continue;
+        }
+
+        vector_add(info->live_starts, (void*) (start_mark));
         vector_add(info->live_ends, (void*) end_mark);
     }
 }
@@ -195,6 +204,66 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
     }
 }
 
+static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_t* a, regid_t* nextintreg, regid_t* nextssereg)
+{
+    // get allocation info and its replacement, if any
+    for (regid_t actual = INVALID_VREGID;
+        (actual = (regid_t) map_get(a->aliases, (void*) reg)) != INVALID_VREGID;
+        reg = actual);
+    allocinfo_t* info = map_get(a->map, (void*) reg);
+    regid_t repl = (regid_t) map_get(a->replacements, (void*) reg);
+
+    // if there's no replacement
+    if (repl == INVALID_VREGID)
+    {
+        // search the aliases for a physical register
+        VECTOR_FOR(regid_t, alias, info->aliases)
+        {
+            if (alias <= NO_PHYSICAL_REGISTERS)
+            {
+                repl = alias;
+                break;
+            }
+            repl = (regid_t) map_get(a->replacements, (void*) alias);
+            if (repl != INVALID_VREGID)
+                break;
+        }
+
+        // if there isn't a physical register in the aliases
+        if (repl == INVALID_VREGID)
+        {
+            // go to the definition of the temporary
+            air_insn_t* def = air_insn_find_temporary_definition_above(reg, insn);
+            if (!def) report_return_value(INVALID_VREGID);
+            // and examine its type
+
+            // if it's an integer/pointer type, take next integer register available (skipping ones that were part of the allocation process)
+            if (type_is_integer(def->ct) || def->ct->class == CTC_POINTER)
+            {
+                for (; *nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) (*nextintreg)); ++(*nextintreg));
+                if (*nextintreg >= X86R_R15) report_return_value(INVALID_VREGID);
+                map_add(a->replacements, (void*) reg, (void*) (repl = (*nextintreg)++));
+            }
+            // if it's a floating type, take next SSE register available (skipping in the same manner as above)
+            else if (type_is_real_floating(def->ct))
+            {
+                for (; *nextssereg <= X86R_XMM7 && map_contains_key(a->map, (void*) (*nextssereg)); ++(*nextssereg));
+                if (*nextssereg >= X86R_XMM7) report_return_value(INVALID_VREGID);
+                map_add(a->replacements, (void*) reg, (void*) (repl = (*nextssereg)++));
+            }
+            // TODO: complex numbas and maybe other?
+            else
+                report_return_value(INVALID_VREGID);
+        }
+        // if there is
+        else
+            // use that
+            map_add(a->replacements, (void*) reg, (void*) repl);
+    }
+
+    return repl;
+}
+
 static void replace_registers_x86_64(air_routine_t* routine, allocator_t* a, air_t* air)
 {
     regid_t nextintreg = X86R_RAX;
@@ -214,75 +283,24 @@ static void replace_registers_x86_64(air_routine_t* routine, allocator_t* a, air
                 reg = op->content.reg;
             else if (op->type == AOP_INDIRECT_REGISTER)
                 reg = op->content.inreg.id;
-            else
-                continue;
             
-            // if the register's already physical, we don't need to replace anything
-            if (reg <= NO_PHYSICAL_REGISTERS)
-                continue;
+            regid_t roffset = INVALID_VREGID;
+            if (op->type == AOP_INDIRECT_REGISTER)
+                roffset = op->content.inreg.roffset;
             
-            // get allocation info and its replacement, if any
-            for (regid_t actual = INVALID_VREGID;
-                (actual = (regid_t) map_get(a->aliases, (void*) reg)) != INVALID_VREGID;
-                reg = actual);
-            allocinfo_t* info = map_get(a->map, (void*) reg);
-            regid_t repl = (regid_t) map_get(a->replacements, (void*) reg);
-
-            // if there's no replacement
-            if (repl == INVALID_VREGID)
-            {
-                // search the aliases for a physical register
-                VECTOR_FOR(regid_t, alias, info->aliases)
-                {
-                    if (alias <= NO_PHYSICAL_REGISTERS)
-                    {
-                        repl = alias;
-                        break;
-                    }
-                    repl = (regid_t) map_get(a->replacements, (void*) alias);
-                    if (repl != INVALID_VREGID)
-                        break;
-                }
-
-                // if there isn't a physical register in the aliases
-                if (repl == INVALID_VREGID)
-                {
-                    // go to the definition of the temporary
-                    air_insn_t* def = air_insn_find_temporary_definition_above(reg, insn);
-                    if (!def) report_return;
-                    // and examine its type
-
-                    // if it's an integer/pointer type, take next integer register available (skipping ones that were part of the allocation process)
-                    if (type_is_integer(def->ct) || def->ct->class == CTC_POINTER)
-                    {
-                        for (; nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) nextintreg); ++nextintreg);
-                        if (nextintreg >= X86R_R15) report_return;
-                        map_add(a->replacements, (void*) reg, (void*) (repl = nextintreg++));
-                    }
-                    // if it's a floating type, take next SSE register available (skipping in the same manner as above)
-                    else if (type_is_real_floating(def->ct))
-                    {
-                        for (; nextintreg <= X86R_XMM7 && map_contains_key(a->map, (void*) nextssereg); ++nextssereg);
-                        if (nextintreg >= X86R_XMM7) report_return;
-                        map_add(a->replacements, (void*) reg, (void*) (repl = nextssereg++));
-                    }
-                    // TODO: complex numbas and maybe other?
-                    else
-                        report_return;
-                }
-                // if there is
-                else
-                    // use that
-                    map_add(a->replacements, (void*) reg, (void*) repl);
-            }
+            // if the register's not physical, replace it
+            if (reg != INVALID_VREGID && reg > NO_PHYSICAL_REGISTERS)
+                reg = find_replacement_x86_64(reg, insn, a, &nextintreg, &nextssereg);
             
             // then replacement the temporary with the physical register
             if (op->type == AOP_REGISTER)
-                op->content.reg = repl;
+                op->content.reg = reg;
             else if (op->type == AOP_INDIRECT_REGISTER)
-                op->content.inreg.id = repl;
-            else 
-                report_return;
+                op->content.inreg.id = reg;
+
+            // if the offset register is not physical, replace it
+            if (roffset != INVALID_VREGID && roffset > NO_PHYSICAL_REGISTERS)
+                op->content.inreg.roffset = find_replacement_x86_64(roffset, insn, a, &nextintreg, &nextssereg);
         }
     }
 }

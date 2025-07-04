@@ -530,11 +530,12 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
                 return make_operand_deref_register(X86R_RBP, sy->stack_offset + offset);
             
             // otherwise, give it a stack offset
+            printf("allocating for %s: %lld\n", symbol_get_name(sy), type_size(sy->type));
             long long syoffset = routine->stackalloc;
             long long size = type_size(sy->type);
             long long alignment = type_alignment(sy->type);
             syoffset -= size;
-            syoffset -= syoffset % alignment;
+            syoffset -= abs(syoffset % alignment);
             return make_operand_deref_register(X86R_RBP, (routine->stackalloc = sy->stack_offset = syoffset) + offset);
         }
         case AOP_LABEL:
