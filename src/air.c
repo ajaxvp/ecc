@@ -741,6 +741,19 @@ air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* st
     return NULL;
 }
 
+air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routine)
+{
+    for (air_insn_t* insn = routine->insns; insn; insn = insn->next)
+    {
+        if (!air_insn_creates_temporary(insn)) continue;
+        air_insn_operand_t* op = insn->ops[0];
+        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        if (op->content.reg == tmp)
+            return insn;
+    }
+    return NULL;
+}
+
 // prev insn inserting
 air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting)
 {

@@ -125,7 +125,7 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
 
         uint64_t start_mark = i + 1;
 
-        if (start_mark > end_mark)
+        if (start_mark > end_mark && reg > NO_PHYSICAL_REGISTERS)
         {
             map_remove(a->map, (void*) reg);
             insn = air_insn_remove(insn);
@@ -191,6 +191,14 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
                 }
             }
             if (found_conflict)
+                continue;
+            
+            air_insn_t* odef = air_insn_find_temporary_definition(ok, routine);
+            air_insn_t* def = air_insn_find_temporary_definition(k, routine);
+            if (!odef || !def) report_return;
+            c_type_t* oct = odef->ct;
+            c_type_t* ct = def->ct;
+            if (air->locale == LOC_X86_64 && !x86_64_c_type_registers_compatible(oct, ct))
                 continue;
 
             // merge conflicts and add each other as aliases

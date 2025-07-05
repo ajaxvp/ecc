@@ -1803,6 +1803,7 @@ air_insn_operand_t* air_insn_label_operand_init(unsigned long long label, char d
 air_insn_t* air_insn_init(air_insn_type_t type, size_t noops);
 bool air_insn_creates_temporary(air_insn_t* insn);
 air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start);
+air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routine);
 bool air_insn_assigns(air_insn_t* insn);
 
 /* localize.c */
@@ -1822,6 +1823,7 @@ void allocate(air_t* air);
 x86_asm_file_t* x86_generate(air_t* air, symbol_table_t* st);
 void x86_asm_file_write(x86_asm_file_t* file, FILE* out);
 void x86_asm_file_delete(x86_asm_file_t* file);
+bool x86_64_c_type_registers_compatible(c_type_t* t1, c_type_t* t2);
 
 /* constexpr.c */
 

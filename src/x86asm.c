@@ -20,36 +20,6 @@ const char* register_name(regid_t reg, x86_insn_size_t size)
     }
 }
 
-/*
-
-    x86_operand_type_t type;
-    union
-    {
-        regid_t reg;
-        struct
-        {
-            regid_t reg_addr;
-            long long offset;
-        } deref_reg;
-        struct
-        {
-            regid_t reg_base;
-            regid_t reg_offset;
-            long long scale;
-            long long offset;
-        } array;
-        char* label;
-        struct
-        {
-            char* label;
-            long long offset;
-        } label_ref;
-        char* text;
-        char* string;
-        unsigned long long immediate;
-    };
-*/
-
 bool x86_operand_equals(x86_operand_t* op1, x86_operand_t* op2)
 {
     if (!op1 && !op2) return true;
@@ -155,6 +125,21 @@ void x86_asm_file_delete(x86_asm_file_t* file)
     vector_deep_delete(file->rodata, (deleter_t) x86_asm_data_delete);
     vector_deep_delete(file->routines, (deleter_t) x86_asm_routine_delete);
     free(file);
+}
+
+bool x86_64_c_type_registers_compatible(c_type_t* t1, c_type_t* t2)
+{
+    if (!t1 && !t2) return false;
+    if (!t1 || !t2) return false;
+    if (type_is_integer(t1) && type_is_integer(t2))
+        return true;
+    if (type_is_real_floating(t1) && type_is_real_floating(t2) &&
+        t1->class != CTC_LONG_DOUBLE && t2->class != CTC_LONG_DOUBLE)
+        return true;
+    if (t1->class == CTC_LONG_DOUBLE && t2->class == CTC_LONG_DOUBLE)
+        return true;
+    // TODO
+    return false;
 }
 
 // location next
@@ -471,17 +456,21 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         long long v = llabs(routine->stackalloc);
         fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
     }
-    x86_insn_t* last = NULL;
+    size_t lr_jumps = 0;
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
     {
-        if (!insn->next) last = insn;
+        if (insn->type == X86I_JMP && insn->op1->type == X86OP_LABEL && streq(insn->op1->label, ".LR"))
+        {
+            ++lr_jumps;
+            if (!insn->next)
+                continue;
+        }
         x86_write_insn(insn, out);
     }
-    if (!last || last->type != X86I_RET)
-    {
-        fprintf(out, "    leave\n");
-        fprintf(out, "    ret\n");
-    }
+    if (lr_jumps > 1)
+        fprintf(out, ".LR:\n");
+    fprintf(out, "    leave\n");
+    fprintf(out, "    ret\n");
 }
 
 void x86_asm_file_write(x86_asm_file_t* file, FILE* out)
@@ -597,7 +586,6 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
                 return make_operand_deref_register(X86R_RBP, sy->stack_offset + offset);
             
             // otherwise, give it a stack offset
-            printf("allocating for %s: %lld\n", symbol_get_name(sy), type_size(sy->type));
             long long syoffset = routine->stackalloc;
             long long size = type_size(sy->type);
             long long alignment = type_alignment(sy->type);
@@ -691,10 +679,9 @@ x86_insn_t* x86_generate_declare(air_insn_t* ainsn, x86_asm_routine_t* routine, 
 
 x86_insn_t* x86_generate_return(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
-    x86_insn_t* leave = make_basic_x86_insn(X86I_LEAVE);
-    x86_insn_t* ret = make_basic_x86_insn(X86I_RET);
-    leave->next = ret;
-    return leave;
+    x86_insn_t* jmp = make_basic_x86_insn(X86I_JMP);
+    jmp->op1 = make_operand_label(".LR");
+    return jmp;
 }
 
 x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
