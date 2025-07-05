@@ -259,7 +259,7 @@ char* work(char* filename)
     }
     if (as_pid == 0)
     {
-        char* argv[] = { "/usr/bin/as", asm_filepath, "-o", obj_filepath, NULL };
+        char* argv[] = { "/usr/bin/x86_64-linux-gnu-as", asm_filepath, "-o", obj_filepath, NULL };
         int status = execv(argv[0], argv);
         if (status == -1)
         {
@@ -366,7 +366,7 @@ int main(int argc, char** argv)
     {
         #define NO_LIBRARIES 2
         char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
-        argv[0] = "/usr/bin/ld";
+        argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
         for (size_t i = 0; i < object_count; ++i)
             argv[i + 1] = objects[i];
         argv[1 + object_count] = "libecc/libecc.a";
@@ -374,7 +374,7 @@ int main(int argc, char** argv)
         argv[1 + object_count + NO_LIBRARIES] = "-o";
         argv[2 + object_count + NO_LIBRARIES] = "a.out";
         argv[3 + object_count + NO_LIBRARIES] = NULL;
-        int status = execv("/usr/bin/ld", argv);
+        int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
         if (status == -1)
         {
             free(argv);

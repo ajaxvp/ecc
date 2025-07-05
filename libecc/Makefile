@@ -11,7 +11,7 @@ $(OUT): $(BUILD)
 		ar r $(OUT) $^
 
 build/%.o: src/%.s
-		as -o $@ $<
+		x86_64-linux-gnu-as -o $@ $<
 
 build/%.o: src/%.c
 		gcc -pedantic-errors -std=c99 -c -o $@ $<
