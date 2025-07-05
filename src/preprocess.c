@@ -405,11 +405,14 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
     *tokens = token;
     preprocessing_token_t* end = token;
 
-    printf("found sequence for parameter '%s':\n", param_name);
-    for (preprocessing_token_t* t = start; t && t != end; t = t->next)
+    if (get_program_options()->iflag)
     {
-        pp_token_print(t, printf);
-        printf("\n");
+        printf("found sequence for parameter '%s':\n", param_name);
+        for (preprocessing_token_t* t = start; t && t != end; t = t->next)
+        {
+            pp_token_print(t, printf);
+            printf("\n");
+        }
     }
 
     while (seq)
@@ -533,11 +536,14 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
             }
             seq = dummy->next;
 
-            printf("sequence:\n");
-            for (preprocessing_token_t* t = seq; t; t = t->next)
+            if (get_program_options()->iflag)
             {
-                pp_token_print(t, printf);
-                printf("\n");
+                printf("sequence:\n");
+                for (preprocessing_token_t* t = seq; t; t = t->next)
+                {
+                    pp_token_print(t, printf);
+                    printf("\n");
+                }
             }
             
             if (!arg_token)
