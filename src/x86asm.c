@@ -6,9 +6,19 @@
 
 #define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 5
 
+bool x86_64_is_integer_register(regid_t reg)
+{
+    return reg >= X86R_RAX && reg <= X86R_R15;
+}
+
+bool x86_64_is_sse_register(regid_t reg)
+{
+    return reg >= X86R_XMM0 && reg <= X86R_XMM7;
+}
+
 const char* register_name(regid_t reg, x86_insn_size_t size)
 {
-    if (reg >= X86R_XMM0)
+    if (x86_64_is_sse_register(reg))
         return X86_64_SSE_REGISTERS[reg - X86R_XMM0];
     switch (size)
     {
@@ -205,6 +215,7 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_SHL:
         case X86I_SHR:
         case X86I_SAR:
+        case X86I_SKIP:
             return false;
         case X86I_MOVSS:
         case X86I_MOVSD:
@@ -419,6 +430,8 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
             fprintf(file, ", ");
             x86_write_operand(insn->op2, insn->size, file);
             break;
+
+        case X86I_SKIP: return;
 
         default:
             break;

@@ -778,6 +778,8 @@ typedef enum x86_insn_type
     X86I_SHR,
     X86I_SAR,
 
+    X86I_SKIP,
+
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
 
@@ -822,6 +824,12 @@ typedef struct opt1_options
 {
     bool inline_fcalls;
 } opt1_options_t;
+
+typedef struct opt4_options
+{
+    bool remove_same_reg_moves;
+    bool xor_zero_moves;
+} opt4_options_t;
 
 typedef enum c_namespace_class
 {
@@ -1814,6 +1822,10 @@ void localize(air_t* air, air_locale_t locale);
 opt1_options_t* opt1_profile_basic(void);
 void opt1(air_t* air, opt1_options_t* options);
 
+/* opt4.c */
+opt4_options_t* opt4_profile_basic(void);
+void opt4(x86_asm_file_t* file, opt4_options_t* options);
+
 /* allocate.c */
 
 void allocate(air_t* air);
@@ -1824,6 +1836,9 @@ x86_asm_file_t* x86_generate(air_t* air, symbol_table_t* st);
 void x86_asm_file_write(x86_asm_file_t* file, FILE* out);
 void x86_asm_file_delete(x86_asm_file_t* file);
 bool x86_64_c_type_registers_compatible(c_type_t* t1, c_type_t* t2);
+void x86_operand_delete(x86_operand_t* op);
+bool x86_64_is_integer_register(regid_t reg);
+bool x86_64_is_sse_register(regid_t reg);
 
 /* constexpr.c */
 

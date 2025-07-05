@@ -3,7 +3,7 @@
 
 #include "ecc.h"
 
-opt1_options_t opt_profile_basic = {
+static opt1_options_t opt_profile_basic = {
     .inline_fcalls = true,
 };
 

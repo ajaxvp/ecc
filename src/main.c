@@ -237,6 +237,8 @@ char* work(char* filename)
 
     x86_asm_file_t* asmfile = x86_generate(air, tlu->tlu_st);
 
+    opt4(asmfile, opt4_profile_basic());
+
     if (opts.iflag)
     {
         printf("<<x86 assembly code>>\n");
