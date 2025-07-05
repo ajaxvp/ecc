@@ -163,29 +163,39 @@ static bool is_whitespace(int c)
     return c == ' ' || c == '\t' || c == '\v' || c == '\n' || c == '\f';
 }
 
-void pp_token_delete(preprocessing_token_t* token)
+void pp_token_delete_content(preprocessing_token_t* token)
 {
     if (!token) return;
     switch (token->type)
     {
         case PPT_STRING_LITERAL:
             free(token->string_literal.value);
+            token->string_literal.value = NULL;
             break;
         case PPT_IDENTIFIER:
             free(token->identifier);
+            token->identifier = NULL;
             break;
         case PPT_PP_NUMBER:
             free(token->pp_number);
+            token->pp_number = NULL;
             break;
         case PPT_HEADER_NAME:
             free(token->header_name.name);
+            token->header_name.name = NULL;
             break;
         case PPT_WHITESPACE:
             free(token->whitespace);
+            token->whitespace = NULL;
             break;
         default:
             break;
     }
+}
+
+void pp_token_delete(preprocessing_token_t* token)
+{
+    pp_token_delete_content(token);
     free(token);
 }
 
@@ -250,6 +260,15 @@ void pp_token_print(preprocessing_token_t* token, int (*printer)(const char* fmt
             break;
     }
     printer(" }");
+}
+
+void pp_token_print_all(preprocessing_token_t* tokens, int (*printer)(const char* fmt, ...))
+{
+    for (; tokens; tokens = tokens->next)
+    {
+        pp_token_print(tokens, printer);
+        printer("\n");
+    }
 }
 
 void pp_token_normal_print(preprocessing_token_t* token, int (*printer)(const char* fmt, ...))

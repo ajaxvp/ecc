@@ -85,16 +85,6 @@ char* work(char* filename)
         return NULL;
     }
 
-    if (opts.iflag)
-    {
-        printf("<<preprocessor output>>\n");
-        for (preprocessing_token_t* token = tokens; token; token = token->next)
-        {
-            pp_token_print(token, printf);
-            printf("\n");
-        }
-    }
-
     if (opts.ppflag)
     {
         pp_token_delete_all(tokens);

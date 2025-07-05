@@ -344,17 +344,49 @@ static void pp_token_delete_all_until(preprocessing_token_t* token, preprocessin
     pp_token_delete(token);
 }
 
-// delete every token from a token sequence, start-inclusive, end-exclusive
-// returns end
 static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start, preprocessing_token_t* end)
 {
     if (!start && !end) return NULL;
+    if (!start)
+    {
+        for (end = end->prev; end; end = end->prev)
+        {
+            pp_token_delete_content(end);
+            end->type = PPT_OTHER;
+        }
+        return end;
+    }
+    if (!end)
+    {
+        for (; start; start = start->next)
+        {
+            pp_token_delete_content(start);
+            start->type = PPT_OTHER;
+        }
+        return NULL;
+    }
+
+    for (; start && start != end; start = start->next)
+    {
+        pp_token_delete_content(start);
+        start->type = PPT_OTHER;
+    }
+    return end;
+}
+
+// delete every token from a token sequence, start-inclusive, end-exclusive
+// returns end
+static preprocessing_token_t* delete_token_sequence(preprocessing_token_t* start, preprocessing_token_t* end)
+{
+    if (!start && !end) return NULL;
+    // tok1 tok2 ... tokN end
     if (!start)
     {
         pp_token_delete_all_prev(end->prev);
         end->prev = NULL;
         return end;
     }
+    // start tok1 tok2 ... tokN
     if (!end)
     {
         if (start->prev)
@@ -2135,10 +2167,26 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
     state_delete(state);
     pp_component_delete(pp_file);
 
+    for (preprocessing_token_t* token = dummy->next; token;)
+    {
+        if (token->type != PPT_OTHER)
+        {
+            token = token->next;
+            continue;
+        }
+        token = remove_token(token);
+    }
+
     *tokens = dummy->next;
     pp_token_delete(dummy);
     if (*tokens)
         (*tokens)->prev = NULL;
+    
+    if (get_program_options()->iflag)
+    {
+        printf("<<preprocessor output>>\n");
+        pp_token_print_all(*tokens, printf);
+    }
 
     return success;
 }
