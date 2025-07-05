@@ -330,20 +330,6 @@ static preprocessing_token_t* remove_token(preprocessing_token_t* token)
     return next;
 }
 
-static void pp_token_delete_all_prev(preprocessing_token_t* token)
-{
-    if (!token) return;
-    pp_token_delete_all_prev(token->prev);
-    pp_token_delete(token);
-}
-
-static void pp_token_delete_all_until(preprocessing_token_t* token, preprocessing_token_t* end)
-{
-    if (!token || token == end) return;
-    pp_token_delete_all_until(token->next, end);
-    pp_token_delete(token);
-}
-
 static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start, preprocessing_token_t* end)
 {
     if (!start && !end) return NULL;
@@ -371,34 +357,6 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
         pp_token_delete_content(start);
         start->type = PPT_OTHER;
     }
-    return end;
-}
-
-// delete every token from a token sequence, start-inclusive, end-exclusive
-// returns end
-static preprocessing_token_t* delete_token_sequence(preprocessing_token_t* start, preprocessing_token_t* end)
-{
-    if (!start && !end) return NULL;
-    // tok1 tok2 ... tokN end
-    if (!start)
-    {
-        pp_token_delete_all_prev(end->prev);
-        end->prev = NULL;
-        return end;
-    }
-    // start tok1 tok2 ... tokN
-    if (!end)
-    {
-        if (start->prev)
-            start->prev->next = NULL;
-        pp_token_delete_all(start);
-        return NULL;
-    }
-    // prev start tok1 tok2 ... tokN end
-    if (start->prev)
-        start->prev->next = end;
-    end->prev = start->prev;
-    pp_token_delete_all_until(start, end);
     return end;
 }
 

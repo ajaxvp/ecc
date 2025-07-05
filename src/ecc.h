@@ -271,6 +271,16 @@ typedef enum c_type_class
     CTC_ERROR
 } c_type_class_t;
 
+typedef enum intrinsic_function
+{
+    IF_VA_ARG,
+    IF_VA_COPY,
+    IF_VA_END,
+    IF_VA_START,
+
+    IF_NO_ELEMENTS
+} intrinsic_function_t;
+
 typedef struct symbol_table_t symbol_table_t;
 typedef struct syntax_traverser syntax_traverser_t;
 typedef struct analysis_error analysis_error_t;
@@ -633,7 +643,10 @@ typedef enum air_insn_type {
     AIR_JNZ,
     AIR_JMP,
     AIR_LABEL,
-    AIR_PUSH
+    AIR_PUSH,
+    AIR_VA_ARG,
+    AIR_VA_START,
+    AIR_VA_END
 } air_insn_type_t;
 
 typedef struct air_insn air_insn_t;
@@ -1006,6 +1019,7 @@ typedef enum syntax_component_type_t
     SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION,
     SC_PRIMARY_EXPRESSION_IDENTIFIER,
     SC_DECLARATOR_IDENTIFIER,
+    SC_INTRINSIC_CALL_EXPRESSION,
 
     SC_NO_ELEMENTS
 } syntax_component_type_t;
@@ -1359,6 +1373,13 @@ typedef struct syntax_component_t
             vector_t* fcallexpr_args; // <syntax_component_t> (SC_ASSIGNMENT_EXPRESSION)
         };
 
+        // SC_INTRINSIC_CALL_EXPRESSION - icallexpr
+        struct
+        {
+            char* icallexpr_name;
+            vector_t* icallexpr_args; // <syntax_component> (SC_ASSIGNMENT_EXPRESSION | SC_TYPE_NAME)
+        };
+
         // SC_SUBSCRIPT_EXPRESSION - subsexpr
         struct
         {
@@ -1605,6 +1626,7 @@ extern const char* X86_64_WORD_REGISTERS[];
 extern const char* X86_64_DOUBLE_REGISTERS[];
 extern const char* X86_64_QUAD_REGISTERS[];
 extern const char* X86_64_SSE_REGISTERS[];
+extern const char* INTRINSIC_FUNCTION_NAMES[];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
@@ -1661,6 +1683,7 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
 symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
+symbol_t* symbol_table_get_by_classes(symbol_table_t* t, char* k, c_type_class_t ctc, c_namespace_class_t nsc);
 
 /* syntax.c */
 bool syntax_is_declarator_type(syntax_component_type_t type);

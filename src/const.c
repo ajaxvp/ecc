@@ -137,7 +137,8 @@ const char* SYNTAX_COMPONENT_NAMES[SC_NO_ELEMENTS] = {
     "SC_BITWISE_OR_ASSIGNMENT_EXPRESSION",
     "SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION",
     "SC_PRIMARY_EXPRESSION_IDENTIFIER",
-    "SC_DECLARATOR_IDENTIFIER"
+    "SC_DECLARATOR_IDENTIFIER",
+    "SC_INTRINSIC_CALL_EXPRESSION"
 };
 
 const char* C_TYPE_CLASS_NAMES[30] = {
@@ -576,4 +577,11 @@ const char* X86_64_SSE_REGISTERS[] = {
     "xmm5",
     "xmm6",
     "xmm7"
+};
+
+const char* INTRINSIC_FUNCTION_NAMES[] = {
+    "_ecc_va_arg",
+    "_ecc_va_copy",
+    "_ecc_va_end",
+    "_ecc_va_start"
 };

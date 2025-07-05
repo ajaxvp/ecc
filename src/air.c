@@ -396,6 +396,15 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_PUSH:
             printer("push"); LPAREN OP(0) RPAREN SEMICOLON
             break;
+        case AIR_VA_ARG:
+            TYPE OP(0) EQUALS printer("va_arg"); LPAREN OP(1) RPAREN SEMICOLON
+            break;
+        case AIR_VA_START:
+            TYPE OP(0) EQUALS printer("va_start"); LPAREN OP(1) RPAREN SEMICOLON
+            break;
+        case AIR_VA_END:
+            TYPE OP(0) EQUALS printer("va_end"); LPAREN OP(1) RPAREN SEMICOLON
+            break;
     }
     #undef SPACE
     #undef EQUALS
@@ -654,6 +663,9 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_AND:
         case AIR_XOR:
         case AIR_OR:
+        case AIR_VA_ARG:
+        case AIR_VA_END:
+        case AIR_VA_START:
             return true;
     }
     return false;
@@ -723,6 +735,9 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_AND:
         case AIR_XOR:
         case AIR_OR:
+        case AIR_VA_ARG:
+        case AIR_VA_END:
+        case AIR_VA_START:
             return true;
     }
     return false;
@@ -2302,6 +2317,31 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+
+    syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
+    
+    COPY_CODE(arg_ap);
+
+    air_insn_t* insn = air_insn_init(AIR_VA_ARG, 2);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_register_operand_init(arg_ap->expr_reg);
+    ADD_CODE(insn);
+
+    FINALIZE_LINEARIZE;
+}
+
+static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (streq(syn->icallexpr_name, "_ecc_va_arg"))
+        linearize_va_arg_intrinsic_call_expression_after(trav, syn);
+    else
+        report_return;
+}
+
 // TODO: break and continue statements
 
 static void linearize_no_action_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2400,9 +2440,12 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_FOR_STATEMENT] = linearize_for_statement_after;
     trav->after[SC_WHILE_STATEMENT] = linearize_while_statement_after;
     trav->after[SC_DO_STATEMENT] = linearize_do_while_statement_after;
+    trav->after[SC_INTRINSIC_CALL_EXPRESSION] = linearize_intrinsic_call_expression_after;
 
     trav->after[SC_TRANSLATION_UNIT] = linearize_no_action_after;
     trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;
+    trav->after[SC_STORAGE_CLASS_SPECIFIER] = linearize_no_action_after;
+    trav->after[SC_TYPEDEF_NAME] = linearize_no_action_after;
     trav->after[SC_PARAMETER_DECLARATION] = linearize_no_action_after;
     trav->after[SC_STRUCT_UNION_SPECIFIER] = linearize_no_action_after;
     trav->after[SC_STRUCT_DECLARATOR] = linearize_no_action_after;

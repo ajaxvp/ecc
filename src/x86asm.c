@@ -1122,6 +1122,11 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         // phi instructions get deleted in an earlier stage
         case AIR_PHI:
 
+        // varargs instructions get deleted in an earlier stage
+        case AIR_VA_ARG:
+        case AIR_VA_START:
+        case AIR_VA_END:
+
             break;
     }
     return NULL;

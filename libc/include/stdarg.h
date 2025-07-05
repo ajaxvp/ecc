@@ -10,9 +10,9 @@ typedef struct _ecc_va_list
     uintptr_t stackpos;
 } va_list;
 
-#define va_arg(ap, type)
-#define va_copy(dest, src)
-#define va_end(ap)
-#define va_start(ap, parmN)
+#define va_arg(ap, type) _ecc_va_arg(ap, type)
+#define va_copy(dest, src) _ecc_va_copy(dest, src)
+#define va_end(ap) _ecc_va_end(ap)
+#define va_start(ap, parmN) _ecc_va_start(ap, parmN)
 
 #endif

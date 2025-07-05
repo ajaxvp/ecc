@@ -338,6 +338,18 @@ symbol_t* symbol_table_get_all(symbol_table_t* t, char* k)
     return symbol_table_get_internal(t, k, NULL);
 }
 
+symbol_t* symbol_table_get_by_classes(symbol_table_t* t, char* k, c_type_class_t ctc, c_namespace_class_t nsc)
+{
+    symbol_t* sylist = symbol_table_get_all(t, k);
+    for (; sylist; sylist = sylist->next)
+    {
+        if (!sylist->type || sylist->type->class != ctc) continue;
+        if (!sylist->ns || sylist->ns->class != nsc) continue;
+        return sylist;
+    }
+    return NULL;
+}
+
 // uses an exact identifier object as opposed to just a name
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id)
 {

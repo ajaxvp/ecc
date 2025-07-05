@@ -1218,6 +1218,15 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
             break;
         }
 
+        case SC_INTRINSIC_CALL_EXPRESSION:
+        {
+            ps(sty("intrinsic call expression") "\n");
+            pf("intrinsic name: %s\n", s->icallexpr_name);
+            pf("arguments:\n");
+            print_vector_indented(s->icallexpr_args, next_indent, printer);
+            break;
+        }
+
         case SC_STRING_LITERAL:
         {
             if (s->strl_reg)
@@ -1596,6 +1605,12 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         {
             free_syntax(syn->fcallexpr_expression, tlu);
             deep_free_syntax_vector(syn->fcallexpr_args, s);
+            break;
+        }
+        case SC_INTRINSIC_CALL_EXPRESSION:
+        {
+            free(syn->icallexpr_name);
+            deep_free_syntax_vector(syn->icallexpr_args, s);
             break;
         }
         case SC_SUBSCRIPT_EXPRESSION:

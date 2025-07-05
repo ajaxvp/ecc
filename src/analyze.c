@@ -436,6 +436,49 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
     }
 }
 
+void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->icallexpr_args->size != 2)
+    {
+        ADD_ERROR(syn, "va_arg invocation requires two arguments: a va_list and a type for the argument returned");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    if (!sy)
+    {
+        ADD_ERROR(syn, "cannot find va_list declaration for va_arg invocation");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
+    syntax_component_t* arg_type = vector_get(syn->icallexpr_args, 1);
+    if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
+    {
+        ADD_ERROR(syn, "first parameter of va_arg invocation must be a va_list");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    if (arg_type->type != SC_TYPE_NAME)
+    {
+        ADD_ERROR(syn, "second parameter of va_arg invocation must be a type name");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syn->ctype = create_type(arg_type, arg_type->tn_declarator);
+}
+
+void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (streq(syn->icallexpr_name, "_ecc_va_arg"))
+        analyze_va_arg_intrinsic_call_expression_after(trav, syn);
+    else
+    {
+        ADD_ERROR(syn, "unsupported intrinsic function '%s' invoked", syn->icallexpr_name);
+        syn->ctype = make_basic_type(CTC_ERROR);
+    }
+}
+
 void analyze_dereference_member_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     bool pass = true;
@@ -1933,6 +1976,7 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_MEMBER_EXPRESSION] = analyze_member_expression_after;
     trav->after[SC_DEREFERENCE_MEMBER_EXPRESSION] = analyze_dereference_member_expression_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = analyze_function_call_expression_after;
+    trav->after[SC_INTRINSIC_CALL_EXPRESSION] = analyze_intrinsic_call_expression_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = analyze_subscript_expression_after;
     trav->after[SC_IDENTIFIER] = analyze_identifier_after;
     trav->after[SC_TYPEDEF_NAME] = analyze_identifier_after;

@@ -1650,6 +1650,42 @@ syntax_component_t* parse_partial_function_call_expression(token_t** tokens, par
 }
 
 // does not parse the postfix expression
+syntax_component_t* parse_partial_intrinsic_call_expression(token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent)
+{
+    init_parse;
+    if (!is_punctuator(token, P_LEFT_PARENTHESIS))
+    {
+        fail_parse(token, "expected left parenthesis for function call expression");
+        return NULL;
+    }
+    advance_token;
+    init_syn(SC_INTRINSIC_CALL_EXPRESSION);
+    syn->icallexpr_args = vector_init();
+    for (;;)
+    {
+        parse_status_code_t arg_stat = UNKNOWN_STATUS;
+        syntax_component_t* arg = parse_assignment_expression(&token, OPTIONAL, &arg_stat, tlu, next_depth, syn);
+        if (arg_stat == NOT_FOUND)
+            arg = parse_type_name(&token, OPTIONAL, &arg_stat, tlu, next_depth, syn);
+        if (arg_stat == NOT_FOUND)
+            break;
+        vector_add(syn->icallexpr_args, arg);
+        if (!is_punctuator(token, P_COMMA))
+            break;
+        advance_token;
+    }
+    if (!is_punctuator(token, P_RIGHT_PARENTHESIS))
+    {
+        fail_parse(token, "expected right parenthesis for function call expression");
+        free_syntax(syn, tlu);
+        return NULL;
+    }
+    advance_token;
+    update_status(FOUND);
+    return syn;
+}
+
+// does not parse the postfix expression
 syntax_component_t* parse_partial_member_expression(token_t** tokens, parse_request_code_t req, parse_status_code_t* stat, syntax_component_t* tlu, int depth, syntax_component_t* parent, syntax_component_type_t type, unsigned oid)
 {
     init_parse;
@@ -1748,6 +1784,18 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
             subsexpr->subsexpr_expression = left;
             left = subsexpr;
             continue;
+        }
+        if (left->type == SC_PRIMARY_EXPRESSION_IDENTIFIER && contains((void**) INTRINSIC_FUNCTION_NAMES, IF_NO_ELEMENTS, left->id, (comparator_t) strcmp) != -1)
+        {
+            parse_status_code_t icall_stat = UNKNOWN_STATUS;
+            syntax_component_t* icall = parse_partial_intrinsic_call_expression(&token, OPTIONAL, &icall_stat, tlu, next_depth, parent);
+            if (icall_stat == FOUND)
+            {
+                icall->icallexpr_name = strdup(left->id);
+                free_syntax(left, tlu);
+                left = icall;
+                continue;
+            }
         }
         parse_status_code_t fcall_stat = UNKNOWN_STATUS;
         syntax_component_t* fcall = parse_partial_function_call_expression(&token, OPTIONAL, &fcall_stat, tlu, next_depth, parent);

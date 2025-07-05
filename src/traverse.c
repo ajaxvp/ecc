@@ -402,6 +402,13 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
             break;
         }
 
+        // SC_INTRINSIC_CALL_EXPRESSION - fcallexpr
+        case SC_INTRINSIC_CALL_EXPRESSION:
+        {
+            traverse_vector(trav, syn->icallexpr_args);
+            break;
+        }
+
         // SC_SUBSCRIPT_EXPRESSION - subsexpr
         case SC_SUBSCRIPT_EXPRESSION:
         {
