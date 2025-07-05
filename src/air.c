@@ -96,6 +96,11 @@ void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const
         switch (air->locale)
         {
             case LOC_X86_64:
+                if (type_is_real_floating(ict))
+                {
+                    printer("%%%s", X86_64_SSE_REGISTERS[reg - X86R_XMM0]);
+                    break;
+                }
                 long long size = type_size(ict);
                 const char** list = NULL;
                 if (size == 1)
@@ -106,7 +111,7 @@ void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const
                     list = X86_64_DOUBLE_REGISTERS;
                 else
                     list = X86_64_QUAD_REGISTERS;
-                printer("%%%s", list[reg - 1]);
+                printer("%%%s", list[reg - X86R_RAX]);
                 break;
             default:
                 printer("r%llu", reg);
@@ -932,13 +937,72 @@ static void linearize_character_constant_after(syntax_traverser_t* trav, syntax_
     FINALIZE_LINEARIZE;
 }
 
+/*
+
+    syntax_component_t* parent = syn->parent;
+    if (parent && parent->type == SC_INITIALIZER_LIST)
+        parent = parent->parent;
+    if (parent->type == SC_INIT_DECLARATOR)
+    {
+        syntax_component_t* id = syntax_get_declarator_identifier(parent->ideclr_declarator);
+        symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+        if (!sy) report_return;
+        if (sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from))
+            return;
+    }
+    air_t* air = AIRINIZING_TRAVERSER->air;
+    air_data_t* data = calloc(1, sizeof *data);
+    data->readonly = true;
+    data->sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+    if (syn->strl_reg)
+    {
+        data->data = calloc(syn->strl_length->intc + 1, sizeof(unsigned char));
+        memcpy(data->data, syn->strl_reg, syn->strl_length->intc + 1);
+    }
+    else
+    {
+        data->data = calloc(syn->strl_length->intc + 1, sizeof(int));
+        memcpy(data->data, syn->strl_wide, sizeof(int) * (syn->strl_length->intc + 1));
+    }
+    vector_add(air->data, data);
+    SETUP_LINEARIZE;
+    air_insn_t* insn = air_insn_init(AIR_LOAD_ADDR, 2);
+    insn->ct = make_reference_type(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_symbol_operand_init(data->sy);
+    ADD_CODE(insn);
+    FINALIZE_LINEARIZE;
+*/
+
 static void linearize_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    air_t* air = AIRINIZING_TRAVERSER->air;
+    air_data_t* data = calloc(1, sizeof *data);
+    data->readonly = true;
+    data->sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+    switch (syn->ctype->class)
+    {
+        case CTC_FLOAT:
+            data->data = malloc(FLOAT_WIDTH);
+            *((float*) (data->data)) = (float) syn->floc;
+            break;
+        case CTC_DOUBLE:
+            data->data = malloc(DOUBLE_WIDTH);
+            *((double*) (data->data)) = (double) syn->floc;
+            break;
+        case CTC_LONG_DOUBLE:
+            data->data = malloc(LONG_DOUBLE_WIDTH);
+            *((long double*) (data->data)) = (long double) syn->floc;
+            break;
+        default: report_return;
+    }
+    vector_add(air->data, data);
+
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
-    insn->ops[1] = air_insn_floating_constant_operand_init(syn->floc);
+    insn->ops[1] = air_insn_symbol_operand_init(data->sy);
     ADD_CODE(insn);
     FINALIZE_LINEARIZE;
 }

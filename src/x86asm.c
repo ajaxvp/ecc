@@ -8,12 +8,14 @@
 
 const char* register_name(regid_t reg, x86_insn_size_t size)
 {
+    if (reg >= X86R_XMM0)
+        return X86_64_SSE_REGISTERS[reg - X86R_XMM0];
     switch (size)
     {
-        case X86SZ_BYTE: return X86_64_BYTE_REGISTERS[reg - 1];
-        case X86SZ_WORD: return X86_64_WORD_REGISTERS[reg - 1];
-        case X86SZ_DWORD: return X86_64_DOUBLE_REGISTERS[reg - 1];
-        case X86SZ_QWORD: return X86_64_QUAD_REGISTERS[reg - 1];
+        case X86SZ_BYTE: return X86_64_BYTE_REGISTERS[reg - X86R_RAX];
+        case X86SZ_WORD: return X86_64_WORD_REGISTERS[reg - X86R_RAX];
+        case X86SZ_DWORD: return X86_64_DOUBLE_REGISTERS[reg - X86R_RAX];
+        case X86SZ_QWORD: return X86_64_QUAD_REGISTERS[reg - X86R_RAX];
         default: return "(invalid register)";
     }
 }
@@ -176,6 +178,64 @@ char x86_operand_size_character(x86_insn_size_t size)
     }
 }
 
+bool x86_insn_has_sse_operands(x86_insn_t* insn)
+{
+    if (!insn) return false;
+    switch (insn->type)
+    {
+        case X86I_UNKNOWN:
+        case X86I_NO_ELEMENTS:
+        case X86I_LABEL:
+        case X86I_LEA:
+        case X86I_CALL:
+        case X86I_PUSH:
+        case X86I_POP:
+        case X86I_LEAVE:
+        case X86I_RET:
+        case X86I_JMP:
+        case X86I_JE:
+        case X86I_JNE:
+        case X86I_CMP:
+        case X86I_SETE:
+        case X86I_SETNE:
+        case X86I_SETLE:
+        case X86I_SETL:
+        case X86I_SETGE:
+        case X86I_SETG:
+        case X86I_AND:
+        case X86I_OR:
+        case X86I_XOR:
+        case X86I_NOT:
+        case X86I_NOP:
+        case X86I_NEG:
+        case X86I_MOV:
+        case X86I_MOVZX:
+        case X86I_MOVSX:
+        case X86I_ADD:
+        case X86I_SUB:
+        case X86I_MUL:
+        case X86I_IMUL:
+        case X86I_DIV:
+        case X86I_IDIV:
+        case X86I_SHL:
+        case X86I_SHR:
+        case X86I_SAR:
+            return false;
+        case X86I_MOVSS:
+        case X86I_MOVSD:
+        case X86I_ADDSS:
+        case X86I_ADDSD:
+        case X86I_SUBSS:
+        case X86I_SUBSD:
+        case X86I_MULSS:
+        case X86I_MULSD:
+        case X86I_DIVSS:
+        case X86I_DIVSD:
+            return true;
+    }
+    return false;
+}
+
 x86_insn_size_t c_type_to_x86_operand_size(c_type_t* ct)
 {
     long long size = type_size(ct);
@@ -253,8 +313,13 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 {
     if (!insn) return;
     #define INDENT "    "
-    #define USUAL_1OP(name) fprintf(file, INDENT name "%c ", x86_operand_size_character(insn->size)); goto op1;
-    #define USUAL_2OP(name) fprintf(file, INDENT name "%c ", x86_operand_size_character(insn->size)); goto op2;
+    char suffix[32];
+    if (x86_insn_has_sse_operands(insn))
+        suffix[0] = '\0';
+    else
+        snprintf(suffix, 32, "%c", x86_operand_size_character(insn->size));
+    #define USUAL_1OP(name) fprintf(file, INDENT name "%s ", suffix); goto op1;
+    #define USUAL_2OP(name) fprintf(file, INDENT name "%s ", suffix); goto op2;
     switch (insn->type)
     {
         case X86I_LABEL:
@@ -327,6 +392,8 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_NEG: USUAL_1OP("neg")
 
         case X86I_MOV: USUAL_2OP("mov")
+        case X86I_MOVSS: USUAL_2OP("movss")
+        case X86I_MOVSD: USUAL_2OP("movsd")
         case X86I_MOVSX: USUAL_2OP("movsx")
         case X86I_MOVZX: USUAL_2OP("movzx")
         case X86I_LEA: USUAL_2OP("lea")
@@ -566,7 +633,16 @@ x86_insn_t* make_x86_insn_clear_register(regid_t reg)
 
 x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
-    x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
+    x86_insn_type_t type = X86I_UNKNOWN;
+    if (type_is_integer(ainsn->ct))
+        type = X86I_MOV;
+    else if (ainsn->ct->class == CTC_FLOAT)
+        type = X86I_MOVSS;
+    else if (ainsn->ct->class == CTC_DOUBLE)
+        type = X86I_MOVSD;
+    else
+        report_return_value(NULL);
+    x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
@@ -577,15 +653,6 @@ x86_insn_t* x86_generate_load_addr(air_insn_t* ainsn, x86_asm_routine_t* routine
 {
     x86_insn_t* insn = make_basic_x86_insn(X86I_LEA);
     insn->size = X86SZ_QWORD;
-    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
-    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
-    return insn;
-}
-
-x86_insn_t* x86_generate_assign(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
-{
-    x86_insn_t* insn = make_basic_x86_insn(X86I_MOV);
-    insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     return insn;
@@ -967,9 +1034,11 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
     if (!ainsn) return NULL;
     switch (ainsn->type)
     {
-        case AIR_LOAD: return x86_generate_load(ainsn, routine, file);
+        case AIR_LOAD:
+        case AIR_ASSIGN:
+            return x86_generate_load(ainsn, routine, file);
+        
         case AIR_LOAD_ADDR: return x86_generate_load_addr(ainsn, routine, file);
-        case AIR_ASSIGN: return x86_generate_assign(ainsn, routine, file);
         case AIR_FUNC_CALL: return x86_generate_func_call(ainsn, routine, file);
         case AIR_NOP: return x86_generate_nop(ainsn, routine, file);
         case AIR_DECLARE: return x86_generate_declare(ainsn, routine, file);

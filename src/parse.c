@@ -2244,20 +2244,36 @@ syntax_component_t* parse_expression(token_t** tokens, parse_request_code_t req,
     init_parse;
     init_syn(SC_EXPRESSION);
     syn->expr_expressions = vector_init();
-    for (;;)
+    parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
+    syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth, syn);
+    if (aexpr_stat == ABORT)
     {
-        parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
-        syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth, syn);
-        if (aexpr_stat == ABORT)
-        {
-            fail_status;
-            free_syntax(syn, tlu);
-            return NULL;
-        }
+        fail_status;
+        free_syntax(syn, tlu);
+        return NULL;
+    }
+    if (is_punctuator(token, P_COMMA))
+    {
         vector_add(syn->expr_expressions, aexpr);
-        if (!is_punctuator(token, P_COMMA))
-            break;
-        advance_token;
+        while (is_punctuator(token, P_COMMA))
+        {
+            advance_token;
+            parse_status_code_t aexpr_stat = UNKNOWN_STATUS;
+            syntax_component_t* aexpr = parse_assignment_expression(&token, EXPECTED, &aexpr_stat, tlu, next_depth, syn);
+            if (aexpr_stat == ABORT)
+            {
+                fail_status;
+                free_syntax(syn, tlu);
+                return NULL;
+            }
+            vector_add(syn->expr_expressions, aexpr);
+        }
+    }
+    else
+    {
+        link_to_specific_parent(aexpr, parent);
+        free_syntax(syn, tlu);
+        syn = aexpr;
     }
     update_status(FOUND);
     return syn;

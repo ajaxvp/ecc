@@ -465,6 +465,14 @@ bool type_is_character(c_type_t* ct)
     return type_is_character_type(ct->class);
 }
 
+bool type_is_vla(c_type_t* ct)
+{
+    if (!ct) return false;
+    if (ct->class != CTC_ARRAY) return false;
+    if (ct->array.unspecified_size) return true;
+    return !can_evaluate(ct->array.length_expression, CE_INTEGER);
+}
+
 c_type_t* integer_promotions(c_type_t* ct)
 {
     if (!ct) return NULL;

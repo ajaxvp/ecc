@@ -566,3 +566,14 @@ const char* X86_64_BYTE_REGISTERS[] = {
     "r14b", 
     "r15b"
 };
+
+const char* X86_64_SSE_REGISTERS[] = {
+    "xmm0",
+    "xmm1",
+    "xmm2",
+    "xmm3",
+    "xmm4",
+    "xmm5",
+    "xmm6",
+    "xmm7"
+};

@@ -39,6 +39,10 @@
 #define UNSIGNED_INT_WIDTH 4
 #define UNSIGNED_LONG_LONG_INT_WIDTH 8
 
+#define FLOAT_WIDTH 4
+#define DOUBLE_WIDTH 8
+#define LONG_DOUBLE_WIDTH 12
+
 #define BOOL_MAX (unsigned char) 0xff
 #define CHAR_MAX (signed char) 0x7f
 #define SIGNED_CHAR_MAX (signed char) 0x7f
@@ -1134,7 +1138,11 @@ typedef struct syntax_component_t
         };
 
         // SC_FLOATING_CONSTANT - floc
-        long double floc;
+        struct
+        {
+            long double floc;
+            char* floc_id;
+        };
 
         // SC_INTEGER_CONSTANT - intc
         unsigned long long intc;
@@ -1587,6 +1595,7 @@ extern const char* X86_64_BYTE_REGISTERS[];
 extern const char* X86_64_WORD_REGISTERS[];
 extern const char* X86_64_DOUBLE_REGISTERS[];
 extern const char* X86_64_QUAD_REGISTERS[];
+extern const char* X86_64_SSE_REGISTERS[];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
@@ -1635,7 +1644,7 @@ symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
 symbol_t* symbol_table_get_syn_id(symbol_table_t* t, syntax_component_t* id);
 symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns);
-symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, size_t* count, bool* first);
+symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, vector_t** symbols, bool* first);
 symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
@@ -1721,6 +1730,7 @@ bool type_is_sua_type(c_type_class_t class);
 bool type_is_sua(c_type_t* ct);
 bool type_is_character_type(c_type_class_t class);
 bool type_is_character(c_type_t* ct);
+bool type_is_vla(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);
 c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr);
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));

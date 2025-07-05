@@ -96,7 +96,8 @@ bool scope_is_file(syntax_component_t* scope)
 
 storage_duration_t symbol_get_storage_duration(symbol_t* sy)
 {
-    if (sy->declarer->type == SC_STRING_LITERAL)
+    if (sy->declarer->type == SC_STRING_LITERAL ||
+        sy->declarer->type == SC_FLOATING_CONSTANT)
         return SD_STATIC;
     syntax_component_t* scope = symbol_get_scope(sy);
     if (!scope) return SD_UNKNOWN;
@@ -152,6 +153,8 @@ static char* syntax_get_identifier_name(syntax_component_t* syn)
             return syn->cl_id;
         case SC_STRING_LITERAL:
             return syn->strl_id;
+        case SC_FLOATING_CONSTANT:
+            return syn->floc_id;
         default:
             return NULL;
     }
@@ -372,23 +375,23 @@ symbol_t* symbol_table_lookup(symbol_table_t* t, syntax_component_t* id, c_names
 
 // 3 return values here:
 //  - actual return value: the symbol representing the identifier given as an arg, if any (must be declaring)
-//  - count: the number of duplicate entries in the symbol table (i.e., same namespace and scope)
+//  - symbols: duplicate entries in the symbol table (i.e., same namespace and scope)
 //  - first: whether the symbol representing a declaring id was the first duplicate
-symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, size_t* count, bool* first)
+symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namespace_t* ns, vector_t** symbols, bool* first)
 {
+    if (symbols) *symbols = vector_init();
     if (first) *first = false;
     symbol_t* sylist = symbol_table_get_all(t, syntax_get_identifier_name(id));
-    if (count) *count = 0;
     symbol_t* found = NULL;
     int distance = INT_MAX;
     for (; sylist; sylist = sylist->next)
     {
         if (sylist->declarer == id)
         {
-            if (count && first && *count == 0)
+            if (symbols && first && (*symbols)->size == 0)
                 *first = true;
-            if (count)
-                ++(*count);
+            if (symbols)
+                vector_add(*symbols, sylist);
             found = sylist;
             continue;
         }
@@ -403,7 +406,7 @@ symbol_t* symbol_table_count(symbol_table_t* t, syntax_component_t* id, c_namesp
                 distance = d;
                 found = sylist;
             }
-            if (count && slscope == idscope) ++(*count);
+            if (symbols && slscope == idscope) vector_add(*symbols, sylist);
         }
     }
     return found;

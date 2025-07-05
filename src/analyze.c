@@ -13,6 +13,7 @@ typedef struct analysis_syntax_traverser
     analysis_error_t* errors;
     unsigned long long next_compound_literal;
     unsigned long long next_string_literal;
+    unsigned long long next_floating_constant;
     unsigned long long next_label_uid;
 } analysis_syntax_traverser_t;
 
@@ -120,22 +121,21 @@ static bool syntax_is_null_ptr_constant(syntax_component_t* expr, c_type_class_t
 
 /*
 
-DEFINITIONS:
-
-A **definition** of an identifier is a declaration for that identifier that:
-    — for an object, causes storage to be reserved for that object;
-    — for a function, includes the function body;
-    — for an enumeration constant or typedef name, is the (only) declaration of the identifier
-
-*/
-
-/*
-
 UNRESOLVED ISO SPECIFICATION REQUIREMENTS
 
-6.5.2.5 (1-8)
-6.5.3.2 (1)
-6.5.3.4 (1)
+CONTRAINTS:
+
+EXPRESSIONS
+6.5.2.5 (2) - requires initializer offset analysis
+6.5.2.5 (3) - part of finding out the contents of a static storage comp-literal
+6.5.4 (3) - probably doesn't need to be checked *on* cast expressions?
+6.6 (3)
+6.6 (4)
+
+SEMANTICS:
+6.5.2.5 (5) - requires analysis of initializers to complete types
+
+UNCATEGORIZED
 6.5.15 (3)
 6.5.15 (6)
 6.5.16.1 (3): this one is interesting, idk if there are things to resolve for it
@@ -153,64 +153,81 @@ UNRESOLVED ISO SPECIFICATION REQUIREMENTS
 
 RESOLVED ISO SPECIFICATION REQUIREMENTS
 
-6.3.2 (4)
-6.5.1 (2)
+CONSTRAINTS:
+
+EXPRESSIONS
+6.5.2.1 (1)
 6.5.2.2 (1)
 6.5.2.2 (2)
-6.5.2.2 (4)
-6.5.2.2 (5)
 6.5.2.3 (1)
 6.5.2.3 (2)
+6.5.2.4 (1)
+6.5.2.5 (1)
+6.5.3.1 (1)
+6.5.3.2 (1)
+6.5.3.2 (2)
+6.5.3.3 (1)
+6.5.3.4 (1)
+6.5.4 (2)
+6.5.5 (2)
+6.5.6 (2)
+6.5.6 (3)
+6.5.7 (2)
+6.5.8 (2)
+6.5.9 (2)
+6.5.10 (2)
+6.5.11 (2)
+6.5.12 (2)
+6.5.13 (2)
+6.5.14 (2)
+6.5.15 (2)
+6.5.15 (3)
+6.5.16 (2)
+6.5.16.1 (1)
+6.5.16.2 (1)
+6.5.16.2 (2)
+
+DECLARATIONS
+6.7 (2)
+6.7 (3)
+6.7 (4)
+6.7.1 (2)
+6.7.2 (2)
+6.7.2 (3)
+
+SEMANTICS:
+
+UNCATEGORIZED
+6.3.2 (4)
+6.5.1 (2)
+6.5.2.2 (4)
+6.5.2.2 (5)
 6.5.2.3 (3): check up on after lvalue changes
 6.5.2.3 (4): check up on after lvalue changes
-6.5.2.4 (1): check up on after lvalue changes
 6.5.2.4 (2)
-6.5.3.1 (1): check up on after lvalue changes
-6.5.3.2 (2)
 6.5.3.2 (3)
 6.5.3.2 (4)
-6.5.3.3 (1)
 6.5.3.3 (2)
 6.5.3.3 (3)
 6.5.3.3 (4)
 6.5.3.3 (5)
 6.5.3.4 (4)
-6.5.4 (2)
 6.5.4 (4)
-6.5.5 (2)
 6.5.5 (3)
-6.5.6 (2)
-6.5.6 (3)
 6.5.6 (4)
 6.5.6 (8)
 6.5.6 (9)
-6.5.7 (2)
 6.5.7 (3)
-6.5.8 (2)
 6.5.8 (6)
-6.5.9 (2)
 6.5.9 (3)
-6.5.10 (2)
 6.5.10 (3)
-6.5.11 (2)
 6.5.11 (3)
-6.5.12 (2)
 6.5.12 (3)
-6.5.13 (2)
 6.5.13 (3)
-6.5.14 (2)
 6.5.14 (3)
-6.5.15 (2)
 6.5.15 (5)
-6.5.16 (2)
 6.5.16 (3)
-6.5.16.1 (1)
-6.5.16.2 (1)
-6.5.16.2 (2)
 6.5.17 (2)
-6.7 (2)
-6.7.1 (2)
-6.7.2 (2)
 6.8.1 (2)
 6.8.1 (3)
 6.9 (2)
@@ -314,7 +331,7 @@ static bool can_assign(c_type_t* tlhs, c_type_t* trhs, syntax_component_t* rhs)
     // ISO: 6.5.16.1 (1)
     // condition 2
     else if ((tlhs->class == CTC_STRUCTURE || tlhs->class == CTC_UNION) &&
-        type_is_compatible(tlhs, trhs))
+        type_is_compatible_ignore_qualifiers(tlhs, trhs))
         pass = true;
     // ISO: 6.5.16.1 (1)
     // condition 3
@@ -364,7 +381,7 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
     {
         if (called_type->derived_from->function.variadic && syn->fcallexpr_args->size < called_type->derived_from->function.param_types->size)
         {
-            // ISO: ?
+            // ISO: vibes
             ADD_ERROR(syn, "function to be called expected %u or more argument(s), got %u",
                 called_type->derived_from->function.param_types->size,
                 syn->fcallexpr_args->size);
@@ -509,7 +526,21 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
 
 void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    // TODO
+    bool pass = true;
+    c_type_t* ct = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
+    if (!type_is_object_type(ct) && (ct->class != CTC_ARRAY || ct->array.length_expression || type_is_vla(ct)))
+    {
+        // ISO: 6.5.2.5 (1)
+        ADD_ERROR(syn, "compound literals may not have a variable length array type");
+        pass = false;
+    }
+    if (pass)
+        syn->ctype = ct;
+    else
+    {
+        syn->ctype = make_basic_type(CTC_ERROR);
+        type_delete(ct);
+    }
 }
 
 void analyze_inc_dec_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -552,8 +583,45 @@ void analyze_dereference_expression_after(syntax_traverser_t* trav, syntax_compo
         syn->ctype = make_basic_type(CTC_ERROR);
 }
 
+typedef struct roa_traverser
+{
+    syntax_traverser_t base;
+    bool found;
+} roa_traverser_t;
+
+void roa_primary_expression_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    c_namespace_t* ns = syntax_get_namespace(syn);
+    if (!ns) report_return;
+    symbol_t* sy = symbol_table_lookup(syntax_get_translation_unit(syn)->tlu_st, syn, ns);
+    namespace_delete(ns);
+    if (!sy) report_return;
+    syntax_component_t* decl = syntax_get_declarator_declaration(sy->declarer);
+    if (!decl) report_return;
+    if (!syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_REGISTER))
+        return;
+    roa_traverser_t* roat = (roa_traverser_t*) trav;
+    if (syntax_is_lvalue(syn) && syntax_is_in_lvalue_context(syn))
+        roat->found = true;
+}
+
+bool is_register_object_addr_requested(syntax_component_t* expr)
+{
+    syntax_traverser_t* trav = traverse_init(expr, sizeof(roa_traverser_t));
+
+    trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = roa_primary_expression_identifier_after;
+
+    traverse(trav);
+    bool found = ((roa_traverser_t*) trav)->found;
+    traverse_delete(trav);
+    return found;
+}
+
 void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    char context[MAX_ERROR_LENGTH];
+    context[0] = '\0';
+
     bool pass = false;
     c_type_t* otype = syn->uexpr_operand->ctype;
     if (otype->class == CTC_FUNCTION)
@@ -565,11 +633,39 @@ void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_compone
     else if (syn->uexpr_operand->type == SC_DEREFERENCE_EXPRESSION)
         // ISO: 6.5.3.2 (1)
         pass = true;
-    // TODO: 6.5.3.2 (1) requires lvalues to be handled here as well
     else if (syntax_is_lvalue(syn->uexpr_operand))
-        // ISO: 6.5.3.2 (1)
-        pass = true;
-    
+    {
+        if (syn->uexpr_operand->type == SC_MEMBER_EXPRESSION || syn->uexpr_operand->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
+        {
+            c_namespace_t* ns = syntax_get_namespace(syn->uexpr_operand->memexpr_id);
+            symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn->uexpr_operand->memexpr_id, ns);
+            namespace_delete(ns);
+            if (!sy) report_return;
+            syntax_component_t* sdeclr = syntax_get_full_declarator(sy->declarer);
+            if (sdeclr->type != SC_STRUCT_DECLARATOR) report_return;
+            if (!sdeclr->sdeclr_bits_expression)
+                pass = true;
+            else
+            {
+                // ISO: 6.5.3.2 (1)
+                snprintf(context, MAX_ERROR_LENGTH, "cannot request address of a bitfield");
+                pass = false;
+                goto finish;
+            }
+        }
+        
+        if (is_register_object_addr_requested(syn->uexpr_operand))
+        {
+            // ISO: 6.5.3.2 (1)
+            snprintf(context, MAX_ERROR_LENGTH, "cannot request address of an object declared with the 'register' storage class specifier");
+            pass = false;
+            goto finish;
+        }
+        else
+            pass = true;
+    }
+
+finish:
     if (pass)
     {
         c_type_t* ct = calloc(1, sizeof *ct);
@@ -580,7 +676,10 @@ void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_compone
     }
     else
     {
-        ADD_ERROR(syn, "invalid operand to address-of operator");
+        if (context[0])
+            ADD_ERROR(syn, "invalid operand to address-of operator: %s", context);
+        else
+            ADD_ERROR(syn, "invalid operand to address-of operator");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -626,7 +725,7 @@ void analyze_not_expression_after(syntax_traverser_t* trav, syntax_component_t* 
     if (!type_is_scalar(otype))
     {
         // ISO: 6.5.3.3 (1)
-        ADD_ERROR(syn, "NOT operand must be of scalar type");
+        ADD_ERROR(syn, "not ('!') operand must be of scalar type");
         pass = false;
     }
     if (pass)
@@ -656,7 +755,22 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
     }
     if (syn->type == SC_SIZEOF_TYPE_EXPRESSION)
         type_delete(otype);
-    // TODO: 6.5.3.4 (1) specifies sizeof cannot take a bitfield member
+    if (syn->uexpr_operand->type == SC_MEMBER_EXPRESSION ||
+        syn->uexpr_operand->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
+    {
+        c_namespace_t* ns = syntax_get_namespace(syn->uexpr_operand->memexpr_id);
+        symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn->uexpr_operand->memexpr_id, ns);
+        namespace_delete(ns);
+        if (!sy) report_return;
+        syntax_component_t* sdeclr = syntax_get_full_declarator(sy->declarer);
+        if (sdeclr->type != SC_STRUCT_DECLARATOR) report_return;
+        if (sdeclr->sdeclr_bits_expression)
+        {
+            // ISO: 6.5.3.4 (1)
+            ADD_ERROR(syn, "sizeof operand cannot be a bitfield member");
+            pass = false;
+        }
+    }
     if (pass)
         // ISO: 6.3.5.4 (4)
         syn->ctype = make_basic_type(C_TYPE_SIZE_T);
@@ -668,12 +782,6 @@ void analyze_cast_expression_after(syntax_traverser_t* trav, syntax_component_t*
 {
     bool pass = true;
     c_type_t* ct = create_type(syn->caexpr_type_name, syn->caexpr_type_name->tn_declarator);
-    if (ct->class != CTC_VOID && !type_is_scalar(ct))
-    {
-        // ISO: 6.5.4 (2)
-        ADD_ERROR(syn, "operand of cast expression must be of scalar type");
-        pass = false;
-    }
     if (ct->class != CTC_VOID && !type_is_scalar(ct))
     {
         // ISO: 6.5.4 (2)
@@ -746,10 +854,10 @@ void analyze_addition_expression_after(syntax_traverser_t* trav, syntax_componen
     if (type_is_arithmetic(tlhs) && type_is_arithmetic(trhs))
         // ISO: 6.5.6 (2), 6.5.6 (4)
         ct = usual_arithmetic_conversions_result_type(tlhs, trhs);
-    else if (type_is_integer(tlhs) && trhs->class == CTC_POINTER)
+    else if (type_is_integer(tlhs) && trhs->class == CTC_POINTER && type_is_object_type(trhs->derived_from))
         // ISO: 6.5.6 (2), 6.5.6 (8)
         ct = type_copy(trhs);
-    else if (tlhs->class == CTC_POINTER && type_is_integer(trhs))
+    else if (tlhs->class == CTC_POINTER && type_is_object_type(tlhs->derived_from) && type_is_integer(trhs))
         // ISO: 6.5.6 (2), 6.5.6 (8)
         ct = type_copy(tlhs);
     if (!ct)
@@ -768,11 +876,12 @@ void analyze_subtraction_expression_after(syntax_traverser_t* trav, syntax_compo
     if (type_is_arithmetic(tlhs) && type_is_arithmetic(trhs))
         // ISO: 6.5.6 (3), 6.5.6 (4)
         ct = usual_arithmetic_conversions_result_type(tlhs, trhs);
-    else if (type_is_integer(tlhs) && trhs->class == CTC_POINTER)
+    else if (tlhs->class == CTC_POINTER && type_is_object_type(tlhs->derived_from) && type_is_integer(trhs))
         // ISO: 6.5.6 (3), 6.5.6 (8)
         ct = type_copy(trhs);
     else if (tlhs->class == CTC_POINTER && trhs->class == CTC_POINTER &&
-        type_is_compatible_ignore_qualifiers(tlhs, trhs))
+        type_is_object_type(tlhs->derived_from) && type_is_object_type(trhs->derived_from) &&
+        type_is_compatible_ignore_qualifiers(tlhs->derived_from, trhs->derived_from))
         // ISO: 6.5.6 (3), 6.5.6 (9)
         ct = make_basic_type(C_TYPE_PTRSIZE_T);
     if (!ct)
@@ -847,11 +956,11 @@ void analyze_equality_expression_after(syntax_traverser_t* trav, syntax_componen
         type_is_compatible_ignore_qualifiers(tlhs->derived_from, trhs->derived_from))
         // ISO: 6.5.9 (2)
         pass = true;
-    else if (tlhs->class == CTC_POINTER && (type_is_object_type(tlhs) || !type_is_complete(tlhs)) &&
+    else if (tlhs->class == CTC_POINTER && (type_is_object_type(tlhs->derived_from) || !type_is_complete(tlhs->derived_from)) &&
         trhs->class == CTC_POINTER && trhs->derived_from->class == CTC_VOID)
         // ISO: 6.5.9 (2)
         pass = true;
-    else if (trhs->class == CTC_POINTER && (type_is_object_type(trhs) || !type_is_complete(trhs)) &&
+    else if (trhs->class == CTC_POINTER && (type_is_object_type(trhs->derived_from) || !type_is_complete(trhs->derived_from)) &&
         tlhs->class == CTC_POINTER && tlhs->derived_from->class == CTC_VOID)
         // ISO: 6.5.9 (2)
         pass = true;
@@ -971,6 +1080,18 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
     {
 
     }
+    else if (op2_type->class == CTC_POINTER &&
+        (type_is_object_type(op2_type->derived_from) || !type_is_complete(op2_type->derived_from)) &&
+        op3_type->class == CTC_VOID)
+    {
+        
+    }
+    else if (op3_type->class == CTC_POINTER &&
+        (type_is_object_type(op3_type->derived_from) || !type_is_complete(op3_type->derived_from)) &&
+        op2_type->class == CTC_VOID)
+    {
+        
+    }
         
     // TODO: ISO: 6.5.15 (6)
 
@@ -1007,7 +1128,6 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
         }
         case SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION:
         case SC_DIVISION_ASSIGNMENT_EXPRESSION:
-        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
         {
             // ISO: 6.5.16.2 (2), 6.5.5 (2)
             if (type_is_arithmetic(tlhs) && type_is_arithmetic(trhs))
@@ -1019,8 +1139,9 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
         case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
         case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
         case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
+        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
         {
-            // ISO: 6.5.16.2 (2), 6.5.7 (2), 6.5.10 (2), 6.5.11 (2), 6.5.12 (2)
+            // ISO: 6.5.16.2 (2), 6.5.5 (2), 6.5.7 (2), 6.5.10 (2), 6.5.11 (2), 6.5.12 (2)
             if (type_is_integer(tlhs) && type_is_integer(trhs))
                 pass = true;
             break;
@@ -1030,7 +1151,7 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
     if (!pass)
     {
         // TODO: come back and make this more useful of an error message
-        ADD_ERROR(syn, "compound assignment operation is invalid");
+        ADD_ERROR(syn, "compound assignment operation has invalid operands");
         if (syn->ctype) type_delete(syn->ctype);
         syn->ctype = make_basic_type(CTC_ERROR);
     }
@@ -1157,19 +1278,25 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     vector_add(sy->initial_values, ce);
 }
 
-void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, bool first, size_t dupes)
+void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, bool first, vector_t* symbols)
 {
     if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
         analyze_enumeration_constant_after(trav, syn, sy);
+    
     linkage_t lk = symbol_get_linkage(sy);
     syntax_component_t* scope = symbol_get_scope(sy);
-    if (lk == LK_NONE && dupes > 1)
-        // TODO: something to think about here: tags...
+
+    if (sy->type->class != CTC_STRUCTURE &&
+        sy->type->class != CTC_UNION &&
+        sy->type->class != CTC_ENUMERATED &&
+        lk == LK_NONE && symbols->size > 1)
         // ISO: 6.7 (3)
         ADD_ERROR(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
+    
     if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && syntax_has_initializer(syn) && scope_is_block(scope))
         // ISO: 6.7.8 (5)
         ADD_ERROR(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
+    
     syntax_component_t* decl = NULL;
     if ((decl = syntax_get_declarator_declaration(syn)) &&
         scope_is_block(scope) &&
@@ -1179,6 +1306,7 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         // NOTE: GCC on -std=c99 -pedantic-errors does not complain about typedef (which seems fine semantically, but appears to break this rule)
         // ISO: 6.7.1 (5)
         ADD_ERROR(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
+    
     if (syntax_is_tentative_definition(syn))
     {
         vector_t* declspecs = syntax_get_declspecs(syn);
@@ -1189,7 +1317,8 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
             ADD_ERROR(syn, "tentative definitions with internal linkage may not have an incomplete type");
         }
     }
-    if (sy->type->class == CTC_LABEL && !first && dupes > 1)
+
+    if (sy->type->class == CTC_LABEL && !first && symbols->size > 1)
     {
         if (!scope) report_return;
         if (scope->type != SC_FUNCTION_DEFINITION) report_return;
@@ -1197,6 +1326,17 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         if (!func_id) report_return;
         // ISO: 6.8.1 (3)
         ADD_ERROR(syn, "duplicate label name '%s' in function '%s'", syn->id, func_id->id);
+    }
+
+    VECTOR_FOR(symbol_t*, x, symbols)
+    {
+        VECTOR_FOR(symbol_t*, y, symbols)
+        {
+            if (x == y) continue;
+            if (!type_is_compatible(x->type, y->type))
+                // ISO: 6.7 (4)
+                ADD_ERROR(syn, "another declaration of '%s' in this scope does not have a compatible type", symbol_get_name(sy));
+        }
     }
 }
 
@@ -1248,19 +1388,20 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         return;
     }
     bool first = false;
-    size_t count = 0;
+    vector_t* symbols = NULL;
     symbol_table_t* st = SYMBOL_TABLE;
-    symbol_t* sy = symbol_table_count(st, syn, ns, &count, &first);
+    symbol_t* sy = symbol_table_count(st, syn, ns, &symbols, &first);
     namespace_delete(ns);
     if (!sy)
     {
         // ISO: 6.5.1 (2)
         ADD_ERROR(syn, "symbol '%s' is not defined in the given context", syn->id);
         syn->ctype = make_basic_type(CTC_ERROR);
+        vector_delete(symbols);
         return;
     }
     if (sy->declarer == syn)
-        analyze_declaring_identifier_after(trav, syn, sy, first, count);
+        analyze_declaring_identifier_after(trav, syn, sy, first, symbols);
     else
         analyze_designating_identifier_after(trav, syn, sy);
 }
@@ -1695,7 +1836,18 @@ void analyze_struct_union_specifier_after(syntax_traverser_t* trav, syntax_compo
 void analyze_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (syn->ctype->class == CTC_LONG_DOUBLE || type_is_complex(syn->ctype))
+    {
         ADD_ERROR(syn, "long double literals and complex numbers are not supported yet");
+        return;
+    }
+    const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __fc(number)(null)
+    char* name = malloc(len);
+    snprintf(name, len, "__fc%llu", ANALYSIS_TRAVERSER->next_floating_constant++);
+    syn->floc_id = strdup(name);
+    symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
+    sy->ns = make_basic_namespace(NSC_ORDINARY);
+    sy->type = type_copy(syn->ctype);
+    free(name);
 }
 
 void analyze_function_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
