@@ -635,7 +635,7 @@ x86_insn_t* make_x86_insn_clear_register(regid_t reg)
 x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_type_t type = X86I_UNKNOWN;
-    if (type_is_integer(ainsn->ct))
+    if (type_is_integer(ainsn->ct) || ainsn->ct->class == CTC_POINTER)
         type = X86I_MOV;
     else if (ainsn->ct->class == CTC_FLOAT)
         type = X86I_MOVSS;

@@ -47,6 +47,8 @@ preprocessing_table_t* preprocessing_table_init(void)
     memset(t->v_repl_list, 0, 50 * sizeof(preprocessing_token_t*));
     t->v_id_list = calloc(50, sizeof(vector_t*));
     memset(t->v_id_list, 0, 50 * sizeof(vector_t*));
+    t->v_variadic_list = calloc(50, sizeof(bool));
+    memset(t->v_variadic_list, 0, 50 * sizeof(bool));
     t->size = 0;
     t->capacity = 50;
     return t;
@@ -61,11 +63,13 @@ preprocessing_table_t* preprocessing_table_resize(preprocessing_table_t* t)
     memset(t->v_repl_list + old_capacity, 0, (t->capacity - old_capacity) * sizeof(preprocessing_token_t*));
     t->v_id_list = realloc(t->v_id_list, t->capacity * sizeof(vector_t*));
     memset(t->v_id_list + old_capacity, 0, (t->capacity - old_capacity) * sizeof(vector_t*));
+    t->v_variadic_list = realloc(t->v_variadic_list, t->capacity * sizeof(bool));
+    memset(t->v_variadic_list + old_capacity, 0, (t->capacity - old_capacity) * sizeof(bool));
     return t;
 }
 
 // the function will copy params passed in, i.e., the key and the token list
-preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessing_token_t* token, preprocessing_token_t* end, vector_t* id_list)
+preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k, preprocessing_token_t* token, preprocessing_token_t* end, vector_t* id_list, bool variadic)
 {
     if (!t) return NULL;
     if (t->size >= t->capacity)
@@ -80,6 +84,7 @@ preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k
             if (token)
                 v = t->v_repl_list[i] = pp_token_copy_range(token, end);
             t->v_id_list[i] = vector_deep_copy(id_list, (void* (*)(void*)) strdup);
+            t->v_variadic_list[i] = variadic;
             ++(t->size);
             break;
         }
@@ -90,7 +95,7 @@ preprocessing_token_t* preprocessing_table_add(preprocessing_table_t* t, char* k
     return v;
 }
 
-bool preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i, preprocessing_token_t** token, vector_t** id_list)
+bool preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i, preprocessing_token_t** token, vector_t** id_list, bool* variadic)
 {
     if (!t) return false;
     unsigned long index = hash(k) % t->capacity;
@@ -102,6 +107,7 @@ bool preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i,
             if (i) *i = index;
             if (token) *token = t->v_repl_list[index];
             if (id_list) *id_list = t->v_id_list[index];
+            if (variadic) *variadic = t->v_variadic_list[index];
             return true;
         }
         index = (index + 1 == t->capacity ? 0 : index + 1);
@@ -111,9 +117,9 @@ bool preprocessing_table_get_internal(preprocessing_table_t* t, char* k, int* i,
     return false;
 }
 
-bool preprocessing_table_get(preprocessing_table_t* t, char* k, preprocessing_token_t** token, vector_t** id_list)
+bool preprocessing_table_get(preprocessing_table_t* t, char* k, preprocessing_token_t** token, vector_t** id_list, bool* variadic)
 {
-    return preprocessing_table_get_internal(t, k, NULL, token, id_list);
+    return preprocessing_table_get_internal(t, k, NULL, token, id_list, variadic);
 }
 
 void preprocessing_table_remove(preprocessing_table_t* t, char* k)
@@ -130,6 +136,7 @@ void preprocessing_table_remove(preprocessing_table_t* t, char* k)
             t->key[i] = NULL;
             t->v_repl_list[i] = NULL;
             t->v_id_list[i] = NULL;
+            t->v_variadic_list[i] = false;
             return;
         }
         i = (i + 1) % t->capacity;
@@ -150,6 +157,7 @@ void preprocessing_table_delete(preprocessing_table_t* t)
     free(t->key);
     free(t->v_repl_list);
     free(t->v_id_list);
+    free(t->v_variadic_list);
     free(t);
 }
 
@@ -166,6 +174,8 @@ void preprocessing_table_print(preprocessing_table_t* t, int (*printer)(const ch
             printer("  parameter list:\n");
             for (unsigned j = 0; j < t->v_id_list[i]->size; ++j)
                 printer("   %s\n", vector_get(t->v_id_list[i], j));
+            if (t->v_variadic_list[i])
+                printer("   ...\n");
         }
         printer("  token sequence:\n");
         for (preprocessing_token_t* token = t->v_repl_list[i]; token; token = token->next)
@@ -226,6 +236,32 @@ static preprocessing_token_t* advance_token_impl(preprocessing_token_t** t)
         token = (token ? token->next : NULL);
     while (token != NULL && !is_pp_token(token));
     return *t = token;
+}
+
+static preprocessing_token_t* unadvance_token_impl(preprocessing_token_t** t)
+{
+    if (!t) return NULL;
+    preprocessing_token_t* token = *t;
+    do
+        token = (token ? token->prev : NULL);
+    while (token != NULL && !is_pp_token(token));
+    return *t = token;
+}
+
+static preprocessing_token_t* get_first_token_forward(preprocessing_token_t* token)
+{
+    if (!token) return NULL;
+    while (token && !is_pp_token(token))
+        token = token->next;
+    return token;
+}
+
+static preprocessing_token_t* get_first_token_backward(preprocessing_token_t* token)
+{
+    if (!token) return NULL;
+    while (token && !is_pp_token(token))
+        token = token->prev;
+    return token;
 }
 
 // inserting next
@@ -334,6 +370,133 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
     return end;
 }
 
+static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing_state_t* state, preprocessing_token_t** start);
+
+// gather the tokens associated with an argument in a function-like macro invocation
+// and then replace every instance of that argument's appearance in the macro
+// with the content gathered
+static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token_t** tokens, preprocessing_token_t* seq, char* param_name)
+{
+    bool va_args = !param_name;
+    preprocessing_token_t* token = *tokens;
+    preprocessing_token_t* start = token;
+    int plevel = 0;
+    for (;; token = token->next)
+    {
+        if (!token)
+            break;
+        if (token->type == PPT_PUNCTUATOR)
+        {
+            if (!plevel && !va_args && token->punctuator == P_COMMA)
+                break;
+
+            if (token->punctuator == P_LEFT_PARENTHESIS)
+                ++plevel;
+            else if (token->punctuator == P_RIGHT_PARENTHESIS)
+            {
+                if (!plevel)
+                    break;
+                --plevel;
+            }
+        }
+        if (!(token = expand(token, state, NULL)))
+            return false;
+    }
+    *tokens = token;
+    preprocessing_token_t* end = token;
+
+    printf("found sequence for parameter '%s':\n", param_name);
+    for (preprocessing_token_t* t = start; t && t != end; t = t->next)
+    {
+        pp_token_print(t, printf);
+        printf("\n");
+    }
+
+    while (seq)
+    {
+        if (seq->type != PPT_IDENTIFIER)
+        {
+            seq = seq->next;
+            continue;
+        }
+        if (va_args && !streq(seq->identifier, "__VA_ARGS__"))
+        {
+            seq = seq->next;
+            continue;
+        }
+        if (param_name && !streq(seq->identifier, param_name))
+        {
+            seq = seq->next;
+            continue;
+        }
+        preprocessing_token_t* prev = seq;
+        unadvance_token_impl(&prev);
+        if (is_pp_type(prev, PPT_PUNCTUATOR) && (prev->punctuator == P_HASH || prev->punctuator == P_DOUBLE_HASH))
+        {
+            preprocessing_token_t* str = calloc(1, sizeof *str);
+            str->type = PPT_STRING_LITERAL;
+            str->row = seq->row;
+            str->col = seq->col;
+            char* buffer = malloc(4096);
+            int offset = 0;
+            for (preprocessing_token_t* arg = start; arg && arg != end; arg = arg->next)
+            {
+                if (is_pp_type(arg, PPT_WHITESPACE))
+                {
+                    if (arg == start)
+                        continue; 
+                    if (arg->next == end)
+                        continue;
+                    offset += snprintf(buffer + offset, 4096 - offset, " ");
+                    continue;
+                }
+                if (is_pp_type(arg, PPT_STRING_LITERAL) || is_pp_type(arg, PPT_CHARACTER_CONSTANT))
+                {
+                    char* value = arg->type == PPT_STRING_LITERAL ? arg->string_literal.value : arg->character_constant.value;
+                    bool wide = arg->type == PPT_STRING_LITERAL ? arg->string_literal.wide : arg->character_constant.wide;
+
+                    offset += snprintf(buffer + offset, 4096 - offset, "%s\"", wide ? "L" : "");
+                    for (char* content = value; *content; ++content)
+                    {
+                        if (offset + 2 >= 4096)
+                            break;
+                        if (*content == '"' || *content == '\\')
+                            buffer[offset++] = '\\';
+                        buffer[offset++] = *content;
+                    }
+                    offset += snprintf(buffer + offset, 4096 - offset, "\"");
+                }
+                offset += pp_token_normal_snprint(buffer + offset, 4096 - offset, arg, snprintf);
+            }
+            str->string_literal.value = strdup(buffer);
+            free(buffer);
+            insert_token_after(str, seq);
+            remove_token(seq);
+            remove_token(prev);
+            seq = str->next;
+            continue;
+        }
+        preprocessing_token_t* next = seq;
+        advance_token_impl(&next);
+        if (is_pp_type(next, PPT_PUNCTUATOR) && next->punctuator == P_DOUBLE_HASH)
+        {
+            seq = seq->next;
+            continue;
+        }
+        preprocessing_token_t* inserting = seq;
+        for (preprocessing_token_t* arg = start; arg && arg != end; arg = arg->next)
+        {
+            preprocessing_token_t* cp = pp_token_copy(arg);
+            cp->row = seq->row;
+            cp->col = seq->col;
+            inserting = insert_token_after(cp, inserting);
+        }
+        remove_token(seq);
+        seq = inserting->next;
+    }
+    return true;
+}
+
 // returns the token at the position at the end of the expansion, NULL if expansion failed
 static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing_state_t* state, preprocessing_token_t** start)
 {
@@ -342,27 +505,110 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
         return token;
     preprocessing_token_t* repl = NULL;
     vector_t* params = NULL;
-    preprocessing_table_get(state->table, token->identifier, &repl, &params);
+    bool variadic = false;
+    preprocessing_table_get(state->table, token->identifier, &repl, &params, &variadic);
     if (!repl)
         return token;
     if (params && !is_punctuator(token->next, P_LEFT_PARENTHESIS))
         return token;
+    
+    preprocessing_token_t* end = token->next;
+    
+    preprocessing_token_t* dummy = calloc(1, sizeof *dummy);
+    dummy->type = PPT_WHITESPACE;
+    dummy->whitespace = strdup(" ");
+    preprocessing_token_t* seq = dummy->next = pp_token_copy_range(repl, NULL);
+    seq->prev = dummy;
+
     if (params)
-        return fail(token, "invocations of function-like macros are not supported yet");
-    preprocessing_token_t* inserting = token;
-    for (; repl; repl = repl->next)
     {
-        preprocessing_token_t* cp = pp_token_copy(repl);
+        preprocessing_token_t* arg_token = token->next->next;
+        int index = 0;
+        for (; arg_token && (arg_token->type != PPT_PUNCTUATOR || arg_token->punctuator != P_RIGHT_PARENTHESIS); ++index)
+        {
+            if (!gather_and_replace(state, &arg_token, seq, (char*) vector_get(params, index)))
+            {
+                pp_token_delete_all(seq);
+                return NULL;
+            }
+            seq = dummy->next;
+
+            printf("sequence:\n");
+            for (preprocessing_token_t* t = seq; t; t = t->next)
+            {
+                pp_token_print(t, printf);
+                printf("\n");
+            }
+            
+            if (!arg_token)
+            {
+                pp_token_delete_all(seq);
+                return fail(token, "unexpectedly reached end of file during function-like macro invocation");
+            }
+            
+            if (arg_token->type != PPT_PUNCTUATOR || (arg_token->punctuator != P_COMMA && arg_token->punctuator != P_RIGHT_PARENTHESIS))
+            {
+                pp_token_delete_all(seq);
+                return fail(token, "expected ')' or ',' after each argument of a function-like macro invocation");
+            }
+
+            if (arg_token->punctuator == P_RIGHT_PARENTHESIS)
+            {
+                if (index + 1 < params->size)
+                {
+                    pp_token_delete_all(seq);
+                    return fail(token, "function-like macro '%s' takes %u%s arguments, but only got %u",
+                        token->identifier,
+                        params->size,
+                        variadic ? " or more" : "",
+                        index + 1);
+                }
+                break;
+            }
+
+            if (!variadic && index + 1 >= params->size)
+            {
+                pp_token_delete_all(seq);
+                return fail(token, "function-like macro '%s' takes %u arguments, but got %u",
+                    token->identifier,
+                    params->size,
+                    index + 1);
+            }
+
+            arg_token = arg_token->next;
+        }
+        if (!arg_token)
+        {
+            pp_token_delete_all(seq);
+            return fail(token, "expected terminating ')' at end of function-like macro invocation");
+        }
+        end = arg_token->next;
+    }
+
+    pp_token_delete(dummy);
+    seq->prev = NULL;
+
+    preprocessing_token_t* inserting = token;
+    for (; seq; seq = seq->next)
+    {
+        preprocessing_token_t* cp = pp_token_copy(seq);
         cp->row = token->row;
         cp->col = token->col;
-        inserting = insert_token_after(cp, inserting);
+        if (inserting == token)
+            inserting = insert_token_before(cp, inserting);
+        else
+            inserting = insert_token_after(cp, inserting);
         preprocessing_token_t* inner_start = NULL;
         if (!(inserting = expand(inserting, state, &inner_start)))
+        {
+            pp_token_delete_all(seq);
             return NULL;
+        }
         if (start && !*start)
             *start = inner_start;
     }
-    remove_token(token);
+    pp_token_delete_all(seq);
+    remove_token_sequence(token, end);
     return inserting;
 }
 
@@ -575,6 +821,7 @@ typedef struct preprocessing_component
         struct
         {
             char* defl_id;
+            bool defl_variadic;
             vector_t* defl_params; // vector_t<char*>
             preprocessing_component_t* defl_replacement; // PPC_TOKEN_SEQUENCE
         };
@@ -757,6 +1004,7 @@ static void pp_component_print_indented(preprocessing_component_t* comp, unsigne
             pf("identifier: %s\n", comp->defl_id);
             pf("parameter list:\n");
             print_string_vector_indented(comp->defl_params, next_indent, printer);
+            pf("variadic: %s\n", BOOL_NAMES[comp->defl_variadic]);
             pf("replacement list:\n");
             pp_component_print_indented(comp->defl_replacement, next_indent, printer);
             break;
@@ -1144,7 +1392,7 @@ preprocessing_component_t* pp_parse_define_line(preprocessing_token_t** tokens, 
         {
             if (is_punctuator(token, P_ELLIPSIS))
             {
-                vector_add(comp->defl_params, strdup("__VA_ARGS__"));
+                comp->defl_variadic = true;
                 advance_token;
                 if (!is_punctuator(token, P_RIGHT_PARENTHESIS))
                 {
@@ -1416,7 +1664,7 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
         repl->type = PPT_PP_NUMBER;
         repl->row = defined_token->row;
         repl->col = defined_token->col;
-        bool exists = preprocessing_table_get(state->table, id->identifier, NULL, NULL);
+        bool exists = preprocessing_table_get(state->table, id->identifier, NULL, NULL, NULL);
         repl->pp_number = strdup(exists ? "1" : "0");
         bool update_start = defined_token == condition->start;
         preprocessing_token_t* inserting = remove_token_sequence(defined_token, token->next);
@@ -1465,7 +1713,7 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
         }
         case PPC_IFDEF_GROUP:
         case PPC_IFNDEF_GROUP:
-            bool f = preprocessing_table_get(state->table, comp->ifs_if_group->ifndg_id, NULL, NULL);
+            bool f = preprocessing_table_get(state->table, comp->ifs_if_group->ifndg_id, NULL, NULL, NULL);
             held = comp->ifs_if_group->type == PPC_IFDEF_GROUP ? f : !f;
             break;
         default:
@@ -1605,12 +1853,111 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
     return true;
 }
 
+static bool is_token_sequence_identical(preprocessing_token_t* s1, preprocessing_token_t* e1,
+    preprocessing_token_t* s2)
+{
+    if (!s1 && !s2) return true;
+    if (!s1 || !s2) return false;
+    for (; s1 && s2 && s1 != e1; s1 = s1->next, s2 = s2->next)
+    {
+        if (s1->type != s2->type)
+            return false;
+        // whitespace is equivalent here
+        if (s1->type == PPT_WHITESPACE)
+            continue;
+        if (!pp_token_equals(s1, s2))
+            return false;
+    }
+    if (s1 != e1 || s2)
+        return false;
+    return true;
+}
+
 bool preprocess_define_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
+    preprocessing_token_t* old_sequence = NULL;
+    vector_t* id_list = NULL;
+    bool old_variadic = false;
+    bool old_exists = preprocessing_table_get(state->table, comp->defl_id, &old_sequence, &id_list, &old_variadic);
+
+    if (old_exists && !is_token_sequence_identical(comp->defl_replacement->start, comp->defl_replacement->end, old_sequence))
+    {
+        // ISO: 6.10.3 (2)
+        (void) fail(comp->start, "redefinition of macro '%s' must have an identical replacement list", comp->defl_id);
+        return false;
+    }
+
+    if (old_exists && ((comp->defl_params && !id_list) || (!comp->defl_params && id_list)))
+    {
+        // ISO: 6.10.3 (2)
+        (void) fail(comp->start, "redefinition of macro '%s' must be the same type of macro (i.e., object, function-like)", comp->defl_id);
+        return false;
+    }
+
+    if (old_exists && comp->defl_params && comp->defl_variadic != old_variadic)
+    {
+        // ISO: 6.10.3 (2)
+        (void) fail(comp->start, "redefinition of function-like macro '%s' cannot differ in its usage of the trailing ellipsis", comp->defl_id);
+        return false;
+    }
+
+    if (old_exists && comp->defl_params && !vector_equals(comp->defl_params, id_list, (bool (*)(void*, void*)) streq))
+    {
+        // ISO: 6.10.3 (2)
+        (void) fail(comp->start, "redefinition of function-like macro '%s' must have the same parameters as its original definition", comp->defl_id);
+        return false;
+    }
+
+    for (preprocessing_token_t* token = comp->defl_replacement->start; token && token != comp->defl_replacement->end; token = token->next)
+    {
+        if (token->type != PPT_IDENTIFIER) continue;
+        if (!streq(token->identifier, "__VA_ARGS__")) continue;
+        if (comp->defl_variadic) continue;
+        // ISO: 6.10.3 (5)
+        (void) fail(token, "'__VA_ARGS__' is only allowed to appear in the replacement list of a function-like macro with a trailing ellipsis");
+        return false;
+    }
+
+    if (comp->defl_params)
+    {
+        for (unsigned i = 0; i < comp->defl_params->size; ++i)
+        {
+            char* outer = vector_get(comp->defl_params, i);
+            for (unsigned j = 0; j < comp->defl_params->size; ++j)
+            {
+                if (i == j) continue;
+                char* inner = vector_get(comp->defl_params, j);
+                if (!streq(outer, inner)) continue;
+                // ISO: 6.10.3 (6)
+                (void) fail(comp->start, "parameter name '%s' duplicated in definition of function-like macro", outer);
+                return false;
+            }
+        }
+    }
+
+    preprocessing_token_t* first = get_first_token_forward(comp->defl_replacement->start);
+    if (is_pp_type(first, PPT_PUNCTUATOR) && first->punctuator == P_DOUBLE_HASH)
+    {
+        // ISO: 6.10.3.3 (1)
+        (void) fail(first, "'##' may not appear at the beginning of a replacement list");
+        return false;
+    }
+
+    preprocessing_token_t* last = get_first_token_backward(comp->defl_replacement->end->prev);
+    if (is_pp_type(last, PPT_PUNCTUATOR) && last->punctuator == P_DOUBLE_HASH)
+    {
+        // ISO: 6.10.3.3 (1)
+        (void) fail(last, "'##' may not appear at the end of a replacement list");
+        return false;
+    }
+
+    if (old_exists)
+        preprocessing_table_remove(state->table, comp->defl_id);
     preprocessing_table_add(state->table, comp->defl_id,
         comp->defl_replacement->start,
         comp->defl_replacement->end,
-        comp->defl_params);
+        comp->defl_params,
+        comp->defl_variadic);
     remove_token_sequence(comp->start, comp->end);
     return true;
 }

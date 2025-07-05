@@ -290,6 +290,46 @@ void pp_token_normal_print(preprocessing_token_t* token, int (*printer)(const ch
     }
 }
 
+int pp_token_normal_snprint(char* buffer, size_t maxlen, preprocessing_token_t* token, int (*snprinter)(char*, size_t, const char* fmt, ...))
+{
+    int c = 0;
+    switch (token->type)
+    {
+        case PPT_HEADER_NAME:
+        {
+            if (token->header_name.quote_delimited)
+                c += snprinter(buffer, maxlen, "\"%s\"", token->header_name.name);
+            else
+                c += snprinter(buffer, maxlen, "<%s>", token->header_name.name);
+            break;
+        }
+        case PPT_IDENTIFIER:
+            c += snprinter(buffer, maxlen, "%s", token->identifier);
+            break;
+        case PPT_PP_NUMBER:
+            c += snprinter(buffer, maxlen, "%s", token->pp_number);
+            break;
+        case PPT_CHARACTER_CONSTANT:
+            c += snprinter(buffer, maxlen, "%s%s", token->character_constant.wide ? "L" : "", token->character_constant.value);
+            break;
+        case PPT_STRING_LITERAL:
+            c += snprinter(buffer, maxlen, "%s\"%s\"", token->string_literal.wide ? "L" : "", token->string_literal.value);
+            break;
+        case PPT_PUNCTUATOR:
+            c += snprinter(buffer, maxlen, "%s", PUNCTUATOR_STRING_REPRS[token->punctuator]);
+            break;
+        case PPT_OTHER:
+            c += snprinter(buffer, maxlen, "%c", token->other);
+            break;
+        case PPT_WHITESPACE:
+            c += snprinter(buffer, maxlen, "%s", token->whitespace);
+            break;
+        default:
+            break;
+    }
+    return c;
+}
+
 // print how code would normally be written from token (inclusive) to end (exclusive) or if end is NULL, till the end
 void pp_token_normal_print_range(preprocessing_token_t* token, preprocessing_token_t* end, int (*printer)(const char* fmt, ...))
 {
@@ -377,6 +417,47 @@ preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preproc
         start = start->next;
     }
     return nstart;
+}
+
+bool pp_token_equals(preprocessing_token_t* t1, preprocessing_token_t* t2)
+{
+    if (!t1 && !t2) return true;
+    if (!t1 || !t2) return false;
+    if (t1->type != t2->type) return false;
+    switch (t1->type)
+    {
+        case PPT_HEADER_NAME:
+            if (t1->header_name.quote_delimited != t2->header_name.quote_delimited) return false;
+            if (!streq(t1->header_name.name, t2->header_name.name)) return false;
+            break;
+        case PPT_IDENTIFIER:
+            if (!streq(t1->identifier, t2->identifier)) return false;
+            break;
+        case PPT_PP_NUMBER:
+            if (!streq(t1->pp_number, t2->pp_number)) return false;
+            break;
+        case PPT_CHARACTER_CONSTANT:
+            if (!streq(t1->character_constant.value, t2->character_constant.value)) return false;
+            if (t1->character_constant.wide != t2->character_constant.wide) return false;
+            break;
+        case PPT_STRING_LITERAL:
+            if (!streq(t1->string_literal.value, t2->string_literal.value)) return false;
+            if (t1->string_literal.wide != t2->string_literal.wide) return false;
+            break;
+        case PPT_PUNCTUATOR:
+            if (t1->punctuator != t2->punctuator) return false;
+            break;
+        case PPT_WHITESPACE:
+            if (!streq(t1->whitespace, t2->whitespace)) return false;
+            break;
+        case PPT_OTHER:
+            if (t1->other != t2->other) return false;
+            break;
+        case PPT_COMMENT:
+        case PPT_NO_ELEMENTS:
+            break;
+    }
+    return true;
 }
 
 typedef preprocessing_token_t* (*lex_function)(lex_state_t* state);
