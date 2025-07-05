@@ -863,6 +863,27 @@ static void linearize_function_definition_after(syntax_traverser_t* trav, syntax
     routine->insns = air_insn_init(AIR_NOP, 0);
     routine->insns->next = copy_air_insn_sequence(syn->code);
 
+    // implicit return 0 for main
+    if (streq(symbol_get_name(routine->sy), "main"))
+    {
+        air_insn_t* last = routine->insns;
+        for (; last->next; last = last->next);
+
+        if (last->type != AIR_RETURN)
+        {
+            regid_t reg = NEXT_VIRTUAL_REGISTER;
+            air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+            ld->ct = make_basic_type(CTC_INT);
+            ld->ops[0] = air_insn_register_operand_init(reg);
+            ld->ops[1] = air_insn_integer_constant_operand_init(0);
+            last = air_insn_insert_after(ld, last);
+            air_insn_t* ret = air_insn_init(AIR_RETURN, 1);
+            ret->ct = make_basic_type(CTC_INT);
+            ret->ops[0] = air_insn_register_operand_init(reg);
+            last = air_insn_insert_after(ret, last);
+        }
+    }
+
     AIRINIZING_TRAVERSER->croutine = NULL;
 }
 

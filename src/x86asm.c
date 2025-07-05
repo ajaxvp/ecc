@@ -457,22 +457,16 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
     }
     size_t lr_jumps = 0;
-    bool ending_return = false;
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
     {
         if (insn->type == X86I_JMP && insn->op1->type == X86OP_LABEL && streq(insn->op1->label, ".LR"))
         {
             ++lr_jumps;
             if (!insn->next)
-            {
-                ending_return = true;
                 continue;
-            }
         }
         x86_write_insn(insn, out);
     }
-    if (!ending_return && streq(routine->label, "main"))
-        fprintf(out, "    movl $0, %%eax\n");
     if (lr_jumps > 1)
         fprintf(out, ".LR:\n");
     fprintf(out, "    leave\n");
