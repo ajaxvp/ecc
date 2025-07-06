@@ -355,3 +355,24 @@ int regid_print(regid_t reg, int (*printer)(const char*, ...))
     else
         return printer("R%llu", reg);
 }
+
+char* replace_extension(char* filepath, char* ext)
+{
+    long long length = 0;
+    long long ext_separator_index = -1;
+    for (char* str = filepath; *str; ++str, ++length)
+    {
+        if (*str == '.')
+            ext_separator_index = length;
+    }
+    if (ext_separator_index == -1)
+        ext_separator_index = length;
+
+    long long extlen = strlen(ext);
+
+    long long finallen = ext_separator_index + extlen;
+
+    char* str = malloc(finallen + 1);
+    snprintf(str, finallen + 1, "%.*s%s", (int) ext_separator_index, filepath, ext);
+    return str;
+}

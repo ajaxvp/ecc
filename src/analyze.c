@@ -466,12 +466,76 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
         return;
     }
     syn->ctype = create_type(arg_type, arg_type->tn_declarator);
+    if (syn->ctype->class == CTC_STRUCTURE ||
+        syn->ctype->class == CTC_UNION ||
+        syn->ctype->class == CTC_LONG_DOUBLE ||
+        type_is_complex(syn->ctype))
+    {
+        ADD_ERROR(syn, "this type is not yet supported by va_arg");
+        type_delete(syn->ctype);
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+}
+
+void analyze_va_start_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->icallexpr_args->size != 2)
+    {
+        ADD_ERROR(syn, "va_start invocation requires two arguments: a va_list and the last non-variadic parameter of this function");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    if (!sy)
+    {
+        ADD_ERROR(syn, "cannot find va_list declaration for va_start invocation");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
+    if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
+    {
+        ADD_ERROR(syn, "first parameter of va_start invocation must be a va_list");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syn->ctype = make_basic_type(CTC_VOID);
+}
+
+void analyze_va_end_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->icallexpr_args->size != 1)
+    {
+        ADD_ERROR(syn, "va_end invocation requires one argument: a va_list");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    if (!sy)
+    {
+        ADD_ERROR(syn, "cannot find va_list declaration for va_end invocation");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
+    if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
+    {
+        ADD_ERROR(syn, "parameter of va_end invocation must be a va_list");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
+    syn->ctype = make_basic_type(CTC_VOID);
 }
 
 void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (streq(syn->icallexpr_name, "_ecc_va_arg"))
         analyze_va_arg_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "_ecc_va_start"))
+        analyze_va_start_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "_ecc_va_end"))
+        analyze_va_end_intrinsic_call_expression_after(trav, syn);
     else
     {
         ADD_ERROR(syn, "unsupported intrinsic function '%s' invoked", syn->icallexpr_name);

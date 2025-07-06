@@ -303,6 +303,8 @@ typedef struct program_options
     bool llflag;
     bool aaflag;
     bool rflag;
+    bool ssflag;
+    bool cflag;
 } program_options_t;
 
 typedef struct preprocessing_token
@@ -674,6 +676,7 @@ typedef struct air_routine {
     symbol_t* sy;
     air_insn_t* insns;
     symbol_t* retptr;
+    bool uses_varargs;
 } air_routine_t;
 
 typedef struct air {
@@ -821,6 +824,7 @@ typedef struct x86_asm_routine
     bool global;
     char* label;
     long long stackalloc;
+    bool uses_varargs;
     x86_insn_t* insns;
 } x86_asm_routine_t;
 
@@ -1808,6 +1812,7 @@ unsigned get_universal_character_hex_value(char* unichar, size_t length);
 unsigned get_universal_character_utf8_encoding(unsigned value);
 
 char* temp_filepath_gen(char* ext);
+char* replace_extension(char* filepath, char* ext);
 
 /* tokenize.c */
 

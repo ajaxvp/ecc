@@ -35,11 +35,20 @@ program_options_t* get_program_options(void)
     return &opts;
 }
 
+static void delete_array(void** arr, size_t length)
+{
+    for (size_t i = 0; i < length; ++i)
+        free(arr[i]);
+    free(arr);
+}
+
 int usage(void)
 {
     printf("Usage: ecc [options] file...\n");
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
+    printf("  %-*sCompile, but do not assemble or link\n", OPTION_DESCRIPTION_LENGTH, "-S");
+    printf("  %-*sCompile and assemble, but do not link\n", OPTION_DESCRIPTION_LENGTH, "-c");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
     printf("  %-*sPreprocess\n", OPTION_DESCRIPTION_LENGTH, "-P");
     printf("  %-*sParse\n", OPTION_DESCRIPTION_LENGTH, "-p");
@@ -51,7 +60,7 @@ int usage(void)
     return EXIT_FAILURE;
 }
 
-char* work(char* filename)
+x86_asm_file_t* compile_object(char* filename)
 {
     FILE* file = fopen(filename, "r");
     if (!file)
@@ -139,7 +148,12 @@ char* work(char* filename)
     {
         dump_errors(type_errors);
         if (error_list_size(type_errors, false) > 0)
+        {
+            fclose(file);
+            free_syntax(tlu, tlu);
+            token_delete_all(ts);
             return NULL;
+        }
     }
 
     if (opts.iflag)
@@ -156,7 +170,12 @@ char* work(char* filename)
     {
         dump_errors(errors);
         if (error_list_size(errors, false) > 0)
+        {
+            fclose(file);
+            free_syntax(tlu, tlu);
+            token_delete_all(ts);
             return NULL;
+        }
     }
 
     if (opts.iflag)
@@ -170,6 +189,7 @@ char* work(char* filename)
 
     if (opts.aflag)
     {
+        fclose(file);
         free_syntax(tlu, tlu);
         token_delete_all(ts);
         return NULL;
@@ -187,6 +207,7 @@ char* work(char* filename)
 
     if (opts.aaflag)
     {
+        fclose(file);
         air_delete(air);
         free_syntax(tlu, tlu);
         token_delete_all(ts);
@@ -203,6 +224,7 @@ char* work(char* filename)
 
     if (opts.llflag)
     {
+        fclose(file);
         air_delete(air);
         free_syntax(tlu, tlu);
         token_delete_all(ts);
@@ -219,6 +241,7 @@ char* work(char* filename)
 
     if (opts.rflag)
     {
+        fclose(file);
         air_delete(air);
         free_syntax(tlu, tlu);
         token_delete_all(ts);
@@ -235,74 +258,138 @@ char* work(char* filename)
         x86_asm_file_write(asmfile, stdout);
     }
 
-    char* asm_filepath = temp_filepath_gen(".s");
-    char* obj_filepath = temp_filepath_gen(".o");
-    FILE* out = fopen(asm_filepath, "w");
-    x86_asm_file_write(asmfile, out);
-    fclose(out);
-    if (opts.iflag)
-        printf("assembly written to %s\n", asm_filepath);
-
     fclose(file);
-    x86_asm_file_delete(asmfile);
     air_delete(air);
     free_syntax(tlu, tlu);
     token_delete_all(ts);
 
+    return asmfile;
+}
+
+char* compile(char* filename, char* target)
+{
+    x86_asm_file_t* asmfile = compile_object(filename);
+    if (!asmfile)
+        return NULL;
+    
+    char* asm_filepath = target ? strdup(target) : temp_filepath_gen(".s");
+
+    FILE* out = fopen(asm_filepath, "w");
+    x86_asm_file_write(asmfile, out);
+    fclose(out);
+    x86_asm_file_delete(asmfile);
+
+    if (opts.iflag)
+        printf("assembly written to %s\n", asm_filepath);
+
+    return asm_filepath;
+}
+
+char* assemble(char* filename, char* target)
+{
+    char* asm_filepath = compile(filename, NULL);
+    if (!asm_filepath)
+        return NULL;
+    char* obj_filepath = target ? strdup(target) : temp_filepath_gen(".o");
+
     pid_t as_pid = fork();
+
     if (as_pid == -1)
     {
-        free(obj_filepath);
+        remove(asm_filepath);
         free(asm_filepath);
+        free(obj_filepath);
         errorf("failed to spawn assembler process\n");
         return NULL;
     }
+
     if (as_pid == 0)
     {
         char* argv[] = { "/usr/bin/x86_64-linux-gnu-as", asm_filepath, "-o", obj_filepath, NULL };
         int status = execv(argv[0], argv);
         if (status == -1)
         {
-            free(obj_filepath);
             free(asm_filepath);
+            free(obj_filepath);
             errorf("failed to execute assembler\n");
             exit(EXIT_FAILURE);
         }
     }
+
     int as_status = EXIT_FAILURE;
     waitpid(as_pid, &as_status, 0);
-    remove(asm_filepath);
     as_status = WEXITSTATUS(as_status);
+
     if (as_status)
     {
+        remove(asm_filepath);
         free(obj_filepath);
         free(asm_filepath);
         errorf("assembler has failed to produce an object file, cannot proceed with compilation\n");
         return NULL;
     }
 
+    remove(asm_filepath);
     free(asm_filepath);
+
+    if (opts.iflag)
+        printf("object written to %s\n", obj_filepath);
+
     return obj_filepath;
 }
 
-static void delete_array(void** arr, size_t length)
+char* linker(char** object_files, size_t object_count, char* target)
 {
-    for (size_t i = 0; i < length; ++i)
-        free(arr[i]);
-    free(arr);
+    char* exec_filepath = target ? strdup(target) : strdup("a.out");
+
+    pid_t ld_pid = fork();
+    if (ld_pid == -1)
+    {
+        free(exec_filepath);
+        errorf("failed to spawn linker process\n");
+        for (size_t i = 0; i < object_count; ++i)
+            remove(object_files[i]);
+        return NULL;
+    }
+
+    if (ld_pid == 0)
+    {
+        #define NO_LIBRARIES 2
+        char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
+        argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
+        for (size_t i = 0; i < object_count; ++i)
+            argv[i + 1] = object_files[i];
+        argv[1 + object_count] = "libecc/libecc.a";
+        argv[2 + object_count] = "libc/libc.a";
+        argv[1 + object_count + NO_LIBRARIES] = "-o";
+        argv[2 + object_count + NO_LIBRARIES] = "a.out";
+        argv[3 + object_count + NO_LIBRARIES] = NULL;
+        int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
+        if (status == -1)
+        {
+            free(exec_filepath);
+            free(argv);
+            return NULL;
+        }
+    }
+
+    int ld_status = EXIT_FAILURE;
+    waitpid(ld_pid, &ld_status, 0);
+    if (WEXITSTATUS(ld_status))
+    {
+        free(exec_filepath);
+        for (size_t i = 0; i < object_count; ++i)
+            remove(object_files[i]);
+        errorf("failed to execute linker\n");
+        return NULL;
+    }
+    return exec_filepath;
 }
 
-int main(int argc, char** argv)
+bool get_options(int argc, char** argv)
 {
-    PROGRAM_NAME = argv[0];
-    srand(time(NULL));
-    if (argc <= 1)
-    {
-        errorf("no input files\n");
-        return EXIT_FAILURE;
-    }
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpaxLAr")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpaxLArcS")) != -1;)
     {
         switch (c)
         {
@@ -332,20 +419,75 @@ int main(int argc, char** argv)
             case 'r':
                 opts.rflag = true;
                 break;
+            case 'c':
+                opts.cflag = true;
+                break;
+            case 'S':
+                opts.ssflag = true;
+                break;
             case '?':
             default:
             {
                 errorf("unknown option specified: -%c\n", c);
-                return EXIT_FAILURE;
+                return false;
             }
         }
     }
+    return true;
+}
 
+int handle_ss_flag(int argc, char** argv)
+{
+    for (int i = optind; i < argc; ++i)
+    {
+        char* created = replace_extension(argv[i], ".s");
+        char* asm_filepath = compile(argv[i], created);
+        free(created);
+        if (!asm_filepath)
+            return EXIT_FAILURE;
+        free(asm_filepath);
+    }
+    return EXIT_SUCCESS;
+}
+
+int handle_c_flag(int argc, char** argv)
+{
+    for (int i = optind; i < argc; ++i)
+    {
+        char* created = replace_extension(argv[i], ".o");
+        char* obj_filepath = assemble(argv[i], created);
+        free(created);
+        if (!obj_filepath)
+            return EXIT_FAILURE;
+        free(obj_filepath);
+    }
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv)
+{
+    PROGRAM_NAME = argv[0];
+    srand(time(NULL));
+    if (argc <= 1)
+    {
+        errorf("no input files\n");
+        return EXIT_FAILURE;
+    }
+
+    if (!get_options(argc, argv))
+        return EXIT_FAILURE;
+    
+    if (opts.ssflag)
+        return handle_ss_flag(argc, argv);
+    
+    if (opts.cflag)
+        return handle_c_flag(argc, argv);
+    
     size_t object_count = argc - optind;
     char** objects = calloc(object_count, sizeof(char*));
-    for (unsigned i = optind; i < argc; ++i)
+    for (int i = optind; i < argc; ++i)
     {
-        char* obj_filepath = work(argv[i]);
+        char* obj_filepath = assemble(argv[i], NULL);
         if (obj_filepath == NULL)
         {
             delete_array((void**) objects, object_count);
@@ -354,48 +496,16 @@ int main(int argc, char** argv)
         objects[i - optind] = obj_filepath;
     }
 
-    pid_t ld_pid = fork();
-    if (ld_pid == -1)
-    {
-        delete_array((void**) objects, object_count);
-        errorf("failed to spawn linker process\n");
-        return EXIT_FAILURE;
-    }
+    char* exec_filepath = linker(objects, object_count, NULL);
 
-    if (ld_pid == 0)
-    {
-        #define NO_LIBRARIES 2
-        char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
-        argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
-        for (size_t i = 0; i < object_count; ++i)
-            argv[i + 1] = objects[i];
-        argv[1 + object_count] = "libecc/libecc.a";
-        argv[2 + object_count] = "libc/libc.a";
-        argv[1 + object_count + NO_LIBRARIES] = "-o";
-        argv[2 + object_count + NO_LIBRARIES] = "a.out";
-        argv[3 + object_count + NO_LIBRARIES] = NULL;
-        int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
-        if (status == -1)
-        {
-            free(argv);
-            delete_array((void**) objects, object_count);
-            errorf("failed to execute linker\n");
-            exit(EXIT_FAILURE);
-        }
-    }
+    delete_array((void**) objects, object_count);
 
-    int ld_status = EXIT_FAILURE;
-    waitpid(ld_pid, &ld_status, 0);
-    for (size_t i = 0; i < object_count; ++i)
-        remove(objects[i]);
-    ld_status = WEXITSTATUS(ld_status);
-    if (ld_status)
+    if (!exec_filepath)
     {
-        delete_array((void**) objects, object_count);
         errorf("linker has failed to produce an executable\n");
         return EXIT_FAILURE;
     }
-    
-    delete_array((void**) objects, object_count);
+
+    free(exec_filepath);
     return EXIT_SUCCESS;
 }

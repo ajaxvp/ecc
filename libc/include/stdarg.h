@@ -5,8 +5,8 @@
 
 typedef struct _ecc_va_list
 {
-    uint32_t intpos;
-    uint32_t ssepos;
+    uintptr_t intpos;
+    uintptr_t ssepos;
     uintptr_t stackpos;
 } va_list;
 

@@ -332,6 +332,16 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
         case SC_MODULAR_EXPRESSION:
         case SC_DIVISION_EXPRESSION:
         case SC_MULTIPLICATION_EXPRESSION:
+        case SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION:
+        case SC_DIVISION_ASSIGNMENT_EXPRESSION:
+        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
+        case SC_ADDITION_ASSIGNMENT_EXPRESSION:
+        case SC_SUBTRACTION_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
         {
             traverse_syntax(trav, syn->bexpr_lhs);
             traverse_syntax(trav, syn->bexpr_rhs);

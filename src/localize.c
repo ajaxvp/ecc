@@ -1084,6 +1084,185 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
     }
 }
 
+/*
+... va_start(_1);
+
+becomes:
+
+unsigned long long int _2 = %rbp;
+_2 -= 176;
+*(_1 + 8) = _2;
+_2 += 128;
+*_1 = _2;
+_2 += 64;
+*(_1 + 16) = _2;
+
+*/
+void localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    symbol_t* fsy = routine->sy;
+    syntax_component_t* fdeclr = syntax_get_full_declarator(fsy->declarer);
+    if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) report_return;
+    vector_t* pdecls = fdeclr->fdeclr_parameter_declarations;
+    if (!pdecls) report_return;
+
+    long long intoffset = -48;
+    long long sseoffset = -176;
+    long long stackoffset = 16;
+
+    VECTOR_FOR(syntax_component_t*, pdecl, pdecls)
+    {
+        syntax_component_t* id = syntax_get_declarator_identifier(pdecl->pdecl_declr);
+        if (!id) report_return;
+        symbol_t* psy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
+        if (!psy) report_return;
+        c_type_t* pt = psy->type;
+        size_t ccount = 0;
+        arg_class_t* classes = find_classes(pt, &ccount);
+        if (!classes) report_return;
+        for (size_t j = 0; j < ccount; ++j)
+        {
+            arg_class_t class = classes[i];
+            switch (class)
+            {
+                case ARG_INTEGER:
+                    if (intoffset == 0)
+                        stackoffset += UNSIGNED_LONG_LONG_INT_WIDTH;
+                    else
+                        intoffset += UNSIGNED_LONG_LONG_INT_WIDTH;
+                    break;
+                case ARG_SSE:
+                    if (sseoffset == -48)
+                        stackoffset += UNSIGNED_LONG_LONG_INT_WIDTH;
+                    else
+                        sseoffset += 16;
+                    break;
+                case ARG_MEMORY:
+                    stackoffset += UNSIGNED_LONG_LONG_INT_WIDTH;
+                    break;
+                case ARG_NO_CLASS:
+                case ARG_COMPLEX_X87:
+                case ARG_SSEUP:
+                case ARG_X87:
+                case ARG_X87UP:
+                    break;
+            }
+        }
+        free(classes);
+    }
+
+    regid_t reg = NEXT_VIRTUAL_REGISTER;
+
+    regid_t valist_reg = insn->ops[1]->content.reg;
+
+    air_insn_t* ld_rbp = air_insn_init(AIR_LOAD, 2);
+    ld_rbp->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    ld_rbp->ops[0] = air_insn_register_operand_init(reg);
+    ld_rbp->ops[1] = air_insn_register_operand_init(X86R_RBP);
+    air_insn_insert_before(ld_rbp, insn);
+
+    air_insn_t* sub = air_insn_init(AIR_DIRECT_SUBTRACT, 2);
+    sub->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    sub->ops[0] = air_insn_register_operand_init(reg);
+    sub->ops[1] = air_insn_integer_constant_operand_init(abs(sseoffset));
+    air_insn_insert_before(sub, insn);
+
+    air_insn_t* ld_ssepos = air_insn_init(AIR_ASSIGN, 2);
+    ld_ssepos->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    ld_ssepos->ops[0] = air_insn_indirect_register_operand_init(valist_reg, 8, INVALID_VREGID, 1);
+    ld_ssepos->ops[1] = air_insn_register_operand_init(reg);
+    air_insn_insert_before(ld_ssepos, insn);
+
+    air_insn_t* add1 = air_insn_init(AIR_DIRECT_ADD, 2);
+    add1->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    add1->ops[0] = air_insn_register_operand_init(reg);
+    add1->ops[1] = air_insn_integer_constant_operand_init(intoffset - sseoffset);
+    air_insn_insert_before(add1, insn);
+
+    air_insn_t* ld_intpos = air_insn_init(AIR_ASSIGN, 2);
+    ld_intpos->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    ld_intpos->ops[0] = air_insn_indirect_register_operand_init(valist_reg, 0, INVALID_VREGID, 1);
+    ld_intpos->ops[1] = air_insn_register_operand_init(reg);
+    air_insn_insert_before(ld_intpos, insn);
+
+    air_insn_t* add2 = air_insn_init(AIR_DIRECT_ADD, 2);
+    add2->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    add2->ops[0] = air_insn_register_operand_init(reg);
+    add2->ops[1] = air_insn_integer_constant_operand_init(stackoffset - intoffset);
+    air_insn_insert_before(add2, insn);
+
+    air_insn_t* ld_stackpos = air_insn_init(AIR_ASSIGN, 2);
+    ld_stackpos->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    ld_stackpos->ops[0] = air_insn_indirect_register_operand_init(valist_reg, 16, INVALID_VREGID, 1);
+    ld_stackpos->ops[1] = air_insn_register_operand_init(reg);
+    air_insn_insert_before(ld_stackpos, insn);
+
+    air_insn_remove(insn);
+}
+
+/*
+type _2 = va_arg(_1)
+
+becomes:
+unsigned long long int _3 = *(_1 + offset of pos for type);
+type _2 = *_3;
+*(_1 + offset of pos for type) += (pos increment for type);
+
+*/
+void localize_x86_64_va_arg(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    c_type_t* ct = insn->ct;
+
+    // TODO: do actual ABI class analysis
+    size_t offset = 0;
+    size_t increment = 0;
+    if (type_is_integer(ct) || ct->class == CTC_POINTER)
+    {
+        offset = 0;
+        increment = 8;
+    }
+    else if (ct->class == CTC_FLOAT || ct->class == CTC_DOUBLE)
+    {
+        offset = 8;
+        increment = 16;
+    }
+    else
+    {
+        offset = 16;
+        increment = 8;
+    }
+
+    regid_t reg = insn->ops[0]->content.reg;
+    regid_t valist_reg = insn->ops[1]->content.reg;
+
+    regid_t posreg = NEXT_VIRTUAL_REGISTER;
+
+    air_insn_t* ld_pos = air_insn_init(AIR_LOAD, 2);
+    ld_pos->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    ld_pos->ops[0] = air_insn_register_operand_init(posreg);
+    ld_pos->ops[1] = air_insn_indirect_register_operand_init(valist_reg, offset, INVALID_VREGID, 1);
+    air_insn_insert_before(ld_pos, insn);
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(reg);
+    ld->ops[1] = air_insn_indirect_register_operand_init(posreg, 0, INVALID_VREGID, 1);
+    air_insn_insert_before(ld, insn);
+
+    air_insn_t* add = air_insn_init(AIR_DIRECT_ADD, 2);
+    add->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    add->ops[0] = air_insn_indirect_register_operand_init(valist_reg, offset, INVALID_VREGID, 1);
+    add->ops[1] = air_insn_integer_constant_operand_init(increment);
+    air_insn_insert_before(add, insn);
+
+    air_insn_remove(insn);
+}
+
+void localize_x86_64_va_end(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    air_insn_remove(insn);
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1102,6 +1281,15 @@ void localize_x86_64(air_t* air)
                 case AIR_DIVIDE:
                 case AIR_MODULO:
                     localize_x86_64_divide_modulo(insn, routine, air);
+                    break;
+                case AIR_VA_START:
+                    localize_x86_64_va_start(insn, routine, air);
+                    break;
+                case AIR_VA_ARG:
+                    localize_x86_64_va_arg(insn, routine, air);
+                    break;
+                case AIR_VA_END:
+                    localize_x86_64_va_end(insn, routine, air);
                     break;
                 default:
                     break;

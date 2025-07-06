@@ -2317,15 +2317,18 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
     FINALIZE_LINEARIZE;
 }
 
-static void linearize_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+static void linearize_va_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_type_t type)
 {
     SETUP_LINEARIZE;
+
+    if (type == AIR_VA_START)
+        AIRINIZING_TRAVERSER->croutine->uses_varargs = true;
 
     syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
     
     COPY_CODE(arg_ap);
 
-    air_insn_t* insn = air_insn_init(AIR_VA_ARG, 2);
+    air_insn_t* insn = air_insn_init(type, 2);
     insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
     insn->ops[1] = air_insn_register_operand_init(arg_ap->expr_reg);
@@ -2337,7 +2340,11 @@ static void linearize_va_arg_intrinsic_call_expression_after(syntax_traverser_t*
 static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (streq(syn->icallexpr_name, "_ecc_va_arg"))
-        linearize_va_arg_intrinsic_call_expression_after(trav, syn);
+        linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_ARG);
+    else if (streq(syn->icallexpr_name, "_ecc_va_start"))
+        linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_START);
+    else if (streq(syn->icallexpr_name, "_ecc_va_end"))
+        linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_END);
     else
         report_return;
 }

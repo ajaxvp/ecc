@@ -457,6 +457,25 @@ void x86_write_data(x86_asm_data_t* data, FILE* out)
     }
 }
 
+static void x86_write_varargs_setup(x86_asm_routine_t* routine, FILE* out)
+{
+    fprintf(out, "    movq %%r9, -8(%%rbp)\n");
+    fprintf(out, "    movq %%r8, -16(%%rbp)\n");
+    fprintf(out, "    movq %%rcx, -16(%%rbp)\n");
+    fprintf(out, "    movq %%rdx, -24(%%rbp)\n");
+    fprintf(out, "    movq %%rdx, -32(%%rbp)\n");
+    fprintf(out, "    movq %%rsi, -40(%%rbp)\n");
+    fprintf(out, "    movq %%rdi, -48(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm7, -64(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm6, -80(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm5, -96(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm4, -112(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm3, -128(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm2, -144(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm1, -160(%%rbp)\n");
+    fprintf(out, "    movaps %%xmm0, -176(%%rbp)\n");
+}
+
 void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
 {
     if (routine->global)
@@ -469,6 +488,8 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         long long v = llabs(routine->stackalloc);
         fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
     }
+    if (routine->uses_varargs)
+        x86_write_varargs_setup(routine, out);
     size_t lr_jumps = 0;
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
     {
@@ -800,9 +821,16 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
             default: report_return_value(NULL);
         }
     }
-    else
+    else if (type_is_unsigned_integer(ainsn->ct))
+    {
         // TODO: handle unsigned integers
-        report_return_value(NULL);
+        switch (ainsn->type)
+        {
+            case AIR_DIRECT_ADD: type = X86I_ADD; break;
+            case AIR_DIRECT_SUBTRACT: type = X86I_SUB; break;
+            default: report_return_value(NULL);
+        }
+    }
     
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1138,6 +1166,11 @@ x86_asm_routine_t* x86_generate_routine(air_routine_t* aroutine, x86_asm_file_t*
     routine->global = symbol_get_linkage(aroutine->sy) == LK_EXTERNAL;
     routine->label = strdup(symbol_get_name(aroutine->sy));
     routine->stackalloc = 0;
+    if (aroutine->uses_varargs)
+    {
+        routine->stackalloc -= 176;
+        routine->uses_varargs = true;
+    }
     x86_insn_t* last = NULL;
     for (air_insn_t* ainsn = aroutine->insns; ainsn; ainsn = ainsn->next)
     {

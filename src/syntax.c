@@ -1525,6 +1525,16 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         case SC_MODULAR_EXPRESSION:
         case SC_DIVISION_EXPRESSION:
         case SC_MULTIPLICATION_EXPRESSION:
+        case SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION:
+        case SC_DIVISION_ASSIGNMENT_EXPRESSION:
+        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
+        case SC_ADDITION_ASSIGNMENT_EXPRESSION:
+        case SC_SUBTRACTION_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
         {
             free_syntax(syn->bexpr_lhs, tlu);
             free_syntax(syn->bexpr_rhs, tlu);
