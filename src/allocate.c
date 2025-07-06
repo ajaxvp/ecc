@@ -125,12 +125,12 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
 
         uint64_t start_mark = i + 1;
 
-        if (start_mark > end_mark && reg > NO_PHYSICAL_REGISTERS)
-        {
-            map_remove(a->map, (void*) reg);
-            insn = air_insn_remove(insn);
-            continue;
-        }
+        // if (start_mark > end_mark && reg > NO_PHYSICAL_REGISTERS)
+        // {
+        //     map_remove(a->map, (void*) reg);
+        //     insn = air_insn_remove(insn);
+        //     continue;
+        // }
 
         vector_add(info->live_starts, (void*) (start_mark));
         vector_add(info->live_ends, (void*) end_mark);

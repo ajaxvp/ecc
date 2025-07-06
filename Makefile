@@ -5,16 +5,16 @@ BUILD=$(addprefix build/, $(OBJS))
 default: buildfolder libc/libc.a libecc/libecc.a $(EXE)
 
 test: buildfolder libc/libc.a libecc/libecc.a $(EXE)
-	cd test && $(MAKE) clean && $(MAKE) && ./test
+	cd test && $(MAKE) && ./test
 
 buildfolder:
 	mkdir -p build
 
 libc/libc.a:
-	cd libc && $(MAKE) clean && $(MAKE)
+	cd libc && $(MAKE)
 
 libecc/libecc.a:
-	cd libecc && $(MAKE) clean && $(MAKE)
+	cd libecc && $(MAKE)
 
 $(EXE): $(BUILD)
 	gcc -g -o $(EXE) $^ $(LIBS)
@@ -23,5 +23,8 @@ build/%.o: src/%.c
 	gcc -c -g -Wall -Werror=vla --std=c99 -o $@ $<
 
 clean:
+	cd test && $(MAKE) clean
+	cd libc && $(MAKE) clean
+	cd libecc && $(MAKE) clean
 	rm -f $(EXE) $(BUILD)
 	rm -rf build
