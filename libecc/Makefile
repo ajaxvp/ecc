@@ -2,6 +2,8 @@ OUT=libecc.a
 OBJS=crt0.o
 BUILD=$(addprefix build/, $(OBJS))
 
+.PHONY: default buildfolder clean
+
 default: buildfolder $(OUT)
 
 buildfolder:

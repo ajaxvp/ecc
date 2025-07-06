@@ -2,6 +2,8 @@ OUT=libc.a
 OBJS=putchar.o puts.o strlen.o stdlib.o
 BUILD=$(addprefix build/, $(OBJS))
 
+.PHONY: default buildfolder clean
+
 default: buildfolder $(OUT)
 
 buildfolder:
