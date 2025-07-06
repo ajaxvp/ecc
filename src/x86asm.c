@@ -394,8 +394,18 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_MOV: USUAL_2OP("mov")
         case X86I_MOVSS: USUAL_2OP("movss")
         case X86I_MOVSD: USUAL_2OP("movsd")
-        case X86I_MOVSX: USUAL_2OP("movsx")
-        case X86I_MOVZX: USUAL_2OP("movzx")
+        case X86I_MOVSX:
+            fprintf(file, INDENT "movsx ");
+            x86_write_operand(insn->op1, insn->source_size, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
+        case X86I_MOVZX:
+            fprintf(file, INDENT "movzx ");
+            x86_write_operand(insn->op1, insn->source_size, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
         case X86I_LEA: USUAL_2OP("lea")
         case X86I_AND: USUAL_2OP("and")
         case X86I_OR: USUAL_2OP("or")
@@ -636,6 +646,7 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
             snprintf(label, MAX_CONSTANT_LOCAL_LABEL_LENGTH, ".L%c%llu", aop->content.label.disambiguator, aop->content.label.id);
             return make_operand_label(label);
         case AOP_FLOATING_CONSTANT:
+        case AOP_TYPE:
             report_return_value(NULL);
     }
     report_return_value(NULL);
@@ -1028,6 +1039,7 @@ x86_insn_t* x86_generate_extension(air_insn_t* ainsn, x86_asm_routine_t* routine
 {
     x86_insn_t* insn = make_basic_x86_insn(ainsn->type == AIR_SEXT ? X86I_MOVSX : X86I_MOVZX);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->source_size = c_type_to_x86_operand_size(ainsn->ops[2]->content.ct);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     return insn;

@@ -172,6 +172,9 @@ void air_insn_operand_print(air_insn_operand_t* op, c_type_t* ict, air_t* air, i
         case AOP_LABEL:
             printer(".L%c%llu", op->content.label.disambiguator, op->content.label.id);
             break;
+        case AOP_TYPE:
+            type_humanized_print(op->content.ct, printer);
+            break;
     }
 }
 
@@ -264,10 +267,10 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             TYPE OP(0) EQUALS OP(1) OPERATOR(*) OP(2) SEMICOLON
             break;
         case AIR_SEXT:
-            TYPE OP(0) EQUALS printer("sext"); LPAREN OP(1) RPAREN SEMICOLON
+            TYPE OP(0) EQUALS printer("sext"); LPAREN OP(1) COMMA OP(2) RPAREN SEMICOLON
             break;
         case AIR_ZEXT:
-            TYPE OP(0) EQUALS printer("zext"); LPAREN OP(1) RPAREN SEMICOLON
+            TYPE OP(0) EQUALS printer("zext"); LPAREN OP(1) COMMA OP(2) RPAREN SEMICOLON
             break;
         case AIR_S2D:
         case AIR_SI2D:
@@ -516,6 +519,9 @@ air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op)
             n->content.insy.sy = op->content.insy.sy;
             n->content.insy.offset = op->content.insy.offset;
             break;
+        case AOP_TYPE:
+            n->content.ct = type_copy(op->content.ct);
+            break;
     }
     return n;
 }
@@ -531,6 +537,13 @@ air_insn_operand_t* air_insn_register_operand_init(regid_t reg)
 {
     air_insn_operand_t* op = air_insn_operand_init(AOP_REGISTER);
     op->content.reg = reg;
+    return op;
+}
+
+air_insn_operand_t* air_insn_type_operand_init(c_type_t* ct)
+{
+    air_insn_operand_t* op = air_insn_operand_init(AOP_TYPE);
+    op->content.ct = type_copy(ct);
     return op;
 }
 
@@ -1324,13 +1337,21 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
     bool fd = from->class == CTC_DOUBLE || from->class == CTC_LONG_DOUBLE;
     bool tf = to->class == CTC_FLOAT;
     bool td = to->class == CTC_DOUBLE || to->class == CTC_LONG_DOUBLE;
+
+    int operands = 2;
     
     if ((type_is_signed_integer(from) || from->class == CTC_CHAR) && type_is_integer(to) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
+    {
         type = AIR_SEXT;
+        operands = 3;
+    }
     else if (type_is_unsigned_integer(from) && (type_is_integer(to) || to->class == CTC_CHAR) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
+    {
         type = AIR_ZEXT;
+        operands = 3;
+    }
     else if (ff & td)
         type = AIR_S2D;
     else if (fd && tf)
@@ -1355,11 +1376,13 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
     regid_t result = reg;
     if (type != AIR_NOP)
     {
-        air_insn_t* insn = air_insn_init(type, 2);
+        air_insn_t* insn = air_insn_init(type, operands);
         insn->ct = type_copy(to);
         result = NEXT_VIRTUAL_REGISTER;
         insn->ops[0] = air_insn_register_operand_init(result);
         insn->ops[1] = air_insn_register_operand_init(reg);
+        if (type == AIR_SEXT || type == AIR_ZEXT)
+            insn->ops[2] = air_insn_type_operand_init(from);
         ADD_CODE(insn);
     }
     *c = code;

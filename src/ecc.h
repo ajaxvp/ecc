@@ -503,6 +503,7 @@ typedef enum air_insn_operand_type {
     AOP_INTEGER_CONSTANT,
     AOP_FLOATING_CONSTANT,
     AOP_LABEL,
+    AOP_TYPE,
 } air_insn_operand_type_t;
 
 typedef struct air_insn_operand {
@@ -530,6 +531,7 @@ typedef struct air_insn_operand {
             unsigned long long id;
             char disambiguator;
         } label;
+        c_type_t* ct;
     } content;
 } air_insn_operand_t;
 
@@ -805,6 +807,7 @@ typedef struct x86_insn
 {
     x86_insn_type_t type;
     x86_insn_size_t size;
+    x86_insn_size_t source_size;
     x86_operand_t* op1;
     x86_operand_t* op2;
     x86_operand_t* op3;
