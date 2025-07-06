@@ -1328,7 +1328,7 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
     if ((type_is_signed_integer(from) || from->class == CTC_CHAR) && type_is_integer(to) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
         type = AIR_SEXT;
-    else if (type_is_unsigned_integer(from) && type_is_integer(to) && 
+    else if (type_is_unsigned_integer(from) && (type_is_integer(to) || to->class == CTC_CHAR) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
         type = AIR_ZEXT;
     else if (ff & td)
