@@ -305,6 +305,7 @@ typedef struct program_options
     bool rflag;
     bool ssflag;
     bool cflag;
+    char* oflag;
 } program_options_t;
 
 typedef struct preprocessing_token

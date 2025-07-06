@@ -47,6 +47,7 @@ int usage(void)
     printf("Usage: ecc [options] file...\n");
     printf("Options:\n");
     printf("  %-*sDisplay this help message\n", OPTION_DESCRIPTION_LENGTH, "-h");
+    printf("  %-*sSet output filepath\n", OPTION_DESCRIPTION_LENGTH, "-o");
     printf("  %-*sCompile, but do not assemble or link\n", OPTION_DESCRIPTION_LENGTH, "-S");
     printf("  %-*sCompile and assemble, but do not link\n", OPTION_DESCRIPTION_LENGTH, "-c");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
@@ -65,7 +66,7 @@ x86_asm_file_t* compile_object(char* filename)
     FILE* file = fopen(filename, "r");
     if (!file)
     {
-        errorf("file '%s' not found", filename);
+        errorf("file '%s' not found\n", filename);
         return NULL;
     }
     preprocessing_token_t* tokens = lex(file, true);
@@ -362,7 +363,7 @@ char* linker(char** object_files, size_t object_count, char* target)
         argv[1 + object_count] = "libecc/libecc.a";
         argv[2 + object_count] = "libc/libc.a";
         argv[1 + object_count + NO_LIBRARIES] = "-o";
-        argv[2 + object_count + NO_LIBRARIES] = "a.out";
+        argv[2 + object_count + NO_LIBRARIES] = exec_filepath;
         argv[3 + object_count + NO_LIBRARIES] = NULL;
         int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
         if (status == -1)
@@ -389,7 +390,7 @@ char* linker(char** object_files, size_t object_count, char* target)
 bool get_options(int argc, char** argv)
 {
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpaxLArcS")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpaxLArcSo:")) != -1;)
     {
         switch (c)
         {
@@ -425,6 +426,9 @@ bool get_options(int argc, char** argv)
             case 'S':
                 opts.ssflag = true;
                 break;
+            case 'o':
+                opts.oflag = optarg;
+                break;
             case '?':
             default:
             {
@@ -438,9 +442,14 @@ bool get_options(int argc, char** argv)
 
 int handle_ss_flag(int argc, char** argv)
 {
+    if (opts.oflag && argc - optind > 1)
+    {
+        errorf("the -o flag can only be used with the -S flag with one file is given as input\n");
+        return EXIT_FAILURE;
+    }
     for (int i = optind; i < argc; ++i)
     {
-        char* created = replace_extension(argv[i], ".s");
+        char* created = opts.oflag ? strdup(opts.oflag) : replace_extension(argv[i], ".s");
         char* asm_filepath = compile(argv[i], created);
         free(created);
         if (!asm_filepath)
@@ -452,9 +461,14 @@ int handle_ss_flag(int argc, char** argv)
 
 int handle_c_flag(int argc, char** argv)
 {
+    if (opts.oflag && argc - optind > 1)
+    {
+        errorf("the -o flag can only be used with the -c flag with one file is given as input\n");
+        return EXIT_FAILURE;
+    }
     for (int i = optind; i < argc; ++i)
     {
-        char* created = replace_extension(argv[i], ".o");
+        char* created = opts.oflag ? strdup(opts.oflag) : replace_extension(argv[i], ".o");
         char* obj_filepath = assemble(argv[i], created);
         free(created);
         if (!obj_filepath)
@@ -496,7 +510,7 @@ int main(int argc, char** argv)
         objects[i - optind] = obj_filepath;
     }
 
-    char* exec_filepath = linker(objects, object_count, NULL);
+    char* exec_filepath = linker(objects, object_count, opts.oflag);
 
     delete_array((void**) objects, object_count);
 

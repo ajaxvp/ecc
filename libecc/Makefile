@@ -8,14 +8,14 @@ buildfolder:
 	mkdir -p build
 
 $(OUT): $(BUILD)
-		ar r $(OUT) $^
+	ar r $(OUT) $^
 
 build/%.o: src/%.s
-		x86_64-linux-gnu-as -o $@ $<
+	x86_64-linux-gnu-as -o $@ $<
 
 build/%.o: src/%.c
-		gcc -pedantic-errors -std=c99 -c -o $@ $<
+	./../ecc -c -o $@ $<
 
 clean:
-		rm -f $(OUT) $(BUILD)
-		rm -rf build
+	rm -f $(OUT) $(BUILD)
+	rm -rf build
