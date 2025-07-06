@@ -141,7 +141,11 @@ bool x86_64_c_type_registers_compatible(c_type_t* t1, c_type_t* t2)
 {
     if (!t1 && !t2) return false;
     if (!t1 || !t2) return false;
-    if (type_is_integer(t1) && type_is_integer(t2))
+    bool t1_intreg = type_is_integer(t1) ||
+        t1->class == CTC_POINTER;
+    bool t2_intreg = type_is_integer(t2) ||
+        t2->class == CTC_POINTER;
+    if (t1_intreg && t2_intreg)
         return true;
     if (type_is_real_floating(t1) && type_is_real_floating(t2) &&
         t1->class != CTC_LONG_DOUBLE && t2->class != CTC_LONG_DOUBLE)
@@ -824,6 +828,15 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
     else if (type_is_unsigned_integer(ainsn->ct))
     {
         // TODO: handle unsigned integers
+        switch (ainsn->type)
+        {
+            case AIR_DIRECT_ADD: type = X86I_ADD; break;
+            case AIR_DIRECT_SUBTRACT: type = X86I_SUB; break;
+            default: report_return_value(NULL);
+        }
+    }
+    else if (ainsn->ct->class == CTC_POINTER)
+    {
         switch (ainsn->type)
         {
             case AIR_DIRECT_ADD: type = X86I_ADD; break;
