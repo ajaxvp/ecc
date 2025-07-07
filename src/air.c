@@ -1626,7 +1626,7 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
         data->data = calloc(syn->strl_length->intc + 1, sizeof(int));
         memcpy(data->data, syn->strl_wide, sizeof(int) * (syn->strl_length->intc + 1));
     }
-    vector_add(air->data, data);
+    vector_add(air->rodata, data);
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD_ADDR, 2);
     insn->ct = make_reference_type(syn->ctype);
