@@ -1728,8 +1728,7 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
         if (comp->ifs_else_group)
             remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->end);
         remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
-        preprocess_group(comp->ifs_if_group->ifg_parts, state);
-        return true;
+        return preprocess_group(comp->ifs_if_group->ifg_parts, state);
     }
     if (comp->ifs_elif_groups)
     {
@@ -1750,8 +1749,7 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
             if (comp->ifs_else_group)
                 remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->end);
             remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
-            preprocess_group(group->elifg_parts, state);
-            return true;
+            return preprocess_group(group->elifg_parts, state);
         }
     }
     // delete #if group, every #elif group, #else directive, and #endif directive
@@ -1765,7 +1763,7 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
         remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->directive_end);
     remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
     if (comp->ifs_else_group)
-        preprocess_group(comp->ifs_else_group->elseg_parts, state);
+        return preprocess_group(comp->ifs_else_group->elseg_parts, state);
     return true;
 }
 

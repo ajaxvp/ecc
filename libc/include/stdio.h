@@ -5,4 +5,6 @@ int putchar(int c);
 
 int puts(const char* str);
 
+int printf(const char* fmt, ...);
+
 #endif

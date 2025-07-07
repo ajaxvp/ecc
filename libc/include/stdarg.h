@@ -1,7 +1,7 @@
 #ifndef _STDARG_H
 #define _STDARG_H
 
-#include <stdint.h>
+#include "stdint.h"
 
 typedef struct _ecc_va_list
 {

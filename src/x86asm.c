@@ -509,13 +509,13 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
     {
         if (insn->type == X86I_JMP && insn->op1->type == X86OP_LABEL && streq(insn->op1->label, ".LR"))
         {
-            ++lr_jumps;
             if (!insn->next)
                 continue;
+            ++lr_jumps;
         }
         x86_write_insn(insn, out);
     }
-    if (lr_jumps > 1)
+    if (lr_jumps > 0)
         fprintf(out, ".LR:\n");
     fprintf(out, "    leave\n");
     fprintf(out, "    ret\n");
@@ -843,6 +843,7 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
         {
             case AIR_DIRECT_ADD: type = X86I_ADD; break;
             case AIR_DIRECT_SUBTRACT: type = X86I_SUB; break;
+            case AIR_DIRECT_AND: type = X86I_AND; break;
             default: report_return_value(NULL);
         }
     }

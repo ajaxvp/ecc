@@ -741,8 +741,8 @@ int _3 = _1 / _2;
 
 becomes:
 
-%eax = _1;
-%edx = 0;
+int %eax = _1;
+int %edx = 0;
 %eax = %edx:%eax / _2;
 int _3 = %eax;
 
@@ -755,12 +755,12 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     regid_t hresultreg = insn->type == AIR_DIVIDE ? X86R_RAX : X86R_RDX;
     if (insn->ops[0]->type != AOP_REGISTER) report_return;
     if (insn->ops[1]->type != AOP_REGISTER) report_return;
-    air_insn_t* assign_top = air_insn_init(AIR_ASSIGN, 2);
+    air_insn_t* assign_top = air_insn_init(AIR_LOAD, 2);
     assign_top->ct = type_copy(insn->ct);
     assign_top->ops[0] = air_insn_register_operand_init(X86R_RAX);
     assign_top->ops[1] = air_insn_register_operand_init(insn->ops[1]->content.reg);
     air_insn_insert_before(assign_top, insn);
-    air_insn_t* zero_rdx = air_insn_init(AIR_ASSIGN, 2);
+    air_insn_t* zero_rdx = air_insn_init(AIR_LOAD, 2);
     zero_rdx->ct = type_copy(insn->ct);
     zero_rdx->ops[0] = air_insn_register_operand_init(X86R_RDX);
     zero_rdx->ops[1] = air_insn_integer_constant_operand_init(0);
@@ -1263,6 +1263,29 @@ void localize_x86_64_va_end(air_insn_t* insn, air_routine_t* routine, air_t* air
     air_insn_remove(insn);
 }
 
+/*
+
+for comparison operators:
+
+int _3 = _1 == _2;
+
+becomes:
+
+int _3 = _1 == _2;
+_3 &= 1;
+
+*/
+void localize_x86_64_setcc_comparison(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    regid_t reg = insn->ops[0]->content.reg;
+
+    air_insn_t* and = air_insn_init(AIR_DIRECT_AND, 2);
+    and->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    and->ops[0] = air_insn_register_operand_init(reg);
+    and->ops[1] = air_insn_integer_constant_operand_init(1);
+    air_insn_insert_after(and, insn);
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1290,6 +1313,15 @@ void localize_x86_64(air_t* air)
                     break;
                 case AIR_VA_END:
                     localize_x86_64_va_end(insn, routine, air);
+                    break;
+                case AIR_LESS_EQUAL:
+                case AIR_LESS:
+                case AIR_GREATER_EQUAL:
+                case AIR_GREATER:
+                case AIR_EQUAL:
+                case AIR_INEQUAL:
+                case AIR_NOT:
+                    localize_x86_64_setcc_comparison(insn, routine, air);
                     break;
                 default:
                     break;

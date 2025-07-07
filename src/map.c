@@ -41,11 +41,35 @@ void set_set_deleter(map_t* m, void (*deleter)(void*))
 
 void map_resize(map_t* m)
 {
-    size_t old_capacity = m->capacity;
-    m->key = realloc(m->key, (m->capacity *= 2) * sizeof(void*));
-    memset(m->key + old_capacity, 0, (m->capacity - old_capacity) * sizeof(void*));
-    m->value = realloc(m->value, m->capacity * sizeof(void*));
-    memset(m->value + old_capacity, 0, (m->capacity - old_capacity) * sizeof(void*));
+    size_t new_capacity = m->capacity * 2;
+    void** nkey = calloc(new_capacity, sizeof(void*));
+    void** nvalue = calloc(new_capacity, sizeof(void*));
+    MAP_FOR(void*, void*, m)
+    {
+        if (MAP_IS_BAD_KEY) continue;
+
+        unsigned long h = m->hash(k) % new_capacity;
+
+        for (size_t i = h;;)
+        {
+            void* fk = nkey[i];
+            if (!fk || fk == TOMBSTONE)
+            {
+                nkey[i] = k;
+                nvalue[i] = v;
+                break;
+            }
+
+            i = (i + 1) % new_capacity;
+            if (i == h)
+                report_return;
+        }
+    }
+    free(m->key);
+    free(m->value);
+    m->key = nkey;
+    m->value = nvalue;
+    m->capacity = new_capacity;
 }
 
 // gets the index of the key, if it exists in the map

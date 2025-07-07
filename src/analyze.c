@@ -434,6 +434,8 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
             // ISO: 6.5.2.2 (5)
             syn->ctype = make_basic_type(CTC_VOID);
     }
+    else
+        syn->ctype = make_basic_type(CTC_ERROR);
 }
 
 void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
