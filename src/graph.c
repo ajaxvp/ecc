@@ -41,6 +41,7 @@ bool graph_add_edge(graph_t* graph, void* from, void* to)
         return false;
     set_add(from_set, to);
     set_add(to_set, from);
+    return true;
 }
 
 bool graph_remove_vertex(graph_t* graph, void* item)
@@ -50,6 +51,7 @@ bool graph_remove_vertex(graph_t* graph, void* item)
     map_t* vset = map_get(graph->lists, item);
     MAP_FOR(void*, void*, vset)
     {
+        (void) v;
         map_t* set = map_get(graph->lists, k);
         set_remove(set, item);
     }

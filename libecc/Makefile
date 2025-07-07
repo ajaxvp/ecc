@@ -1,23 +1,23 @@
 OUT=libecc.a
-OBJS=crt0.o
-BUILD=$(addprefix build/, $(OBJS))
+SOURCES := $(notdir $(shell find src -name '*.c') $(shell find src -name '*.s'))
+OBJECTS := $(addprefix build/,$(addsuffix .o,$(basename $(SOURCES))))
 
 .PHONY: default clean
 
-default: build $(OUT)
+default: $(OUT)
+
+clean:
+	rm -f $(OUT) $(OBJECTS)
+	rm -rf build
+
+$(OUT): $(OBJECTS)
+	ar r $(OUT) $^
+
+build/%.o: src/%.s build
+	x86_64-linux-gnu-as -o $@ $<
+
+build/%.o: src/%.c build
+	./../ecc -c -o $@ $<
 
 build:
 	mkdir -p build
-
-$(OUT): $(BUILD)
-	ar r $(OUT) $^
-
-build/%.o: src/%.s
-	x86_64-linux-gnu-as -o $@ $<
-
-build/%.o: src/%.c
-	./../ecc -c -o $@ $<
-
-clean:
-	rm -f $(OUT) $(BUILD)
-	rm -rf build

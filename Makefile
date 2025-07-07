@@ -1,16 +1,26 @@
-EXE=ecc
-OBJS=opt1.o opt4.o x86asm.o constexpr.o util.o tokenize.o allocate.o localize.o air.o preprocess.o type.o buffer.o const.o lex.o log.o traverse.o analyze.o parse.o map.o symbol.o syntax.o main.o vector.o
-BUILD=$(addprefix build/, $(OBJS))
+OUT=ecc
+SOURCES := $(notdir $(shell find src -name '*.c'))
+OBJECTS := $(addprefix build/,$(addsuffix .o,$(basename $(SOURCES))))
 
 .PHONY: default test clean
 
-default: build $(EXE) libecc/libecc.a libc/libc.a
+default: $(OUT) libecc/libecc.a libc/libc.a
 
-test: build $(EXE) libecc/libecc.a libc/libc.a
+test: $(OUT) libecc/libecc.a libc/libc.a
 	cd test && $(MAKE) && ./test
 
-build:
-	mkdir -p build
+clean:
+	cd test && $(MAKE) clean
+	cd libc && $(MAKE) clean
+	cd libecc && $(MAKE) clean
+	rm -f $(OUT) $(OBJECTS)
+	rm -rf build
+
+$(OUT): $(OBJECTS)
+	gcc -g -o $(OUT) $^
+
+build/%.o: src/%.c build
+	gcc -c -g -Wall -Werror=vla --std=c99 -o $@ $<
 
 libc/libc.a:
 	cd libc && $(MAKE)
@@ -18,15 +28,5 @@ libc/libc.a:
 libecc/libecc.a:
 	cd libecc && $(MAKE)
 
-$(EXE): $(BUILD)
-	gcc -g -o $(EXE) $^ $(LIBS)
-
-build/%.o: src/%.c
-	gcc -c -g -Wall -Werror=vla --std=c99 -o $@ $<
-
-clean:
-	cd test && $(MAKE) clean
-	cd libc && $(MAKE) clean
-	cd libecc && $(MAKE) clean
-	rm -f $(EXE) $(BUILD)
-	rm -rf build
+build:
+	mkdir -p build
