@@ -529,6 +529,8 @@ INTEGER:
 
     (if returning a struct)
     call(_2);
+    unsigned long long int %rax, %rdi, %rsi, %rdx, %rcx, %r8, %r9, %r10, %r11, %rsp;
+    double %xmm0, %xmm1, %xmm2, %xmm3, %xmm4, %xmm5, %xmm6, %xmm7;
     deref type __lv0;
     type _1 = &__lv0;
     *_1 = %rax;
@@ -537,6 +539,30 @@ INTEGER:
 
 void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
+    static const regid_t volatile_integer_registers[] = {
+        X86R_RAX,
+        X86R_RDI,
+        X86R_RSI,
+        X86R_RDX,
+        X86R_RCX,
+        X86R_R8,
+        X86R_R9,
+        X86R_R10,
+        X86R_R11,
+        X86R_RSP
+    };
+
+    static const regid_t volatile_sse_registers[] = {
+        X86R_XMM0,
+        X86R_XMM1,
+        X86R_XMM2,
+        X86R_XMM3,
+        X86R_XMM4,
+        X86R_XMM5,
+        X86R_XMM6,
+        X86R_XMM7
+    };
+
     if (insn->ops[0]->type != AOP_REGISTER) report_return;
 
     // initialize the integer register return sequence
@@ -561,6 +587,24 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     arg_class_t* classes = find_classes(ct, &ccount);
     if (!classes) report_return;
 
+    air_insn_t* pos = insn;
+
+    for (size_t i = 0; i < sizeof(volatile_integer_registers) / sizeof(volatile_integer_registers[0]); ++i)
+    {
+        air_insn_t* decl = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        decl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+        decl->ops[0] = air_insn_register_operand_init(volatile_integer_registers[i]);
+        pos = air_insn_insert_after(decl, pos);
+    }
+
+        for (size_t i = 0; i < sizeof(volatile_sse_registers) / sizeof(volatile_sse_registers[0]); ++i)
+    {
+        air_insn_t* decl = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        decl->ct = make_basic_type(CTC_DOUBLE);
+        decl->ops[0] = air_insn_register_operand_init(volatile_sse_registers[i]);
+        pos = air_insn_insert_after(decl, pos);
+    }
+
     // if there is a single class and it's INTEGER,
     // then the return value is in %rax, so pull it into the result register
 
@@ -570,20 +614,12 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     if (classes[0] == ARG_MEMORY ||
         (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION && classes[0] == ARG_INTEGER))
     {
-        // TODO: support cases where there are multiple INTEGER classes
-
-        // declare the register (for the register-allocator)
-        air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
-        declreg->ct = type_copy(insn->ct);
-        declreg->ops[0] = air_insn_register_operand_init(X86R_RAX);
-        air_insn_insert_after(declreg, insn);
-
         // load the actual value
         air_insn_t* load = air_insn_init(AIR_LOAD, 2);
         load->ct = type_copy(insn->ct);
         load->ops[0] = air_insn_register_operand_init(resreg);
         load->ops[1] = air_insn_register_operand_init(X86R_RAX);
-        air_insn_insert_after(load, declreg);
+        pos = air_insn_insert_after(load, pos);
         free(classes);
         return;
     }
@@ -592,18 +628,12 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     // then the return value is in %xmm0, so pull it into the result register
     if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION && classes[0] == ARG_SSE)
     {
-        // declare the register (for the register-allocator)
-        air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
-        declreg->ct = type_copy(insn->ct);
-        declreg->ops[0] = air_insn_register_operand_init(X86R_XMM0);
-        air_insn_insert_after(declreg, insn);
-
         // load the actual value
         air_insn_t* load = air_insn_init(AIR_LOAD, 2);
         load->ct = type_copy(insn->ct);
         load->ops[0] = air_insn_register_operand_init(resreg);
         load->ops[1] = air_insn_register_operand_init(X86R_XMM0);
-        air_insn_insert_after(load, declreg);
+        pos = air_insn_insert_after(load, pos);
         free(classes);
         return;
     }
@@ -626,7 +656,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     air_insn_t* decl = air_insn_init(AIR_DECLARE, 1);
     decl->ops[0] = air_insn_symbol_operand_init(lv);
 
-    air_insn_t* pos = air_insn_insert_after(decl, insn);
+    pos = air_insn_insert_after(decl, pos);
 
     // load the address of the local variable we just created
     air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
@@ -646,12 +676,6 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
         // if the class is INTEGER
         if (class == ARG_INTEGER)
         {
-            // declare the register before use (for register-allocator)
-            air_insn_t* declreg = air_insn_init(AIR_DECLARE_REGISTER, 1);
-            declreg->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-            declreg->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
-            pos = air_insn_insert_after(declreg, pos);
-
             // copy at most 8 bytes at a time
             long long to_be_copied = min(total_remaining, 8);
             for (long long copied = 0; copied < to_be_copied;)
@@ -1098,13 +1122,13 @@ _2 += 64;
 *(_1 + 16) = _2;
 
 */
-void localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* air)
+air_insn_t* localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     symbol_t* fsy = routine->sy;
     syntax_component_t* fdeclr = syntax_get_full_declarator(fsy->declarer);
-    if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) report_return;
+    if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) report_return_value(NULL);
     vector_t* pdecls = fdeclr->fdeclr_parameter_declarations;
-    if (!pdecls) report_return;
+    if (!pdecls) report_return_value(NULL);
 
     long long intoffset = -48;
     long long sseoffset = -176;
@@ -1113,13 +1137,13 @@ void localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* a
     VECTOR_FOR(syntax_component_t*, pdecl, pdecls)
     {
         syntax_component_t* id = syntax_get_declarator_identifier(pdecl->pdecl_declr);
-        if (!id) report_return;
+        if (!id) report_return_value(NULL);
         symbol_t* psy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-        if (!psy) report_return;
+        if (!psy) report_return_value(NULL);
         c_type_t* pt = psy->type;
         size_t ccount = 0;
         arg_class_t* classes = find_classes(pt, &ccount);
-        if (!classes) report_return;
+        if (!classes) report_return_value(NULL);
         for (size_t j = 0; j < ccount; ++j)
         {
             arg_class_t class = classes[i];
@@ -1198,6 +1222,8 @@ void localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* a
     air_insn_insert_before(ld_stackpos, insn);
 
     air_insn_remove(insn);
+
+    return ld_stackpos;
 }
 
 /*
@@ -1209,7 +1235,7 @@ type _2 = *_3;
 *(_1 + offset of pos for type) += (pos increment for type);
 
 */
-void localize_x86_64_va_arg(air_insn_t* insn, air_routine_t* routine, air_t* air)
+air_insn_t* localize_x86_64_va_arg(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     c_type_t* ct = insn->ct;
 
@@ -1256,11 +1282,13 @@ void localize_x86_64_va_arg(air_insn_t* insn, air_routine_t* routine, air_t* air
     air_insn_insert_before(add, insn);
 
     air_insn_remove(insn);
+
+    return add;
 }
 
-void localize_x86_64_va_end(air_insn_t* insn, air_routine_t* routine, air_t* air)
+air_insn_t* localize_x86_64_va_end(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    air_insn_remove(insn);
+    return air_insn_remove(insn);
 }
 
 /*
@@ -1306,13 +1334,13 @@ void localize_x86_64(air_t* air)
                     localize_x86_64_divide_modulo(insn, routine, air);
                     break;
                 case AIR_VA_START:
-                    localize_x86_64_va_start(insn, routine, air);
+                    insn = localize_x86_64_va_start(insn, routine, air);
                     break;
                 case AIR_VA_ARG:
-                    localize_x86_64_va_arg(insn, routine, air);
+                    insn = localize_x86_64_va_arg(insn, routine, air);
                     break;
                 case AIR_VA_END:
-                    localize_x86_64_va_end(insn, routine, air);
+                    insn = localize_x86_64_va_end(insn, routine, air);
                     break;
                 case AIR_LESS_EQUAL:
                 case AIR_LESS:

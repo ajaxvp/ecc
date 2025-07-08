@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "ecc.h"
 
@@ -234,6 +235,71 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
             return true;
     }
     return false;
+}
+
+#define X86_INSN_WRITES_OP1 (uint8_t) 0x01
+#define X86_INSN_WRITES_OP2 (uint8_t) 0x02
+#define X86_INSN_WRITES_OP3 (uint8_t) 0x04
+
+uint8_t x86_insn_writes(x86_insn_t* insn)
+{
+    if (!insn)
+        return 0;
+    switch (insn->type)
+    {
+        case X86I_UNKNOWN:
+        case X86I_NO_ELEMENTS:
+        case X86I_LABEL:
+        case X86I_CALL:
+        case X86I_PUSH:
+        case X86I_LEAVE:
+        case X86I_RET:
+        case X86I_JMP:
+        case X86I_JE:
+        case X86I_JNE:
+        case X86I_CMP:
+        case X86I_NOP:
+        case X86I_SKIP:
+            return 0;
+        case X86I_POP:
+        case X86I_SETE:
+        case X86I_SETNE:
+        case X86I_SETLE:
+        case X86I_SETL:
+        case X86I_SETGE:
+        case X86I_SETG:
+        case X86I_NOT:
+        case X86I_NEG:
+        case X86I_MUL:
+            return X86_INSN_WRITES_OP1;
+        case X86I_LEA:
+        case X86I_AND:
+        case X86I_OR:
+        case X86I_XOR:
+        case X86I_MOV:
+        case X86I_MOVZX:
+        case X86I_MOVSX:
+        case X86I_ADD:
+        case X86I_SUB:
+        case X86I_IMUL:
+        case X86I_DIV:
+        case X86I_IDIV:
+        case X86I_SHL:
+        case X86I_SHR:
+        case X86I_SAR:
+        case X86I_MOVSS:
+        case X86I_MOVSD:
+        case X86I_ADDSS:
+        case X86I_ADDSD:
+        case X86I_SUBSS:
+        case X86I_SUBSD:
+        case X86I_MULSS:
+        case X86I_MULSD:
+        case X86I_DIVSS:
+        case X86I_DIVSD:
+            return X86_INSN_WRITES_OP2;
+    }
+    return 0;
 }
 
 x86_insn_size_t c_type_to_x86_operand_size(c_type_t* ct)
@@ -490,8 +556,69 @@ static void x86_write_varargs_setup(x86_asm_routine_t* routine, FILE* out)
     fprintf(out, "    movaps %%xmm0, -176(%%rbp)\n");
 }
 
+static void x86_find_used_nonvolatiles(x86_asm_routine_t* routine)
+{
+    for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
+    {
+        uint8_t writes = x86_insn_writes(insn);
+        x86_operand_t* ops[] = { insn->op1, insn->op2, insn->op3 };
+        static uint8_t write_states[] = { X86_INSN_WRITES_OP1, X86_INSN_WRITES_OP2, X86_INSN_WRITES_OP3 };
+        for (size_t i = 0; i < 3; ++i)
+        {
+            if (!ops[i]) continue;
+            if ((writes & write_states[i]) && ops[i]->type == X86OP_REGISTER)
+            {
+                switch (insn->op1->reg)
+                {
+                    case X86R_RBX: routine->used_nonvolatiles |= USED_NONVOLATILES_RBX; break;
+                    case X86R_R12: routine->used_nonvolatiles |= USED_NONVOLATILES_R12; break;
+                    case X86R_R13: routine->used_nonvolatiles |= USED_NONVOLATILES_R13; break;
+                    case X86R_R14: routine->used_nonvolatiles |= USED_NONVOLATILES_R14; break;
+                    case X86R_R15: routine->used_nonvolatiles |= USED_NONVOLATILES_R15; break;
+                    default: break;
+                }
+            }
+        }
+    }
+}
+
+static uint16_t NONVOLATILE_FLAGS[] = {
+    USED_NONVOLATILES_RBX,
+    USED_NONVOLATILES_R12,
+    USED_NONVOLATILES_R13,
+    USED_NONVOLATILES_R14,
+    USED_NONVOLATILES_R15
+};
+
+static const char* NONVOLATILE_REGISTER_NAMES[] = {
+    "rbx",
+    "r12",
+    "r13",
+    "r14",
+    "r15"
+};
+
+static void x86_write_routine_push_nonvolatiles(x86_asm_routine_t* routine, FILE* out)
+{
+    for (int i = 0; i < sizeof(NONVOLATILE_FLAGS) / sizeof(NONVOLATILE_FLAGS[0]); ++i)
+    {
+        if (routine->used_nonvolatiles & NONVOLATILE_FLAGS[i])
+            fprintf(out, "    pushq %%%s\n", NONVOLATILE_REGISTER_NAMES[i]);
+    }
+}
+
+static void x86_write_routine_pop_nonvolatiles(x86_asm_routine_t* routine, FILE* out)
+{
+    for (int i = sizeof(NONVOLATILE_FLAGS) / sizeof(NONVOLATILE_FLAGS[0]) - 1; i >= 0; --i)
+    {
+        if (routine->used_nonvolatiles & NONVOLATILE_FLAGS[i])
+            fprintf(out, "    popq %%%s\n", NONVOLATILE_REGISTER_NAMES[i]);
+    }
+}
+
 void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
 {
+    x86_find_used_nonvolatiles(routine);
     if (routine->global)
         fprintf(out, "    .globl %s\n", routine->label);
     fprintf(out, "%s:\n", routine->label);
@@ -502,6 +629,7 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         long long v = llabs(routine->stackalloc);
         fprintf(out, "    subq $%lld, %%rsp\n", v + (16 - (v % 16)) % 16);
     }
+    x86_write_routine_push_nonvolatiles(routine, out);
     if (routine->uses_varargs)
         x86_write_varargs_setup(routine, out);
     size_t lr_jumps = 0;
@@ -517,6 +645,7 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
     }
     if (lr_jumps > 0)
         fprintf(out, ".LR:\n");
+    x86_write_routine_pop_nonvolatiles(routine, out);
     fprintf(out, "    leave\n");
     fprintf(out, "    ret\n");
 }

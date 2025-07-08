@@ -42,6 +42,8 @@ int printf(const char* fmt, ...)
             c = *++fmt;
             if (c == 'd')
                 _ecc_printf_int(va_arg(list, int));
+            else if (c == 's')
+                puts(va_arg(list, char*));
         }
         else
             putchar(c);

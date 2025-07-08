@@ -198,11 +198,17 @@ x86_asm_file_t* compile_object(char* filename)
 
     air_t* air = airinize(tlu);
 
+    if (opts.iflag)
+    {
+        printf("<<AIR>>\n");
+        air_print(air, printf);
+    }
+
     opt1(air, opt1_profile_basic());
 
     if (opts.iflag)
     {
-        printf("<<AIR>>\n");
+        printf("<<AIR (optimized)>>\n");
         air_print(air, printf);
     }
 

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define debug in_debug()
 
@@ -823,12 +824,19 @@ typedef struct x86_asm_data
     size_t length;
 } x86_asm_data_t;
 
+#define USED_NONVOLATILES_RBX (uint16_t) 0x0001
+#define USED_NONVOLATILES_R12 (uint16_t) 0x0002
+#define USED_NONVOLATILES_R13 (uint16_t) 0x0004
+#define USED_NONVOLATILES_R14 (uint16_t) 0x0008
+#define USED_NONVOLATILES_R15 (uint16_t) 0x0010
+
 typedef struct x86_asm_routine
 {
     bool global;
     char* label;
     long long stackalloc;
     bool uses_varargs;
+    uint16_t used_nonvolatiles;
     x86_insn_t* insns;
 } x86_asm_routine_t;
 
@@ -845,6 +853,7 @@ typedef struct x86_asm_file
 typedef struct opt1_options
 {
     bool inline_fcalls;
+    bool remove_fcall_passing_lifetimes;
 } opt1_options_t;
 
 typedef struct opt4_options
@@ -1835,6 +1844,8 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
 void air_insn_delete_all(air_insn_t* insns);
 air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting);
 air_insn_t* air_insn_insert_before(air_insn_t* insn, air_insn_t* inserting);
+air_insn_t* air_insn_move_before(air_insn_t* insn, air_insn_t* inserting);
+air_insn_t* air_insn_move_after(air_insn_t* insn, air_insn_t* inserting);
 air_insn_t* air_insn_remove(air_insn_t* insn);
 air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op);
 void air_insn_operand_delete(air_insn_operand_t* op);
@@ -1848,8 +1859,11 @@ air_insn_operand_t* air_insn_label_operand_init(unsigned long long label, char d
 air_insn_t* air_insn_init(air_insn_type_t type, size_t noops);
 bool air_insn_creates_temporary(air_insn_t* insn);
 air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start);
+air_insn_t* air_insn_find_temporary_definition_below(regid_t tmp, air_insn_t* start);
+air_insn_t* air_insn_find_temporary_definition_from_insn(regid_t tmp, air_insn_t* start);
 air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routine);
 bool air_insn_assigns(air_insn_t* insn);
+bool air_insn_uses(air_insn_t* insn, regid_t reg);
 
 /* localize.c */
 void localize(air_t* air, air_locale_t locale);

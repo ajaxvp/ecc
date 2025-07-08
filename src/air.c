@@ -756,6 +756,32 @@ bool air_insn_assigns(air_insn_t* insn)
     return false;
 }
 
+bool air_insn_uses(air_insn_t* insn, regid_t reg)
+{
+    if (!insn) return false;
+    for (size_t i = 0; i < insn->noops; ++i)
+    {
+        air_insn_operand_t* op = insn->ops[i];
+        if (!op) continue;
+        switch (op->type)
+        {
+            case AOP_REGISTER:
+                if (op->content.reg == reg)
+                    return true;
+                break;
+            case AOP_INDIRECT_REGISTER:
+                if (op->content.inreg.id == reg)
+                    return true;
+                if (op->content.inreg.roffset == reg)
+                    return true;
+                break;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
 air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* start)
 {
     for (; start; start = start->prev)
@@ -767,6 +793,26 @@ air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* st
             return start;
     }
     return NULL;
+}
+
+air_insn_t* air_insn_find_temporary_definition_below(regid_t tmp, air_insn_t* start)
+{
+    for (; start; start = start->next)
+    {
+        if (!air_insn_creates_temporary(start)) continue;
+        air_insn_operand_t* op = start->ops[0];
+        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        if (op->content.reg == tmp)
+            return start;
+    }
+    return NULL;
+}
+
+air_insn_t* air_insn_find_temporary_definition_from_insn(regid_t tmp, air_insn_t* start)
+{
+    air_insn_t* def = air_insn_find_temporary_definition_above(tmp, start);
+    if (def) return def;
+    return air_insn_find_temporary_definition_below(tmp, start);
 }
 
 air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routine)
@@ -808,19 +854,48 @@ air_insn_t* air_insn_insert_after(air_insn_t* insn, air_insn_t* inserting)
     return insn;
 }
 
-// prev insn next
-air_insn_t* air_insn_remove(air_insn_t* insn)
+static void air_insn_remove_from_list(air_insn_t* insn)
 {
-    if (!insn) return NULL;
+    if (!insn) return;
 
     if (insn->prev)
         insn->prev->next = insn->next;
 
     if (insn->next)
         insn->next->prev = insn->prev;
+    
+    insn->prev = NULL;
+    insn->next = NULL;
+}
+
+air_insn_t* air_insn_move_before(air_insn_t* insn, air_insn_t* inserting)
+{
+    if (!insn || !inserting) return NULL;
+
+    air_insn_remove_from_list(insn);
+    air_insn_insert_before(insn, inserting);
+
+    return insn;
+}
+
+air_insn_t* air_insn_move_after(air_insn_t* insn, air_insn_t* inserting)
+{
+    if (!insn || !inserting) return NULL;
+
+    air_insn_remove_from_list(insn);
+    air_insn_insert_after(insn, inserting);
+
+    return insn;
+}
+
+// prev insn next
+air_insn_t* air_insn_remove(air_insn_t* insn)
+{
+    if (!insn) return NULL;
 
     air_insn_t* prev = insn->prev;
 
+    air_insn_remove_from_list(insn);
     air_insn_delete(insn);
 
     return prev;
@@ -890,6 +965,8 @@ static void linearize_function_definition_after(syntax_traverser_t* trav, syntax
     air_routine_t* routine = AIRINIZING_TRAVERSER->croutine;
     routine->insns = air_insn_init(AIR_NOP, 0);
     routine->insns->next = copy_air_insn_sequence(syn->code);
+    if (routine->insns->next)
+        routine->insns->next->prev = routine->insns;
 
     // implicit return 0 for main
     if (streq(symbol_get_name(routine->sy), "main"))
@@ -2484,6 +2561,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_DESIGNATION] = linearize_no_action_after;
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_TYPE_QUALIFIER] = linearize_no_action_after;
+    trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

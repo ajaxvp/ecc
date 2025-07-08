@@ -152,6 +152,15 @@ static bool live_range_conflicts(allocator_t* a, regid_t r1, regid_t r2)
             uint64_t start2 = (uint64_t) vector_get(info2->live_starts, j);
             uint64_t end2 = (uint64_t) vector_get(info2->live_ends, j);
 
+            if (end1 + 1 == start1 && end2 + 1 == start2)
+                return true;
+
+            if (end1 + 1 == start1 && start2 <= end1 && end1 <= end2)
+                return true;
+            
+            if (end2 + 1 == start2 && start1 <= end2 && end2 <= end1)
+                return true;
+
             if (max(start1, start2) <= min(end1, end2))
                 return true;
         }
@@ -241,24 +250,27 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
         if (repl == INVALID_VREGID)
         {
             // go to the definition of the temporary
-            air_insn_t* def = air_insn_find_temporary_definition_above(reg, insn);
-            if (!def) report_return_value(INVALID_VREGID);
+            air_insn_t* def = air_insn_find_temporary_definition_from_insn(reg, insn);
+            if (!def)
+                report_return_value(INVALID_VREGID);
             // and examine its type
 
             // if it's an integer/pointer type, take next integer register available (skipping ones that were part of the allocation process)
             if (type_is_integer(def->ct) || def->ct->class == CTC_POINTER)
             {
-                for (; *nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) (*nextintreg)); ++(*nextintreg));
-                if (*nextintreg >= X86R_R15) report_return_value(INVALID_VREGID);
+                for (; (*nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) (*nextintreg))) || *nextintreg == X86R_RBP; ++(*nextintreg));
+                if (*nextintreg > X86R_R15) report_return_value(INVALID_VREGID);
                 map_add(a->replacements, (void*) reg, (void*) (repl = (*nextintreg)++));
             }
             // if it's a floating type, take next SSE register available (skipping in the same manner as above)
             else if (type_is_real_floating(def->ct))
             {
                 for (; *nextssereg <= X86R_XMM7 && map_contains_key(a->map, (void*) (*nextssereg)); ++(*nextssereg));
-                if (*nextssereg >= X86R_XMM7) report_return_value(INVALID_VREGID);
+                if (*nextssereg > X86R_XMM7) report_return_value(INVALID_VREGID);
                 map_add(a->replacements, (void*) reg, (void*) (repl = (*nextssereg)++));
             }
+            else if (def->ct->class == CTC_VOID)
+                return INVALID_VREGID;
             // TODO: complex numbas and maybe other?
             else
                 report_return_value(INVALID_VREGID);
