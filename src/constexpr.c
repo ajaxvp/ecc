@@ -218,35 +218,66 @@ constexpr_t* ce_make_integer(c_type_t* ct, unsigned long long value)
 
 #define errret { *class = CTC_ERROR; return; }
 
-// static bool representable(unsigned long long value, c_type_class_t class)
-// {
-//     #define representable_case(ctc, type) case ctc: return value == (type) value;
-//     switch (class)
-//     {
-//         representable_case(CTC_BOOL, bool)
-//         representable_case(CTC_CHAR, char)
-//         representable_case(CTC_SIGNED_CHAR, signed char)
-//         representable_case(CTC_SHORT_INT, short int)
-//         representable_case(CTC_INT, int)
-//         representable_case(CTC_LONG_INT, long int)
-//         representable_case(CTC_LONG_LONG_INT, long long int)
-//         representable_case(CTC_UNSIGNED_CHAR, unsigned char)
-//         representable_case(CTC_UNSIGNED_SHORT_INT, unsigned short int)
-//         representable_case(CTC_UNSIGNED_INT, unsigned int)
-//         representable_case(CTC_UNSIGNED_LONG_INT, unsigned long int)
-//         representable_case(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long int)
-//         representable_case(CTC_FLOAT, float)
-//         representable_case(CTC_DOUBLE, double)
-//         representable_case(CTC_LONG_DOUBLE, long double)
-//         representable_case(CTC_FLOAT_COMPLEX, float _Complex)
-//         representable_case(CTC_DOUBLE_COMPLEX, double _Complex)
-//         representable_case(CTC_LONG_DOUBLE_COMPLEX, long double _Complex)
-//         default: return false;
-//     }
-// }
+bool representable(unsigned long long value, c_type_class_t class)
+{
+    #define c(cl, ty) case cl: return (ty) value == value;
+    switch (class)
+    {
+        c(CTC_BOOL, bool);
+        c(CTC_CHAR, char);
+        c(CTC_SIGNED_CHAR, signed char);
+        c(CTC_UNSIGNED_CHAR, unsigned char);
+        c(CTC_SHORT_INT, short);
+        c(CTC_UNSIGNED_SHORT_INT, unsigned short);
+        c(CTC_INT, int);
+        c(CTC_UNSIGNED_INT, unsigned);
+        c(CTC_LONG_INT, long);
+        c(CTC_UNSIGNED_LONG_INT, unsigned long);
+        c(CTC_LONG_LONG_INT, long long);
+        c(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long);
+        default: return false;
+    }
+    #undef c
+    return false;
+}
+
+static void ce_evaluate_integer_value(syntax_component_t* expr, unsigned long long* value, c_type_class_t* class);
+
+#define ce_integer_binary_operation(name, operator) unsigned long long name (unsigned long long lhs, unsigned long long rhs) { return lhs operator rhs; }
+
+ce_integer_binary_operation(ce_add, +)
+ce_integer_binary_operation(ce_sub, -)
+ce_integer_binary_operation(ce_mul, *)
+ce_integer_binary_operation(ce_div, /)
+
+static void ce_evaluate_integer_binary_operation(syntax_component_t* expr,
+    unsigned long long* value,
+    c_type_class_t* class,
+    unsigned long long (*operation)(unsigned long long lhs, unsigned long long rhs))
+{
+    unsigned long long vlhs = 0;
+    c_type_class_t tclhs = CTC_ERROR;
+    ce_evaluate_integer_value(expr->bexpr_lhs, &vlhs, &tclhs);
+
+    unsigned long long vrhs = 0;
+    c_type_class_t tcrhs = CTC_ERROR;
+    ce_evaluate_integer_value(expr->bexpr_lhs, &vrhs, &tcrhs);
+
+    if (tclhs == CTC_ERROR || tcrhs == CTC_ERROR)
+    {
+        *value = 0;
+        *class = CTC_ERROR;
+        return;
+    }
+
+    *value = operation(vlhs, vrhs);
+    *class = expr->ctype->class;
+}
 
 static void ce_evaluate_integer_value(syntax_component_t* expr, unsigned long long* value, c_type_class_t* class)
 {
+    if (!expr->ctype)
+        report_return;
     if (!expr)
         errret;
     switch (expr->type)
@@ -257,25 +288,16 @@ static void ce_evaluate_integer_value(syntax_component_t* expr, unsigned long lo
             *class = expr->ctype->class;
             break;
         }
-        case SC_ENUMERATION_CONSTANT:
-        {
-            c_namespace_t* ns = syntax_get_namespace(expr);
-            symbol_t* sy = symbol_table_lookup(syntax_get_symbol_table(expr), expr, ns);
-            if (!sy) errret;
-            namespace_delete(ns);
-            if (!sy->declarer->parent || sy->declarer->parent->type != SC_ENUMERATOR) errret;
-            constexpr_t* ce = vector_get(sy->initial_values, 0);
-            if (!ce) report_return; // enum constant initializer isn't added yet
-            *value = ce->ivalue;
-            *class = CTC_INT;
-            break;
-        }
         case SC_CHARACTER_CONSTANT:
         {
             *value = expr->charc_value;
             *class = CTC_INT;
             break;
         }
+        case SC_ADDITION_EXPRESSION: ce_evaluate_integer_binary_operation(expr, value, class, ce_add); break;
+        case SC_SUBTRACTION_EXPRESSION: ce_evaluate_integer_binary_operation(expr, value, class, ce_sub); break;
+        case SC_MULTIPLICATION_EXPRESSION: ce_evaluate_integer_binary_operation(expr, value, class, ce_mul); break;
+        case SC_DIVISION_EXPRESSION: ce_evaluate_integer_binary_operation(expr, value, class, ce_div); break;
         case SC_SIZEOF_TYPE_EXPRESSION:
         {
             c_type_t* ct = create_type(expr->uexpr_operand, expr->uexpr_operand->tn_declarator);
@@ -331,6 +353,11 @@ constexpr_t* ce_evaluate_integer(syntax_component_t* expr)
     ce->type = CE_INTEGER;
     c_type_t* ct = calloc(1, sizeof *ct);
     ce_evaluate_integer_value(expr, &ce->ivalue, &ct->class);
+    if (!representable(ce->ivalue, ct->class))
+    {
+        constexpr_delete(ce);
+        return NULL;
+    }
     if (ct->class == CTC_ERROR)
     {
         constexpr_delete(ce);

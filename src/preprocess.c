@@ -1673,16 +1673,32 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
     tokenizing_settings_t settings;
     settings.error = state->settings->error;
     settings.filepath = state->settings->filepath;
+
     token_t* tokens = tokenize_sequence(condition->start, condition->end, &settings);
     if (settings.error[0])
         return 2;
     
     syntax_component_t* expr = parse_if_directive_expression(tokens, settings.error);
 
+    analysis_error_t* errors = analyze(expr);
+    if (errors)
+    {
+        dump_errors(errors);
+        if (error_list_size(errors, false) > 0)
+        {
+            (void) fail(condition->start, "could not evaluate constant expression");
+            error_delete_all(errors);
+            token_delete_all(tokens);
+            free_syntax(expr, NULL);
+            return 2;
+        }
+    }
+    error_delete_all(errors);
+
     constexpr_t* ce = ce_evaluate(expr, CE_INTEGER);
     if (!ce)
     {
-        (void) fail(condition->start, "#if/#elif directive expression must be a constant expression");
+        (void) fail(condition->start, "#if/#elif directive expression must be a constant expression and have a representable value for its type");
         return 2;
     }
     unsigned long long value = ce->ivalue;
@@ -1728,7 +1744,9 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
         if (comp->ifs_else_group)
             remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->end);
         remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
-        return preprocess_group(comp->ifs_if_group->ifg_parts, state);
+        if (comp->ifs_if_group->ifg_parts)
+            return preprocess_group(comp->ifs_if_group->ifg_parts, state);
+        return true;
     }
     if (comp->ifs_elif_groups)
     {
@@ -1749,7 +1767,9 @@ bool preprocess_if_section(preprocessing_component_t* comp, preprocessing_state_
             if (comp->ifs_else_group)
                 remove_token_sequence(comp->ifs_else_group->start, comp->ifs_else_group->end);
             remove_token_sequence(comp->ifs_endif_line->start, comp->ifs_endif_line->end);
-            return preprocess_group(group->elifg_parts, state);
+            if (group->elifg_parts)
+                return preprocess_group(group->elifg_parts, state);
+            return true;
         }
     }
     // delete #if group, every #elif group, #else directive, and #endif directive

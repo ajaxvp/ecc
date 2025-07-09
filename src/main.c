@@ -175,9 +175,12 @@ x86_asm_file_t* compile_object(char* filename)
             fclose(file);
             free_syntax(tlu, tlu);
             token_delete_all(ts);
+            error_delete_all(errors);
             return NULL;
         }
     }
+
+    error_delete_all(errors);
 
     if (opts.iflag)
     {
