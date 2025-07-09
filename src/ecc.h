@@ -832,6 +832,7 @@ typedef struct x86_asm_data
 
 typedef struct x86_asm_routine
 {
+    uint64_t id;
     bool global;
     char* label;
     long long stackalloc;
@@ -848,6 +849,7 @@ typedef struct x86_asm_file
     symbol_table_t* st;
     air_t* air;
     size_t next_constant_local_label;
+    uint64_t next_routine_id;
 } x86_asm_file_t;
 
 typedef struct opt1_options

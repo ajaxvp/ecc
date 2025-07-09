@@ -635,7 +635,7 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
     size_t lr_jumps = 0;
     for (x86_insn_t* insn = routine->insns; insn; insn = insn->next)
     {
-        if (insn->type == X86I_JMP && insn->op1->type == X86OP_LABEL && streq(insn->op1->label, ".LR"))
+        if (insn->type == X86I_JMP && insn->op1->type == X86OP_LABEL && starts_with_ignore_case(insn->op1->label, ".LR"))
         {
             if (!insn->next)
                 continue;
@@ -644,7 +644,11 @@ void x86_write_routine(x86_asm_routine_t* routine, FILE* out)
         x86_write_insn(insn, out);
     }
     if (lr_jumps > 0)
-        fprintf(out, ".LR:\n");
+    {
+        char buffer[6 + MAX_STRINGIFIED_INTEGER_LENGTH];
+        snprintf(buffer, sizeof(buffer), ".LR%lu:\n", routine->id);
+        fprintf(out, "%s", buffer);
+    }
     x86_write_routine_pop_nonvolatiles(routine, out);
     fprintf(out, "    leave\n");
     fprintf(out, "    ret\n");
@@ -858,7 +862,9 @@ x86_insn_t* x86_generate_declare(air_insn_t* ainsn, x86_asm_routine_t* routine, 
 x86_insn_t* x86_generate_return(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_t* jmp = make_basic_x86_insn(X86I_JMP);
-    jmp->op1 = make_operand_label(".LR");
+    char buffer[4 + MAX_STRINGIFIED_INTEGER_LENGTH];
+    snprintf(buffer, sizeof(buffer), ".LR%lu", routine->id);
+    jmp->op1 = make_operand_label(buffer);
     return jmp;
 }
 
@@ -1318,6 +1324,7 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
 x86_asm_routine_t* x86_generate_routine(air_routine_t* aroutine, x86_asm_file_t* file)
 {
     x86_asm_routine_t* routine = calloc(1, sizeof *routine);
+    routine->id = ++file->next_routine_id;
     routine->global = symbol_get_linkage(aroutine->sy) == LK_EXTERNAL;
     routine->label = strdup(symbol_get_name(aroutine->sy));
     routine->stackalloc = 0;
