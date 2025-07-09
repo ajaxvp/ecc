@@ -854,6 +854,7 @@ typedef struct opt1_options
 {
     bool inline_fcalls;
     bool remove_fcall_passing_lifetimes;
+    bool inline_integer_constant;
 } opt1_options_t;
 
 typedef struct opt4_options

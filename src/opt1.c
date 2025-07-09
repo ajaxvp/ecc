@@ -5,7 +5,8 @@
 
 static opt1_options_t opt_profile_basic = {
     .inline_fcalls = true,
-    .remove_fcall_passing_lifetimes = true
+    .remove_fcall_passing_lifetimes = true,
+    .inline_integer_constant = true
 };
 
 opt1_options_t* opt1_profile_basic(void)
@@ -70,15 +71,52 @@ static bool try_remove_fcall_passing_lifetimes(air_insn_t* insn, air_routine_t* 
     return true;
 }
 
+/*
+
+int _1 = 5;
+int _2 = _1;
+
+becomes:
+
+int _2 = 5;
+
+*/
+
+/*
+static bool try_inline_integer_constant(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    if (!insn) return false;
+    if (insn->type != AIR_LOAD) return false;
+    if (insn->ops[1]->type != AOP_INTEGER_CONSTANT) return false;
+    regid_t reg = insn->ops[0]->content.reg;
+    unsigned long long value = insn->ops[1]->content.ic;
+    for (air_insn_t* trace = insn->next; trace; trace = trace->next)
+    {
+        for (size_t i = 0; i < trace->noops; ++i)
+        {
+            air_insn_operand_t* op = trace->ops[i];
+            if (!op) continue;
+            if (op->type == AOP_REGISTER && op->content.reg == reg)
+            {
+                op->type = AOP_INTEGER_CONSTANT;
+                op->content.ic = value;
+            }
+        }
+    }
+    return true;
+}
+*/
+
 void opt1(air_t* air, opt1_options_t* options)
 {
     if (!options) return;
     VECTOR_FOR(air_routine_t*, routine, air->routines)
     {
         air_insn_t* last = NULL;
-        for (air_insn_t* insn = routine->insns; insn; insn = insn->next)
+        for (air_insn_t* insn = routine->insns; insn;)
         {
             if (!insn->next) last = insn;
+            air_insn_t* next = insn->next;
             switch (insn->type)
             {
                 case AIR_FUNC_CALL:
@@ -87,6 +125,7 @@ void opt1(air_t* air, opt1_options_t* options)
                 default:
                     break;
             }
+            insn = next;
         }
         while (last)
         {

@@ -152,7 +152,7 @@ static bool live_range_conflicts(allocator_t* a, regid_t r1, regid_t r2)
             uint64_t start2 = (uint64_t) vector_get(info2->live_starts, j);
             uint64_t end2 = (uint64_t) vector_get(info2->live_ends, j);
 
-            if (end1 + 1 == start1 && end2 + 1 == start2)
+            if (end1 + 1 == start1 && end2 + 1 == start2 && start1 == start2)
                 return true;
 
             if (end1 + 1 == start1 && start2 <= end1 && end1 <= end2)

@@ -132,8 +132,18 @@ EXPRESSIONS
 6.6 (3)
 6.6 (4)
 
+STATEMENTS
+6.8.4.2 (2)
+6.8.4.2 (3)
+6.8.6.1 (1)
+
 SEMANTICS:
+
+EXPRESSIONS
 6.5.2.5 (5) - requires analysis of initializers to complete types
+
+EXTERNAL DEFINITIONS
+6.9 (3)
 
 UNCATEGORIZED
 6.5.15 (3)
@@ -142,10 +152,7 @@ UNCATEGORIZED
 6.7 (4)
 6.7 (7)
 6.7.1 (6)
-6.8.4.2 (2)
-6.8.4.2 (3)
 6.8.4.2 (5)
-6.8.6.1 (1)
 
 */
 
@@ -195,6 +202,25 @@ DECLARATIONS
 6.7.2 (2)
 6.7.2 (3)
 
+STATEMENTS
+6.8.1 (2)
+6.8.1 (3)
+6.8.4.1 (1)
+6.8.4.2 (1)
+6.8.5 (2)
+6.8.5 (3)
+6.8.6.2 (1)
+6.8.6.3 (1)
+6.8.6.4 (1)
+
+EXTERNAL DEFINITIONS
+6.9 (2)
+6.9.1 (2)
+6.9.1 (3)
+6.9.1 (4)
+6.9.1 (5)
+6.9.1 (6)
+
 SEMANTICS:
 
 UNCATEGORIZED
@@ -202,8 +228,8 @@ UNCATEGORIZED
 6.5.1 (2)
 6.5.2.2 (4)
 6.5.2.2 (5)
-6.5.2.3 (3): check up on after lvalue changes
-6.5.2.3 (4): check up on after lvalue changes
+6.5.2.3 (3)
+6.5.2.3 (4)
 6.5.2.4 (2)
 6.5.3.2 (3)
 6.5.3.2 (4)
@@ -228,14 +254,6 @@ UNCATEGORIZED
 6.5.15 (5)
 6.5.16 (3)
 6.5.17 (2)
-6.8.1 (2)
-6.8.1 (3)
-6.9 (2)
-6.9.1 (2)
-6.9.1 (3)
-6.9.1 (4)
-6.9.1 (5)
-6.9.1 (6)
 6.9.2 (3)
 
 */
@@ -1722,9 +1740,7 @@ void enforce_6_8_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
     if (syn->lstmt_id)
         return; // this constraint does not apply to regular labels, only case/default
     
-    syntax_component_t* parent = syn;
-    for (; parent && parent->type != SC_SWITCH_STATEMENT; parent = parent->parent);
-    if (!parent)
+    if (!syntax_get_enclosing(syn, SC_SWITCH_STATEMENT))
         // ISO: 6.8.1 (2)
         ADD_ERROR(syn, "case and default labels may only exist within a switch statement");
 }
