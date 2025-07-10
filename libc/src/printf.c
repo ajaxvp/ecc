@@ -2,7 +2,7 @@
 #include "../include/stdio.h"
 #include "../include/stdlib.h"
 
-static int _ecc_printf_int(int i)
+static int __ecc_printf_int(int i)
 {
     if (!i)
     {
@@ -23,7 +23,7 @@ static int _ecc_printf_int(int i)
     int j = i / 10;
 
     if (j)
-        count += _ecc_printf_int(j);
+        count += __ecc_printf_int(j);
     
     putchar((i % 10) + '0');
     return count + 1;
@@ -41,7 +41,7 @@ int printf(const char* fmt, ...)
         {
             c = *++fmt;
             if (c == 'd')
-                _ecc_printf_int(va_arg(list, int));
+                __ecc_printf_int(va_arg(list, int));
             else if (c == 's')
                 puts(va_arg(list, char*));
         }
