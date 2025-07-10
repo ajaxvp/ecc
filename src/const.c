@@ -580,8 +580,8 @@ const char* X86_64_SSE_REGISTERS[] = {
 };
 
 const char* INTRINSIC_FUNCTION_NAMES[] = {
-    "_ecc_va_arg",
-    "_ecc_va_copy",
-    "_ecc_va_end",
-    "_ecc_va_start"
+    "__ecc_va_arg",
+    "__ecc_va_copy",
+    "__ecc_va_end",
+    "__ecc_va_start"
 };

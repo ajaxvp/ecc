@@ -2333,6 +2333,14 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
     ADD_CODE(body_label);
 
     COPY_CODE(syn->forstmt_body);
+
+    if (syn->continue_label_no)
+    {
+        air_insn_t* continue_label = air_insn_init(AIR_LABEL, 1);
+        continue_label->ops[0] = air_insn_label_operand_init(syn->continue_label_no, 'S');
+        ADD_CODE(continue_label);
+    }
+
     COPY_CODE(syn->forstmt_post);
 
     if (syn->forstmt_condition)
@@ -2359,6 +2367,13 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
         ADD_CODE(jmp);
     }
 
+    if (syn->break_label_no)
+    {
+        air_insn_t* break_label = air_insn_init(AIR_LABEL, 1);
+        break_label->ops[0] = air_insn_label_operand_init(syn->break_label_no, 'S');
+        ADD_CODE(break_label);
+    }
+
     FINALIZE_LINEARIZE;
 }
 
@@ -2367,7 +2382,7 @@ static void linearize_while_statement_after(syntax_traverser_t* trav, syntax_com
     SETUP_LINEARIZE;
 
     unsigned long long body_label_no = NEXT_LABEL;
-    unsigned long long condition_label_no = NEXT_LABEL;
+    unsigned long long condition_label_no = syn->continue_label_no ? syn->continue_label_no : NEXT_LABEL;
 
     air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
     jmp->ops[0] = air_insn_label_operand_init(condition_label_no, 'S');
@@ -2391,6 +2406,13 @@ static void linearize_while_statement_after(syntax_traverser_t* trav, syntax_com
     jnz->ops[1] = air_insn_register_operand_init(syn->whstmt_condition->expr_reg);
     ADD_CODE(jnz);
 
+    if (syn->break_label_no)
+    {
+        air_insn_t* break_label = air_insn_init(AIR_LABEL, 1);
+        break_label->ops[0] = air_insn_label_operand_init(syn->break_label_no, 'S');
+        ADD_CODE(break_label);
+    }
+
     FINALIZE_LINEARIZE;
 }
 
@@ -2406,6 +2428,13 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
 
     COPY_CODE(syn->dostmt_body);
 
+    if (syn->continue_label_no)
+    {
+        air_insn_t* continue_label = air_insn_init(AIR_LABEL, 1);
+        continue_label->ops[0] = air_insn_label_operand_init(syn->continue_label_no, 'S');
+        ADD_CODE(continue_label);
+    }
+
     COPY_CODE(syn->dostmt_condition);
 
     air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
@@ -2413,6 +2442,13 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
     jnz->ops[0] = air_insn_label_operand_init(body_label_no, 'S');
     jnz->ops[1] = air_insn_register_operand_init(syn->dostmt_condition->expr_reg);
     ADD_CODE(jnz);
+
+    if (syn->break_label_no)
+    {
+        air_insn_t* break_label = air_insn_init(AIR_LABEL, 1);
+        break_label->ops[0] = air_insn_label_operand_init(syn->break_label_no, 'S');
+        ADD_CODE(break_label);
+    }
 
     FINALIZE_LINEARIZE;
 }
@@ -2439,17 +2475,53 @@ static void linearize_va_intrinsic_call_expression_after(syntax_traverser_t* tra
 
 static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (streq(syn->icallexpr_name, "_ecc_va_arg"))
+    if (streq(syn->icallexpr_name, "__ecc_va_arg"))
         linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_ARG);
-    else if (streq(syn->icallexpr_name, "_ecc_va_start"))
+    else if (streq(syn->icallexpr_name, "__ecc_va_start"))
         linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_START);
-    else if (streq(syn->icallexpr_name, "_ecc_va_end"))
+    else if (streq(syn->icallexpr_name, "__ecc_va_end"))
         linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_END);
     else
         report_return;
 }
 
-// TODO: break and continue statements
+static void linearize_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* parent = syn;
+    for (; parent &&
+        parent->type != SC_FOR_STATEMENT &&
+        parent->type != SC_WHILE_STATEMENT &&
+        parent->type != SC_DO_STATEMENT &&
+        parent->type != SC_SWITCH_STATEMENT; parent = parent->parent);
+    if (!parent) report_return;
+    if (!parent->break_label_no)
+        parent->break_label_no = NEXT_LABEL;
+    
+    SETUP_LINEARIZE;
+    air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
+    jmp->ops[0] = air_insn_label_operand_init(parent->break_label_no, 'S');
+    ADD_CODE(jmp);
+    FINALIZE_LINEARIZE;
+}
+
+static void linearize_continue_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    syntax_component_t* loop = syn;
+    for (; loop &&
+        loop->type != SC_FOR_STATEMENT &&
+        loop->type != SC_WHILE_STATEMENT &&
+        loop->type != SC_DO_STATEMENT;
+        loop = loop->parent);
+    if (!loop) report_return;
+    if (!loop->continue_label_no)
+        loop->continue_label_no = NEXT_LABEL;
+
+    SETUP_LINEARIZE;
+    air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
+    jmp->ops[0] = air_insn_label_operand_init(loop->continue_label_no, 'S');
+    ADD_CODE(jmp);
+    FINALIZE_LINEARIZE;
+}
 
 static void linearize_no_action_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
@@ -2548,6 +2620,8 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_WHILE_STATEMENT] = linearize_while_statement_after;
     trav->after[SC_DO_STATEMENT] = linearize_do_while_statement_after;
     trav->after[SC_INTRINSIC_CALL_EXPRESSION] = linearize_intrinsic_call_expression_after;
+    trav->after[SC_CONTINUE_STATEMENT] = linearize_continue_statement_after;
+    trav->after[SC_BREAK_STATEMENT] = linearize_break_statement_after;
 
     trav->after[SC_TRANSLATION_UNIT] = linearize_no_action_after;
     trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;

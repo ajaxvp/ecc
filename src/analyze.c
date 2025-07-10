@@ -464,7 +464,7 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
-    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
         ADD_ERROR(syn, "cannot find va_list declaration for va_arg invocation");
@@ -506,7 +506,7 @@ void analyze_va_start_intrinsic_call_expression_after(syntax_traverser_t* trav, 
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
-    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
         ADD_ERROR(syn, "cannot find va_list declaration for va_start invocation");
@@ -531,7 +531,7 @@ void analyze_va_end_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
-    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "_ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
+    symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
         ADD_ERROR(syn, "cannot find va_list declaration for va_end invocation");
@@ -550,11 +550,11 @@ void analyze_va_end_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
 
 void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (streq(syn->icallexpr_name, "_ecc_va_arg"))
+    if (streq(syn->icallexpr_name, "__ecc_va_arg"))
         analyze_va_arg_intrinsic_call_expression_after(trav, syn);
-    else if (streq(syn->icallexpr_name, "_ecc_va_start"))
+    else if (streq(syn->icallexpr_name, "__ecc_va_start"))
         analyze_va_start_intrinsic_call_expression_after(trav, syn);
-    else if (streq(syn->icallexpr_name, "_ecc_va_end"))
+    else if (streq(syn->icallexpr_name, "__ecc_va_end"))
         analyze_va_end_intrinsic_call_expression_after(trav, syn);
     else
     {
@@ -1811,7 +1811,6 @@ void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_componen
 
 void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    ADD_ERROR(syn, "continue statements are not supported yet");
     syntax_component_t* loop = syn;
     for (; loop && loop->type != SC_FOR_STATEMENT && loop->type != SC_WHILE_STATEMENT && loop->type != SC_DO_STATEMENT; loop = loop->parent);
     if (!loop)
@@ -1821,7 +1820,6 @@ void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component
 
 void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    ADD_ERROR(syn, "break statements are not supported yet");
     syntax_component_t* parent = syn;
     for (; parent &&
         parent->type != SC_FOR_STATEMENT &&

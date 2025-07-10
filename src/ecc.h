@@ -1075,6 +1075,12 @@ typedef struct syntax_component_t
     regid_t expr_reg;
     regid_t result_register;
 
+    // loop types
+    uint64_t continue_label_no;
+
+    // switch & loop types
+    uint64_t break_label_no;
+
     union
     {
         // SC_TRANSLATION_UNIT - tlu
