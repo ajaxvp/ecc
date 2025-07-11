@@ -1261,6 +1261,12 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
 
 preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error)
 {
+    if (length == 0)
+    {
+        errorf("translation unit may not be empty\n");
+        return NULL;
+    }
+
     lex_state_t* state = calloc(1, sizeof *state);
 
     state->data = data;

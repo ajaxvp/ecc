@@ -5,9 +5,9 @@
 
 typedef struct __ecc_va_list
 {
-    uintptr_t intpos;
-    uintptr_t ssepos;
-    uintptr_t stackpos;
+    uintptr_t __intpos;
+    uintptr_t __ssepos;
+    uintptr_t __stackpos;
 } va_list;
 
 #define va_arg(ap, type) __ecc_va_arg(ap, type)
