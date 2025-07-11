@@ -1919,6 +1919,7 @@ void designation_delete_all(designation_t* desig);
 designation_t* designation_concat(designation_t* d1, designation_t* d2);
 constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
 void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** ct);
+bool representable(unsigned long long value, c_type_class_t class);
 
 /* ecc.c */
 program_options_t* get_program_options(void);

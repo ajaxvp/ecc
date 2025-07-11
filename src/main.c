@@ -57,7 +57,7 @@ int usage(void)
     printf("  %-*sAIR\n", OPTION_DESCRIPTION_LENGTH, "-A");
     printf("  %-*sLocalized AIR\n", OPTION_DESCRIPTION_LENGTH, "-L");
     printf("  %-*sRegister-allocated AIR\n", OPTION_DESCRIPTION_LENGTH, "-r");
-    printf("  %-*sBleeding edge work, if any\n", OPTION_DESCRIPTION_LENGTH, "-x");
+    printf("  %-*sBleeding edge work, if any (warning: very unstable)\n", OPTION_DESCRIPTION_LENGTH, "-x");
     return EXIT_FAILURE;
 }
 

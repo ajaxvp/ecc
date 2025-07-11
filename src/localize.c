@@ -802,6 +802,27 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
 
 /*
 
+moves integer constants to temporaries
+
+*/
+
+void localize_x86_64_return_try_unsimplify(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    if (insn->ops[0]->type != AOP_INTEGER_CONSTANT) return;
+    regid_t reg = NEXT_VIRTUAL_REGISTER;
+
+    air_insn_t* def = air_insn_init(AIR_LOAD, 2);
+    def->ct = type_copy(insn->ct);
+    def->ops[0] = air_insn_register_operand_init(reg);
+    def->ops[1] = air_insn_integer_constant_operand_init(insn->ops[0]->content.ic);
+    air_insn_insert_before(def, insn);
+
+    insn->ops[0]->type = AOP_REGISTER;
+    insn->ops[0]->content.reg = reg;
+}
+
+/*
+
     int _1 = 5;
     return _1;
 
@@ -857,6 +878,8 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
 {
     if (insn->noops < 1)
         return;
+    
+    localize_x86_64_return_try_unsimplify(insn, routine, air);
     
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
     size_t next_intretreg = 0;
