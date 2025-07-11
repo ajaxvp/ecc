@@ -1915,6 +1915,14 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
         analyze_automatic_initializer_after(trav, init, sy);
 }
 
+void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!syn->adeclr_length_expression)
+        ADD_ERROR(syn, "arrays without a given length are not supported yet");
+    if (syntax_is_vla(syn))
+        ADD_ERROR(syn, "variable-length arrays are not supported yet");
+}
+
 void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     unsigned count = 0;
@@ -2081,6 +2089,7 @@ analysis_error_t* analyze(syntax_component_t* tlu)
 
     // declarations
     trav->after[SC_INIT_DECLARATOR] = analyze_init_declarator_after;
+    trav->after[SC_ARRAY_DECLARATOR] = analyze_array_declarator_after;
     trav->after[SC_STRUCT_UNION_SPECIFIER] = analyze_struct_union_specifier_after;
     trav->after[SC_FUNCTION_DECLARATOR] = analyze_function_declarator_after;
 
