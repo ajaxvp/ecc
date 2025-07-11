@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <time.h>
 
 #define debug in_debug()
 
@@ -164,6 +165,7 @@ typedef enum preprocessor_token_type
     PPT_OTHER,
     PPT_COMMENT,
     PPT_WHITESPACE,
+    PPT_PLACEHOLDER,
     PPT_NO_ELEMENTS
 } preprocessor_token_type_t;
 
@@ -368,6 +370,7 @@ typedef struct preprocessing_table
 
 typedef struct preprocessing_settings
 {
+    time_t* translation_time;
     char* filepath;
     char* error;
     preprocessing_table_t* table;
@@ -1808,6 +1811,7 @@ c_namespace_t* make_basic_namespace(c_namespace_class_t class);
 char* strdup(const char* str);
 int* strdup_wide(const int* str);
 int* strdup_widen(const char* str);
+char* substrdup(const char* str, size_t start, size_t end);
 bool contains_substr(char* str, char* substr);
 bool contains_char(char* str, char c);
 bool streq(char* s1, char* s2);

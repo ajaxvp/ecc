@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "../../src/ecc.h"
 
@@ -15,8 +16,11 @@ syntax_component_t* quickparse(char* tlu_str)
     preprocessing_token_t* pp_tokens = lex_raw((unsigned char*) tlu_str, strlen(tlu_str), false);
     if (!pp_tokens)
         return NULL;
+
+    time_t t = time(NULL);
     
     preprocessing_settings_t settings;
+    settings.translation_time = &t;
     settings.filepath = ".";
     char pp_error[MAX_ERROR_LENGTH];
     settings.error = pp_error;

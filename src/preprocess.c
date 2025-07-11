@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ecc.h"
 
@@ -360,6 +361,46 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
     return end;
 }
 
+// merges into lhs, returns new lhs
+static preprocessing_token_t* merge_tokens(preprocessing_token_t* lhs, preprocessing_token_t* rhs)
+{
+    if (!lhs || !rhs) return NULL;
+    if (lhs->type == PPT_PLACEHOLDER && rhs->type == PPT_PLACEHOLDER)
+    {
+        remove_token(rhs);
+        return lhs;
+    }
+    if (rhs->type == PPT_PLACEHOLDER)
+    {
+        remove_token(rhs);
+        return lhs;
+    }
+    if (lhs->type == PPT_PLACEHOLDER)
+    {
+        preprocessing_token_t* token = insert_token_after(pp_token_copy(rhs), lhs);
+        remove_token(lhs);
+        remove_token(rhs);
+        return token;
+    }
+    size_t bsize = 4096;
+    char* buffer = malloc(bsize);
+    bsize -= pp_token_normal_snprint(buffer, bsize, lhs, snprintf);
+    bsize -= pp_token_normal_snprint(buffer + (4096 - bsize), bsize, rhs, snprintf);
+    size_t length = 4096 - bsize;
+    char* concat = strdup(buffer);
+    free(buffer);
+    preprocessing_token_t* tokens = lex_raw((unsigned char*) concat, length, false);
+    free(concat);
+    if (!tokens)
+        return NULL;
+    preprocessing_token_t* first = pp_token_copy(tokens);
+    pp_token_delete_all(tokens);
+    insert_token_after(first, lhs);
+    remove_token(lhs);
+    remove_token(rhs);
+    return first;
+}
+
 static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing_state_t* state, preprocessing_token_t** start);
 
 // gather the tokens associated with an argument in a function-like macro invocation
@@ -424,7 +465,7 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
         }
         preprocessing_token_t* prev = seq;
         unadvance_token_impl(&prev);
-        if (is_pp_type(prev, PPT_PUNCTUATOR) && (prev->punctuator == P_HASH || prev->punctuator == P_DOUBLE_HASH))
+        if (is_pp_type(prev, PPT_PUNCTUATOR) && prev->punctuator == P_HASH)
         {
             preprocessing_token_t* str = calloc(1, sizeof *str);
             str->type = PPT_STRING_LITERAL;
@@ -447,8 +488,9 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
                 {
                     char* value = arg->type == PPT_STRING_LITERAL ? arg->string_literal.value : arg->character_constant.value;
                     bool wide = arg->type == PPT_STRING_LITERAL ? arg->string_literal.wide : arg->character_constant.wide;
+                    char* quote = arg->type == PPT_STRING_LITERAL ? "\\\"" : "'";
 
-                    offset += snprintf(buffer + offset, 4096 - offset, "%s\"", wide ? "L" : "");
+                    offset += snprintf(buffer + offset, 4096 - offset, "%s%s", wide ? "L" : "", quote);
                     for (char* content = value; *content; ++content)
                     {
                         if (offset + 2 >= 4096)
@@ -457,7 +499,8 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
                             buffer[offset++] = '\\';
                         buffer[offset++] = *content;
                     }
-                    offset += snprintf(buffer + offset, 4096 - offset, "\"");
+                    offset += snprintf(buffer + offset, 4096 - offset, "%s", quote);
+                    continue;
                 }
                 offset += pp_token_normal_snprint(buffer + offset, 4096 - offset, arg, snprintf);
             }
@@ -471,13 +514,17 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
         }
         preprocessing_token_t* next = seq;
         advance_token_impl(&next);
-        if (is_pp_type(next, PPT_PUNCTUATOR) && next->punctuator == P_DOUBLE_HASH)
-        {
-            seq = seq->next;
-            continue;
-        }
         preprocessing_token_t* inserting = seq;
-        for (preprocessing_token_t* arg = start; arg && arg != end; arg = arg->next)
+        if (start == end && ((is_pp_type(next, PPT_PUNCTUATOR) && next->punctuator == P_DOUBLE_HASH) ||
+            (is_pp_type(prev, PPT_PUNCTUATOR) && prev->punctuator == P_DOUBLE_HASH)))
+        {
+            preprocessing_token_t* token = calloc(1, sizeof *token);
+            token->type = PPT_PLACEHOLDER;
+            token->row = seq->row;
+            token->col = seq->col;
+            inserting = insert_token_after(token, inserting);
+        }
+        else for (preprocessing_token_t* arg = start; arg && arg != end; arg = arg->next)
         {
             preprocessing_token_t* cp = pp_token_copy(arg);
             cp->row = seq->row;
@@ -486,8 +533,106 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
         }
         remove_token(seq);
         seq = inserting->next;
+        if (is_pp_type(prev, PPT_PUNCTUATOR) && prev->punctuator == P_DOUBLE_HASH)
+        {
+            preprocessing_token_t* lhs = prev;
+            unadvance_token_impl(&lhs);
+            preprocessing_token_t* rhs = prev;
+            advance_token_impl(&rhs);
+            preprocessing_token_t* merged = merge_tokens(lhs, rhs);
+            advance_token_impl(&merged);
+            remove_token(merged);
+        }
     }
     return true;
+}
+
+static preprocessing_token_t* expand_special(preprocessing_token_t* token, preprocessing_state_t* state, preprocessing_token_t** start)
+{
+    char* datetime = asctime(localtime(state->settings->translation_time));
+    if (streq(token->identifier, "__STDC__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_PP_NUMBER;
+        t->row = token->row;
+        t->col = token->col;
+        // TODO: change when we are conforming!
+        t->pp_number = strdup("0");
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__STDC_HOSTED__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_PP_NUMBER;
+        t->row = token->row;
+        t->col = token->col;
+        t->pp_number = strdup("1");
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__STDC_VERSION__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_PP_NUMBER;
+        t->row = token->row;
+        t->col = token->col;
+        t->pp_number = strdup("199901L");
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__FILE__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_STRING_LITERAL;
+        t->row = token->row;
+        t->col = token->col;
+        t->string_literal.value = strdup(state->settings->filepath);
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__LINE__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_PP_NUMBER;
+        t->row = token->row;
+        t->col = token->col;
+        char buffer[1 + MAX_STRINGIFIED_INTEGER_LENGTH];
+        snprintf(buffer, sizeof(buffer), "%u", token->row);
+        t->string_literal.value = strdup(buffer);
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__DATE__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_STRING_LITERAL;
+        t->row = token->row;
+        t->col = token->col;
+        char buffer[12];
+        snprintf(buffer, sizeof(buffer), "%.6s %.4s", datetime + 4, datetime + 20);
+        t->string_literal.value = strdup(buffer);
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    if (streq(token->identifier, "__TIME__"))
+    {
+        preprocessing_token_t* t = calloc(1, sizeof *t);
+        t->type = PPT_STRING_LITERAL;
+        t->row = token->row;
+        t->col = token->col;
+        t->string_literal.value = substrdup(datetime, 11, 18);
+        insert_token_after(t, token);
+        remove_token(token);
+        return t;
+    }
+    return token;
 }
 
 // returns the token at the position at the end of the expansion, NULL if expansion failed
@@ -501,7 +646,8 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
     bool variadic = false;
     preprocessing_table_get(state->table, token->identifier, &repl, &params, &variadic);
     if (!repl)
-        return token;
+        return expand_special(token, state, start);
+    
     if (params && !is_punctuator(token->next, P_LEFT_PARENTHESIS))
         return token;
     
@@ -515,10 +661,12 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
 
     if (params)
     {
-        preprocessing_token_t* arg_token = token->next->next;
+        preprocessing_token_t* arg_token = token->next;
         int index = 0;
         for (; arg_token && (arg_token->type != PPT_PUNCTUATOR || arg_token->punctuator != P_RIGHT_PARENTHESIS); ++index)
         {
+            arg_token = arg_token->next;
+
             if (!gather_and_replace(state, &arg_token, seq, (char*) vector_get(params, index)))
             {
                 pp_token_delete_all(seq);
@@ -528,7 +676,7 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
 
             if (get_program_options()->iflag)
             {
-                printf("sequence:\n");
+                printf("sequence for %s:\n", (char*) vector_get(params, index));
                 for (preprocessing_token_t* t = seq; t; t = t->next)
                 {
                     pp_token_print(t, printf);
@@ -571,7 +719,6 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
                     index + 1);
             }
 
-            arg_token = arg_token->next;
         }
         if (!arg_token)
         {
@@ -1822,6 +1969,7 @@ bool preprocess_include_file(FILE* file, char* path, preprocessing_state_t* stat
         return false;
 
     preprocessing_settings_t settings;
+    settings.translation_time = state->settings->translation_time;
     settings.filepath = path;
     settings.error = state->settings->error;
     settings.table = state->table;
@@ -2145,7 +2293,7 @@ bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settin
 
     for (preprocessing_token_t* token = dummy->next; token;)
     {
-        if (token->type != PPT_OTHER)
+        if (token->type != PPT_OTHER && token->type != PPT_PLACEHOLDER)
         {
             token = token->next;
             continue;

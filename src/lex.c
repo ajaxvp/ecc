@@ -329,7 +329,7 @@ int pp_token_normal_snprint(char* buffer, size_t maxlen, preprocessing_token_t* 
             c += snprinter(buffer, maxlen, "%s", token->pp_number);
             break;
         case PPT_CHARACTER_CONSTANT:
-            c += snprinter(buffer, maxlen, "%s%s", token->character_constant.wide ? "L" : "", token->character_constant.value);
+            c += snprinter(buffer, maxlen, "%s'%s'", token->character_constant.wide ? "L" : "", token->character_constant.value);
             break;
         case PPT_STRING_LITERAL:
             c += snprinter(buffer, maxlen, "%s\"%s\"", token->string_literal.wide ? "L" : "", token->string_literal.value);
@@ -473,6 +473,7 @@ bool pp_token_equals(preprocessing_token_t* t1, preprocessing_token_t* t2)
             if (t1->other != t2->other) return false;
             break;
         case PPT_COMMENT:
+        case PPT_PLACEHOLDER:
         case PPT_NO_ELEMENTS:
             break;
     }
@@ -714,7 +715,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
         return NULL;
     }
     buffer_t* buf = buffer_init();
-    buffer_append(buf, read);
+    read;
     if (peek == '\'')
     {
         cleanup_lex_fail;
@@ -726,7 +727,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
     {
         if (peek == '\'')
         {
-            buffer_append(buf, read);
+            read;
             break;
         }
         if (peek == '\n')
@@ -1160,6 +1161,14 @@ preprocessing_token_t* lex_other(lex_state_t* state)
     return token;
 }
 
+preprocessing_token_t* lex_placeholder(lex_state_t* state)
+{
+    init_lex(PPT_PLACEHOLDER);
+    (void) c;
+    cleanup_lex_pass;
+    return token;
+}
+
 preprocessing_token_t* lex_whitespace(lex_state_t* state)
 {
     init_lex(PPT_WHITESPACE);
@@ -1278,6 +1287,7 @@ preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_err
         lex_whitespace,
         lex_comment,
         lex_other,
+        lex_placeholder
     };
     int counts[PPT_NO_ELEMENTS];
     while (state->cursor < state->length)

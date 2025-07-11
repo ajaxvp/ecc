@@ -53,6 +53,21 @@ int* strdup_wide(const int* str)
     return dup;
 }
 
+// farting
+// 0123456
+// substrdup("farting", 2, 4);
+
+char* substrdup(const char* str, size_t start, size_t end)
+{
+    if (start > end)
+        return NULL;
+    size_t length = end - start;
+    char* dup = malloc(length + 1);
+    dup[length] = '\0';
+    strncpy(dup, str + start, length + 1);
+    return dup;
+}
+
 bool contains_substr(char* str, char* substr)
 {
     size_t len_substr = strlen(substr);

@@ -82,7 +82,10 @@ x86_asm_file_t* compile_object(char* filename)
         }
     }
 
+    time_t t = time(NULL);
+
     preprocessing_settings_t settings;
+    settings.translation_time = &t;
     settings.filepath = filename;
     char pp_error[MAX_ERROR_LENGTH];
     settings.error = pp_error;
