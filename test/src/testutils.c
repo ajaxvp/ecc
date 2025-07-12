@@ -13,7 +13,7 @@ program_options_t* get_program_options(void)
 
 syntax_component_t* quickparse(char* tlu_str)
 {
-    preprocessing_token_t* pp_tokens = lex_raw((unsigned char*) tlu_str, strlen(tlu_str), false);
+    preprocessing_token_t* pp_tokens = lex_raw((unsigned char*) tlu_str, strlen(tlu_str), false, false);
     if (!pp_tokens)
         return NULL;
 

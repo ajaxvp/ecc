@@ -365,13 +365,13 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
     return end;
 }
 
-static preprocessing_token_t* relex(preprocessing_token_t* start, preprocessing_token_t* end, preprocessing_token_t** last)
+static preprocessing_token_t* relex(preprocessing_token_t* start, preprocessing_token_t* end, preprocessing_token_t** last, bool start_in_include)
 {
     if (!start) return NULL;
     char* content = pp_token_stringify_range(start, end);
     if (!content)
         return NULL;
-    preprocessing_token_t* tokens = lex_raw((unsigned char*) content, strlen(content), false);
+    preprocessing_token_t* tokens = lex_raw((unsigned char*) content, strlen(content), false, start_in_include);
     free(content);
     if (!tokens)
         return NULL;
@@ -420,7 +420,7 @@ static preprocessing_token_t* merge_tokens(preprocessing_token_t* lhs, preproces
     size_t length = 4096 - bsize;
     char* concat = strdup(buffer);
     free(buffer);
-    preprocessing_token_t* tokens = lex_raw((unsigned char*) concat, length, false);
+    preprocessing_token_t* tokens = lex_raw((unsigned char*) concat, length, false, false);
     free(concat);
     if (!tokens)
         return NULL;
@@ -2029,7 +2029,7 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
             return false;
     comp->incl_sequence->start = seq_start;
     comp->incl_sequence->end = token;
-    comp->incl_sequence->start = relex(comp->incl_sequence->start, comp->incl_sequence->end, &comp->incl_sequence->end);
+    comp->incl_sequence->start = relex(comp->incl_sequence->start, comp->incl_sequence->end, &comp->incl_sequence->end, true);
     if (!comp->incl_sequence->start)
     {
         (void) fail(comp->start, "#include macro content was unable to be expanded");
@@ -2198,7 +2198,7 @@ bool preprocess_line_line(preprocessing_component_t* comp, preprocessing_state_t
             return false;
     comp->linel_sequence->start = seq_start;
     comp->linel_sequence->end = token;
-    comp->linel_sequence->start = relex(comp->linel_sequence->start, comp->linel_sequence->end, &comp->linel_sequence->end);
+    comp->linel_sequence->start = relex(comp->linel_sequence->start, comp->linel_sequence->end, &comp->linel_sequence->end, false);
     if (!comp->linel_sequence->start)
     {
         (void) fail(comp->start, "#line macro content was unable to be expanded");

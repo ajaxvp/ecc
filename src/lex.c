@@ -1277,7 +1277,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
     return NULL;
 }
 
-preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error)
+preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error, bool start_in_include)
 {
     if (length == 0)
     {
@@ -1296,7 +1296,7 @@ preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_err
     state->error[0] = '\0';
     state->counting = false;
     state->counter = 0;
-    state->include_condition = 0;
+    state->include_condition = start_in_include ? 2 : 0;
     state->prev = NULL;
 
     preprocessing_token_t* tokens = NULL;
@@ -1400,7 +1400,7 @@ preprocessing_token_t* lex(FILE* file, bool dump_error)
             data = realloc(data, buffer_size += 1024);
         data[count++] = c;
     }
-    preprocessing_token_t* tokens = lex_raw(data, count, dump_error);
+    preprocessing_token_t* tokens = lex_raw(data, count, dump_error, false);
     free(data);
     return tokens;
 }

@@ -1659,7 +1659,7 @@ extern const char* INTRINSIC_FUNCTION_NAMES[];
 
 /* lex.c */
 preprocessing_token_t* lex(FILE* file, bool dump_error);
-preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error);
+preprocessing_token_t* lex_raw(unsigned char* data, size_t length, bool dump_error, bool start_in_include);
 void pp_token_delete(preprocessing_token_t* token);
 void pp_token_delete_content(preprocessing_token_t* token);
 void pp_token_delete_all(preprocessing_token_t* tokens);
