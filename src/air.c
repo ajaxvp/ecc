@@ -1816,7 +1816,7 @@ static void linearize_increment_decrement_expression_after(syntax_traverser_t* t
     air_insn_t* chg = air_insn_init(add ? AIR_DIRECT_ADD : AIR_DIRECT_SUBTRACT, 2);
     chg->ct = type_copy(syn->uexpr_operand->ctype);
     chg->ops[0] = air_insn_indirect_register_operand_init(syn->uexpr_operand->expr_reg, 0, INVALID_VREGID, 1);
-    chg->ops[1] = air_insn_integer_constant_operand_init(1);
+    chg->ops[1] = air_insn_integer_constant_operand_init(syn->uexpr_operand->ctype->class == CTC_POINTER ? type_size(syn->uexpr_operand->ctype->derived_from) : 1);
     air_insn_t* access = air_insn_init(AIR_LOAD, 2);
     access->ct = type_copy(syn->uexpr_operand->ctype);
     access->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
@@ -1978,9 +1978,24 @@ static void linearize_assignment_expression_after(syntax_traverser_t* trav, synt
         default:
             report_return;
     }
+    regid_t rhs_reg = syn->bexpr_rhs->expr_reg;
+    long long lhs_deref_size = 0;
+    if (syn->bexpr_lhs->ctype->class == CTC_POINTER &&
+        syn->bexpr_rhs->ctype->class != CTC_POINTER &&
+        (lhs_deref_size = type_size(syn->bexpr_lhs->ctype->derived_from)) != 1)
+    {
+        air_insn_t* mul = air_insn_init(AIR_MULTIPLY, 3);
+        mul->ct = type_copy(syn->bexpr_rhs->ctype);
+        regid_t multiplied_reg = NEXT_VIRTUAL_REGISTER;
+        mul->ops[0] = air_insn_register_operand_init(multiplied_reg);
+        mul->ops[1] = air_insn_register_operand_init(rhs_reg);
+        mul->ops[2] = air_insn_integer_constant_operand_init(lhs_deref_size);
+        ADD_CODE(mul);
+        rhs_reg = multiplied_reg;
+    }
     if (type_is_scalar(syn->ctype))
     {
-        syn->expr_reg = convert(trav, syn->bexpr_rhs->ctype, syn->ctype, syn->bexpr_rhs->expr_reg, &code);
+        syn->expr_reg = convert(trav, syn->bexpr_rhs->ctype, syn->ctype, rhs_reg, &code);
         air_insn_t* insn = air_insn_init(type, 2);
         insn->ct = type_copy(syn->ctype);
         insn->ops[0] = air_insn_indirect_register_operand_init(syn->bexpr_lhs->expr_reg, 0, INVALID_VREGID, 1);
@@ -1989,6 +2004,14 @@ static void linearize_assignment_expression_after(syntax_traverser_t* trav, synt
     }
     else
         report_return;
+    if (syn->type != SC_ASSIGNMENT_EXPRESSION)
+    {
+        air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
+        insn->ct = type_copy(syn->ctype);
+        insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+        insn->ops[1] = air_insn_indirect_register_operand_init(syn->bexpr_lhs->expr_reg, 0, INVALID_VREGID, 1);
+        ADD_CODE(insn);
+    }
     FINALIZE_LINEARIZE;
 }
 
@@ -2058,9 +2081,44 @@ static void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_c
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_ptr_offset_expression_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_type_t type)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->bexpr_lhs);
+    bool scale_on_left = syn->bexpr_rhs->ctype->class == CTC_POINTER;
+    regid_t reg = scale_on_left ? syn->bexpr_lhs->expr_reg : syn->bexpr_rhs->expr_reg;
+    long long size = type_size(scale_on_left ? syn->bexpr_rhs->ctype->derived_from : syn->bexpr_lhs->ctype->derived_from);
+    air_insn_t* mul = NULL;
+    if (size != 1)
+    {
+        mul = air_insn_init(AIR_MULTIPLY, 3);
+        mul->ct = type_copy(scale_on_left ? syn->bexpr_lhs->ctype : syn->bexpr_rhs->ctype);
+        mul->ops[0] = air_insn_register_operand_init(reg = NEXT_VIRTUAL_REGISTER);
+        mul->ops[1] = air_insn_register_operand_init(scale_on_left ? syn->bexpr_lhs->expr_reg : syn->bexpr_rhs->expr_reg);
+        mul->ops[2] = air_insn_integer_constant_operand_init(size);
+    }
+    if (mul && scale_on_left)
+        ADD_CODE(mul);
+    COPY_CODE(syn->bexpr_rhs);
+    if (mul && !scale_on_left)
+        ADD_CODE(mul);
+    air_insn_t* insn = air_insn_init(type, 3);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_register_operand_init(scale_on_left ? reg : syn->bexpr_lhs->expr_reg);
+    insn->ops[2] = air_insn_register_operand_init(scale_on_left ? syn->bexpr_rhs->expr_reg : reg);
+    ADD_CODE(insn);
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_addition_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    // TODO: handle other silly cases of addition expressions
+    if (syn->bexpr_lhs->ctype->class == CTC_POINTER ||
+        syn->bexpr_rhs->ctype->class == CTC_POINTER)
+    {
+        linearize_ptr_offset_expression_after(trav, syn, AIR_ADD);
+        return;
+    }
     SETUP_LINEARIZE;
     COPY_CODE(syn->bexpr_lhs);
     COPY_CODE(syn->bexpr_rhs);
@@ -2077,9 +2135,42 @@ static void linearize_addition_expression_after(syntax_traverser_t* trav, syntax
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_ptrdiff_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+    COPY_CODE(syn->bexpr_lhs);
+    COPY_CODE(syn->bexpr_rhs);
+    air_insn_t* insn = air_insn_init(AIR_SUBTRACT, 3);
+    insn->ct = make_basic_type(C_TYPE_PTRSIZE_T);
+    regid_t sub_reg = NEXT_VIRTUAL_REGISTER;
+    insn->ops[0] = air_insn_register_operand_init(sub_reg);
+    insn->ops[1] = air_insn_register_operand_init(syn->bexpr_lhs->expr_reg);
+    insn->ops[2] = air_insn_register_operand_init(syn->bexpr_rhs->expr_reg);
+    ADD_CODE(insn);
+    long long size = type_size(syn->bexpr_lhs->ctype->derived_from);
+    air_insn_t* div = air_insn_init(AIR_DIVIDE, 3);
+    div->ct = make_basic_type(C_TYPE_PTRSIZE_T);
+    div->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    div->ops[1] = air_insn_register_operand_init(sub_reg);
+    div->ops[2] = air_insn_integer_constant_operand_init(size);
+    ADD_CODE(div);
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_subtraction_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    // TODO: handle other silly cases of subtraction expressions
+    bool lhs_ptr = syn->bexpr_lhs->ctype->class == CTC_POINTER;
+    bool rhs_ptr = syn->bexpr_rhs->ctype->class == CTC_POINTER;
+    if (lhs_ptr && rhs_ptr)
+    {
+        linearize_ptrdiff_expression_after(trav, syn);
+        return;
+    }
+    if (lhs_ptr || rhs_ptr)
+    {
+        linearize_ptr_offset_expression_after(trav, syn, AIR_SUBTRACT);
+        return;
+    }
     SETUP_LINEARIZE;
     COPY_CODE(syn->bexpr_lhs);
     COPY_CODE(syn->bexpr_rhs);
@@ -2202,8 +2293,6 @@ static void linearize_conditional_expression_after(syntax_traverser_t* trav, syn
 
     FINALIZE_LINEARIZE;
 }
-
-// TODO: AND SUBTRACTION!
 
 static void linearize_raw_label_statement_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_t** c)
 {

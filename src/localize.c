@@ -219,6 +219,37 @@ static arg_class_t* find_aggregate_union_classes(c_type_t* ct, size_t* count)
 
 /*
 
+takes an instruction like:
+    int _1 = 5 + 3;
+and if we want to extract the '3', it would convert it to:
+    int _2 = 3;
+    int _1 = 5 + _2;
+
+*/
+static regid_t try_extract_integer_constant(air_insn_t* insn, air_t* air, size_t index, c_type_t* ct)
+{
+    if (index >= insn->noops)
+        return INVALID_VREGID;
+    air_insn_operand_t* op = insn->ops[index];
+    if (!op || op->type != AOP_INTEGER_CONSTANT)
+        return INVALID_VREGID;
+    unsigned long long value = op->content.ic;
+    
+    regid_t reg = NEXT_VIRTUAL_REGISTER;
+
+    air_insn_t* def = air_insn_init(AIR_LOAD, 2);
+    def->ct = type_copy(ct);
+    def->ops[0] = air_insn_register_operand_init(reg);
+    def->ops[1] = air_insn_integer_constant_operand_init(value);
+    air_insn_insert_before(def, insn);
+
+    op->type = AOP_REGISTER;
+    op->content.reg = reg;
+    return reg;
+}
+
+/*
+
 struct point* _1 = &p;
 
 push(*p);
@@ -773,7 +804,10 @@ int _3 = %eax;
 */
 void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    // localization only applies to integer division
+    try_extract_integer_constant(insn, air, 2, insn->ct);
+    try_extract_integer_constant(insn, air, 1, insn->ct);
+
+    // further localization only applies to integer division
     if (insn->type == AIR_DIVIDE && !type_is_integer(insn->ct))
         return;
     regid_t hresultreg = insn->type == AIR_DIVIDE ? X86R_RAX : X86R_RDX;
@@ -800,25 +834,9 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     insn->type = AIR_DIVIDE;
 }
 
-/*
-
-moves integer constants to temporaries
-
-*/
-
-void localize_x86_64_return_try_unsimplify(air_insn_t* insn, air_routine_t* routine, air_t* air)
+void localize_x86_64_add_subtract(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    if (insn->ops[0]->type != AOP_INTEGER_CONSTANT) return;
-    regid_t reg = NEXT_VIRTUAL_REGISTER;
-
-    air_insn_t* def = air_insn_init(AIR_LOAD, 2);
-    def->ct = type_copy(insn->ct);
-    def->ops[0] = air_insn_register_operand_init(reg);
-    def->ops[1] = air_insn_integer_constant_operand_init(insn->ops[0]->content.ic);
-    air_insn_insert_before(def, insn);
-
-    insn->ops[0]->type = AOP_REGISTER;
-    insn->ops[0]->content.reg = reg;
+    try_extract_integer_constant(insn, air, 1, insn->ct);
 }
 
 /*
@@ -879,7 +897,7 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     if (insn->noops < 1)
         return;
     
-    localize_x86_64_return_try_unsimplify(insn, routine, air);
+    try_extract_integer_constant(insn, air, 0, insn->ct);
     
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
     size_t next_intretreg = 0;
@@ -1355,6 +1373,10 @@ void localize_x86_64(air_t* air)
                 case AIR_DIVIDE:
                 case AIR_MODULO:
                     localize_x86_64_divide_modulo(insn, routine, air);
+                    break;
+                case AIR_ADD:
+                case AIR_SUBTRACT:
+                    localize_x86_64_add_subtract(insn, routine, air);
                     break;
                 case AIR_VA_START:
                     insn = localize_x86_64_va_start(insn, routine, air);
