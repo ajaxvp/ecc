@@ -1355,6 +1355,25 @@ void localize_x86_64_setcc_comparison(air_insn_t* insn, air_routine_t* routine, 
     air_insn_insert_after(and, insn);
 }
 
+void localize_x86_64_shift(air_insn_t* insn, air_routine_t* routine, air_t* air, size_t index)
+{
+    if (insn->ops[index]->type == AOP_INTEGER_CONSTANT &&
+        insn->ops[index]->content.ic >= 0 &&
+        insn->ops[index]->content.ic <= 0xFF)
+        return;
+    
+    if (insn->ops[index]->type != AOP_REGISTER)
+        report_return;
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(X86R_RCX);
+    ld->ops[1] = air_insn_register_operand_init(insn->ops[index]->content.reg);
+    air_insn_insert_before(ld, insn);
+
+    insn->ops[index]->content.reg = X86R_RCX;
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1386,6 +1405,16 @@ void localize_x86_64(air_t* air)
                     break;
                 case AIR_VA_END:
                     insn = localize_x86_64_va_end(insn, routine, air);
+                    break;
+                case AIR_SHIFT_LEFT:
+                case AIR_SHIFT_RIGHT:
+                case AIR_SIGNED_SHIFT_RIGHT:
+                    localize_x86_64_shift(insn, routine, air, 2);
+                    break;
+                case AIR_DIRECT_SHIFT_LEFT:
+                case AIR_DIRECT_SHIFT_RIGHT:
+                case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
+                    localize_x86_64_shift(insn, routine, air, 1);
                     break;
                 case AIR_LESS_EQUAL:
                 case AIR_LESS:

@@ -384,8 +384,9 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         suffix[0] = '\0';
     else
         snprintf(suffix, 32, "%c", x86_operand_size_character(insn->size));
-    #define USUAL_1OP(name) fprintf(file, INDENT name "%s ", suffix); goto op1;
-    #define USUAL_2OP(name) fprintf(file, INDENT name "%s ", suffix); goto op2;
+    #define USUAL_START(name) fprintf(file, INDENT name "%s ", suffix)
+    #define USUAL_1OP(name) USUAL_START(name); goto op1;
+    #define USUAL_2OP(name) USUAL_START(name); goto op2;
     switch (insn->type)
     {
         case X86I_LABEL:
@@ -497,9 +498,26 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_DIVSS: USUAL_2OP("divss")
         case X86I_DIVSD: USUAL_2OP("divsd")
 
-        case X86I_SHL: USUAL_2OP("shl")
-        case X86I_SHR: USUAL_2OP("shr")
-        case X86I_SAR: USUAL_2OP("sar")
+        case X86I_SHL:
+            USUAL_START("shl");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
+        
+        case X86I_SHR:
+            USUAL_START("shr");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
+
+        case X86I_SAR:
+            USUAL_START("sar");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
 
         op1:
             x86_write_operand(insn->op1, insn->size, file);
@@ -517,6 +535,9 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
             break;
     }
     #undef INDENT
+    #undef USUAL_START
+    #undef USUAL_1OP
+    #undef USUAL_2OP
     fprintf(file, "\n");
 }
 
