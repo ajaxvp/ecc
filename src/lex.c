@@ -438,6 +438,24 @@ preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preproc
     return nstart;
 }
 
+char* pp_token_stringify_range(preprocessing_token_t* start, preprocessing_token_t* end)
+{
+    long long buffer_length = 1024;
+    long long remaining = buffer_length;
+    char* buffer = malloc(remaining);
+    if (!buffer)
+        return NULL;
+    for (; start && start != end; start = start->next)
+    {
+        if (start->type == PPT_OTHER && !start->other)
+            continue;
+        remaining -= pp_token_normal_snprint(buffer + (buffer_length - remaining), remaining, start, snprintf);
+    }
+    char* str = strdup(buffer);
+    free(buffer);
+    return str;
+}
+
 bool pp_token_equals(preprocessing_token_t* t1, preprocessing_token_t* t2)
 {
     if (!t1 && !t2) return true;

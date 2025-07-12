@@ -1670,6 +1670,7 @@ preprocessing_token_t* pp_token_copy_range(preprocessing_token_t* start, preproc
 int pp_token_normal_snprint(char* buffer, size_t maxlen, preprocessing_token_t* token, int (*snprinter)(char*, size_t, const char* fmt, ...));
 void pp_token_normal_print_range(preprocessing_token_t* token, preprocessing_token_t* end, int (*printer)(const char* fmt, ...));
 bool pp_token_equals(preprocessing_token_t* t1, preprocessing_token_t* t2);
+char* pp_token_stringify_range(preprocessing_token_t* start, preprocessing_token_t* end);
 
 /* preprocess.c */
 bool preprocess(preprocessing_token_t** tokens, preprocessing_settings_t* settings);

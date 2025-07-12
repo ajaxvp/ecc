@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 
 #include "ecc.h"
 
@@ -9,6 +10,8 @@ typedef struct preprocessing_state
     preprocessing_table_t* table;
     preprocessing_token_t* tokens;
     preprocessing_settings_t* settings;
+    long long line_offset;
+    char* filename;
 } preprocessing_state_t;
 
 typedef enum pp_status_code
@@ -192,6 +195,7 @@ void state_delete(preprocessing_state_t* state)
 {
     if (!state) return;
     preprocessing_table_delete(state->table);
+    free(state->filename);
     free(state);
 }
 
@@ -235,7 +239,7 @@ static preprocessing_token_t* advance_token_impl(preprocessing_token_t** t)
     preprocessing_token_t* token = *t;
     do
         token = (token ? token->next : NULL);
-    while (token != NULL && !is_pp_token(token));
+    while (token != NULL && (!is_pp_token(token) || token->type == PPT_OTHER));
     return *t = token;
 }
 
@@ -245,14 +249,14 @@ static preprocessing_token_t* unadvance_token_impl(preprocessing_token_t** t)
     preprocessing_token_t* token = *t;
     do
         token = (token ? token->prev : NULL);
-    while (token != NULL && !is_pp_token(token));
+    while (token != NULL && (!is_pp_token(token) || token->type == PPT_OTHER));
     return *t = token;
 }
 
 static preprocessing_token_t* get_first_token_forward(preprocessing_token_t* token)
 {
     if (!token) return NULL;
-    while (token && !is_pp_token(token))
+    while (token && (!is_pp_token(token) || token->type == PPT_OTHER))
         token = token->next;
     return token;
 }
@@ -260,7 +264,7 @@ static preprocessing_token_t* get_first_token_forward(preprocessing_token_t* tok
 static preprocessing_token_t* get_first_token_backward(preprocessing_token_t* token)
 {
     if (!token) return NULL;
-    while (token && !is_pp_token(token))
+    while (token && (!is_pp_token(token) || token->type == PPT_OTHER))
         token = token->prev;
     return token;
 }
@@ -359,6 +363,33 @@ static preprocessing_token_t* remove_token_sequence(preprocessing_token_t* start
         start->type = PPT_OTHER;
     }
     return end;
+}
+
+static preprocessing_token_t* relex(preprocessing_token_t* start, preprocessing_token_t* end, preprocessing_token_t** last)
+{
+    if (!start) return NULL;
+    char* content = pp_token_stringify_range(start, end);
+    if (!content)
+        return NULL;
+    preprocessing_token_t* tokens = lex_raw((unsigned char*) content, strlen(content), false);
+    free(content);
+    if (!tokens)
+        return NULL;
+    preprocessing_token_t* first = NULL;
+    if (last) *last = NULL;
+    for (preprocessing_token_t* token = tokens; token; token = token->next)
+    {
+        preprocessing_token_t* cp = pp_token_copy(token);
+        if (!first) first = cp;
+        if (last && !token->next) *last = cp;
+        cp->row = start->row;
+        cp->col = start->col;
+        insert_token_before(cp, start);
+    }
+    if (last && *last) *last = (*last)->next;
+    pp_token_delete_all(tokens);
+    remove_token_sequence(start, end);
+    return first;
 }
 
 // merges into lhs, returns new lhs
@@ -560,6 +591,7 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->pp_number = strdup("0");
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__STDC_HOSTED__"))
@@ -571,6 +603,7 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->pp_number = strdup("1");
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__STDC_VERSION__"))
@@ -582,6 +615,7 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->pp_number = strdup("199901L");
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__FILE__"))
@@ -590,9 +624,10 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->type = PPT_STRING_LITERAL;
         t->row = token->row;
         t->col = token->col;
-        t->string_literal.value = strdup(state->settings->filepath);
+        t->string_literal.value = strdup(state->filename ? state->filename : state->settings->filepath);
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__LINE__"))
@@ -602,10 +637,11 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->row = token->row;
         t->col = token->col;
         char buffer[1 + MAX_STRINGIFIED_INTEGER_LENGTH];
-        snprintf(buffer, sizeof(buffer), "%u", token->row);
+        snprintf(buffer, sizeof(buffer), "%llu", token->row + state->line_offset);
         t->string_literal.value = strdup(buffer);
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__DATE__"))
@@ -619,6 +655,7 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->string_literal.value = strdup(buffer);
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     if (streq(token->identifier, "__TIME__"))
@@ -630,6 +667,7 @@ static preprocessing_token_t* expand_special(preprocessing_token_t* token, prepr
         t->string_literal.value = substrdup(datetime, 11, 18);
         insert_token_after(t, token);
         remove_token(token);
+        if (start) *start = t;
         return t;
     }
     return token;
@@ -730,6 +768,8 @@ static preprocessing_token_t* expand(preprocessing_token_t* token, preprocessing
 
     pp_token_delete(dummy);
     seq->prev = NULL;
+
+    if (start) *start = NULL;
 
     preprocessing_token_t* inserting = token;
     for (; seq; seq = seq->next)
@@ -1983,21 +2023,39 @@ bool preprocess_include_file(FILE* file, char* path, preprocessing_state_t* stat
 bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
     preprocessing_token_t* seq_start = NULL;
-    for (preprocessing_token_t* token = comp->incl_sequence->start; token && token != comp->incl_sequence->end; token = token->next)
+    preprocessing_token_t* token = comp->incl_sequence->start;
+    for (; token && token != comp->incl_sequence->end; token = token->next)
         if (!(token = expand(token, state, seq_start ? NULL : &seq_start)))
             return false;
     comp->incl_sequence->start = seq_start;
-    if (!is_pp_type(seq_start, PPT_HEADER_NAME))
+    comp->incl_sequence->end = token;
+    comp->incl_sequence->start = relex(comp->incl_sequence->start, comp->incl_sequence->end, &comp->incl_sequence->end);
+    if (!comp->incl_sequence->start)
     {
-        (void) fail(seq_start, "#include directives that do not expand directly to header names are not supported yet");
+        (void) fail(comp->start, "#include macro content was unable to be expanded");
+        return false;
+    }
+
+    preprocessing_token_t* hn = comp->incl_sequence->start;
+
+    if (is_pp_type(hn, PPT_STRING_LITERAL))
+    {
+        hn->header_name.name = hn->string_literal.value;
+        hn->header_name.quote_delimited = true;
+        hn->type = PPT_HEADER_NAME;
+    }
+
+    if (!is_pp_type(hn, PPT_HEADER_NAME))
+    {
+        (void) fail(hn, "#include directives must include a header name or a macro expansion that resolves to a header name");
         return false;
     }
 
     char* path = NULL;
-    FILE* file = open_include_path(seq_start->header_name.name, seq_start->header_name.quote_delimited, state, &path);
+    FILE* file = open_include_path(hn->header_name.name, hn->header_name.quote_delimited, state, &path);
     if (!file)
     {
-        (void) fail(seq_start, "could not open file '%s'", seq_start->header_name.name);
+        (void) fail(hn, "could not open file '%s'", hn->header_name.name);
         return false;
     }
 
@@ -2133,8 +2191,57 @@ bool preprocess_undef_line(preprocessing_component_t* comp, preprocessing_state_
 
 bool preprocess_line_line(preprocessing_component_t* comp, preprocessing_state_t* state)
 {
-    warnf("[%s:%d:%d] #line directives are currently ignored by the compiler. they will be supported in a later version\n",
-        state->settings->filepath, comp->start->row, comp->start->col);
+    preprocessing_token_t* seq_start = NULL;
+    preprocessing_token_t* token = comp->linel_sequence->start;
+    for (; token && token != comp->linel_sequence->end; token = token->next)
+        if (!(token = expand(token, state, seq_start ? NULL : &seq_start)))
+            return false;
+    comp->linel_sequence->start = seq_start;
+    comp->linel_sequence->end = token;
+    comp->linel_sequence->start = relex(comp->linel_sequence->start, comp->linel_sequence->end, &comp->linel_sequence->end);
+    if (!comp->linel_sequence->start)
+    {
+        (void) fail(comp->start, "#line macro content was unable to be expanded");
+        return false;
+    }
+    preprocessing_token_t* line_number = get_first_token_forward(comp->linel_sequence->start);
+    if (!is_pp_type(line_number, PPT_PP_NUMBER))
+    {
+        (void) fail(comp->start, "#line directive requires a line number specified");
+        return false;
+    }
+    errno = 0;
+    long value = strtol(line_number->pp_number, NULL, 10);
+    if (errno == ERANGE || value <= 0 || value > 0x7FFFFFFF)
+    {
+        (void) fail(comp->start, "#line directive has a line number that is out of range (1 to 2,147,483,647) or is not a number");
+        return false;
+    }
+    preprocessing_token_t* filename = get_first_token_backward(comp->linel_sequence->end);
+    if (is_pp_type(filename, PPT_STRING_LITERAL))
+    {
+        preprocessing_token_t* prev = filename;
+        unadvance_token_impl(&prev);
+        if (prev != line_number)
+        {
+            (void) fail(comp->start, "too many tokens in #line directive, expected a line number and a file name or just a line number");
+            return false;
+        }
+
+        if (filename->string_literal.wide)
+        {
+            (void) fail(comp->start, "string literal used to specify file name in #line directive may not be wide");
+            return false;
+        }
+
+        state->filename = strdup(filename->string_literal.value);
+    }
+    else if (filename != line_number)
+    {
+        (void) fail(comp->start, "too many tokens in #line directive, expected a line number and a file name or just a line number");
+        return false;
+    }
+    state->line_offset = value - comp->start->row - 1;
     remove_token_sequence(comp->start, comp->end);
     return true;
 }
