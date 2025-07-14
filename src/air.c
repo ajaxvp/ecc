@@ -2393,10 +2393,19 @@ static void linearize_switch_statement_after(syntax_traverser_t* trav, syntax_co
         ADD_CODE(jnz);
     }
 
+    uint64_t after_label_no = syn->break_label_no ? syn->break_label_no : 0;
+
     if (syn->swstmt_default)
     {
         air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
         jmp->ops[0] = air_insn_label_operand_init(syn->swstmt_default->lstmt_uid, 'L');
+        ADD_CODE(jmp);
+    }
+    else
+    {
+        after_label_no = syn->break_label_no ? syn->break_label_no : NEXT_LABEL;
+        air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
+        jmp->ops[0] = air_insn_label_operand_init(after_label_no, 'S');
         ADD_CODE(jmp);
     }
 
@@ -2404,10 +2413,10 @@ static void linearize_switch_statement_after(syntax_traverser_t* trav, syntax_co
 
     COPY_CODE(syn->swstmt_body);
 
-    if (syn->break_label_no)
+    if (after_label_no)
     {
         air_insn_t* label = air_insn_init(AIR_LABEL, 1);
-        label->ops[0] = air_insn_label_operand_init(syn->break_label_no, 'S');
+        label->ops[0] = air_insn_label_operand_init(after_label_no, 'S');
         ADD_CODE(label);
     }
 
