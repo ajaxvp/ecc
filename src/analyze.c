@@ -73,7 +73,8 @@ void dump_errors(analysis_error_t* errors)
 }
 
 #define ANALYSIS_TRAVERSER ((analysis_syntax_traverser_t*) trav)
-#define ADD_ERROR(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, false, fmt, ## __VA_ARGS__ ))
+#define ADD_ERROR_TO_TRAVERSER(trav, syn, fmt, ...) (trav)->errors = error_list_add((trav)->errors, error_init(syn, false, fmt, ## __VA_ARGS__ ))
+#define ADD_ERROR(syn, fmt, ...) ADD_ERROR_TO_TRAVERSER(ANALYSIS_TRAVERSER, syn, fmt, ## __VA_ARGS__ )
 #define ADD_WARNING(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
 
 // you should assign this to a variable if you plan on using it a lot.
@@ -134,7 +135,6 @@ EXPRESSIONS
 
 STATEMENTS
 6.8.4.2 (2)
-6.8.4.2 (3)
 6.8.6.1 (1)
 
 SEMANTICS:
@@ -207,6 +207,7 @@ STATEMENTS
 6.8.1 (3)
 6.8.4.1 (1)
 6.8.4.2 (1)
+6.8.4.2 (3)
 6.8.5 (2)
 6.8.5 (3)
 6.8.6.2 (1)
@@ -1747,8 +1748,7 @@ void enforce_6_8_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
 
 void analyze_labeled_statement_before(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (syn->lstmt_id)
-        syn->lstmt_uid = ++(ANALYSIS_TRAVERSER->next_label_uid);
+    syn->lstmt_uid = ++(ANALYSIS_TRAVERSER->next_label_uid);
 }
 
 void analyze_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1763,12 +1763,72 @@ void analyze_if_statement_after(syntax_traverser_t* trav, syntax_component_t* sy
         ADD_ERROR(syn->ifstmt_condition, "controlling expression of an if statement must be of scalar type");
 }
 
+#define SWBODY_ANALYSIS_TRAVERSER (((swbody_traverser_t*) trav)->analysis_traverser)
+
+typedef struct swbody_traverser
+{
+    syntax_traverser_t base;
+    analysis_syntax_traverser_t* analysis_traverser;
+} swbody_traverser_t;
+
+void swbody_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->lstmt_id)
+        return;
+    syntax_component_t* enc = syntax_get_enclosing(syn, SC_SWITCH_STATEMENT);
+    syntax_component_t* swstmt = trav->tlu;
+    if (enc != swstmt)
+        return;
+    if (syn->lstmt_case_expression)
+    {
+        constexpr_t* ce = ce_evaluate(syn->lstmt_case_expression, CE_INTEGER);
+        if (!ce)
+        {
+            // ISO: 6.8.4.2 (3)
+            ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "case statement must have a constant expression");
+            return;
+        }
+        c_type_t* pt = integer_promotions(swstmt->swstmt_condition->ctype);
+        syn->lstmt_value = constexpr_convert(ce->ivalue, pt->class);
+        type_delete(pt);
+        constexpr_delete(ce);
+        VECTOR_FOR(syntax_component_t*, lstmt, swstmt->swstmt_cases)
+        {
+            if (lstmt->lstmt_value == syn->lstmt_value)
+            {
+                // ISO: 6.8.4.2 (3)
+                ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn,
+                    "case statement on line %u has expression with the same value", lstmt->row);
+            }
+        }
+        vector_add(swstmt->swstmt_cases, syn);
+        return;
+    }
+    if (swstmt->swstmt_default)
+    {
+        // ISO: 6.8.4.2 (3)
+        ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "multiple default cases are not allowed within a switch statement");
+        return;
+    }
+    swstmt->swstmt_default = syn;
+}
+
 void analyze_switch_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    ADD_ERROR(syn, "switch statements are not supported yet");
+    ADD_WARNING(syn, "switch statements are not checked for identifiers with variably-modified types, use with your own risk");
     if (!type_is_integer(syn->swstmt_condition->ctype))
+    {
         // ISO: 6.8.4.2 (1)
         ADD_ERROR(syn->swstmt_condition, "controlling expression of a switch statement must be of integer type");
+        return;
+    }
+    syn->swstmt_cases = vector_init();
+    
+    syntax_traverser_t* swb_trav = traverse_init(syn, sizeof(swbody_traverser_t));
+    ((swbody_traverser_t*) swb_trav)->analysis_traverser = ANALYSIS_TRAVERSER;
+    swb_trav->after[SC_LABELED_STATEMENT] = swbody_labeled_statement_after;
+    traverse(swb_trav);
+    traverse_delete(swb_trav);
 }
 
 void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)

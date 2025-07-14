@@ -2294,22 +2294,12 @@ static void linearize_conditional_expression_after(syntax_traverser_t* trav, syn
     FINALIZE_LINEARIZE;
 }
 
-static void linearize_raw_label_statement_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_t** c)
-{
-    air_insn_t* code = *c;
-
-    air_insn_t* insn = air_insn_init(AIR_LABEL, 1);
-    insn->ops[0] = air_insn_label_operand_init(syn->lstmt_uid, 'L');
-    ADD_CODE(insn);
-
-    *c = code;
-}
-
 static void linearize_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
-    if (syn->lstmt_id)
-        linearize_raw_label_statement_after(trav, syn, &code);
+    air_insn_t* insn = air_insn_init(AIR_LABEL, 1);
+    insn->ops[0] = air_insn_label_operand_init(syn->lstmt_uid, 'L');
+    ADD_CODE(insn);
     COPY_CODE(syn->lstmt_stmt);
     FINALIZE_LINEARIZE;
 }
@@ -2369,7 +2359,60 @@ static void linearize_if_statement_after(syntax_traverser_t* trav, syntax_compon
     FINALIZE_LINEARIZE;
 }
 
-// TODO: switch
+static void linearize_switch_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    SETUP_LINEARIZE;
+
+    COPY_CODE(syn->swstmt_condition);
+
+    c_type_t* pt = integer_promotions(syn->swstmt_condition->ctype);
+
+    regid_t reg = convert(trav, syn->swstmt_condition->ctype, pt, syn->swstmt_condition->expr_reg, &code);
+
+    VECTOR_FOR(syntax_component_t*, cstmt, syn->swstmt_cases)
+    {
+        regid_t cvreg = NEXT_VIRTUAL_REGISTER;
+        air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+        ld->ct = type_copy(pt);
+        ld->ops[0] = air_insn_register_operand_init(cvreg);
+        ld->ops[1] = air_insn_integer_constant_operand_init(cstmt->lstmt_value);
+        ADD_CODE(ld);
+
+        regid_t eqreg = NEXT_VIRTUAL_REGISTER;
+        air_insn_t* eq = air_insn_init(AIR_EQUAL, 3);
+        eq->ct = make_basic_type(CTC_INT);
+        eq->ops[0] = air_insn_register_operand_init(eqreg);
+        eq->ops[1] = air_insn_register_operand_init(reg);
+        eq->ops[2] = air_insn_register_operand_init(cvreg);
+        ADD_CODE(eq);
+
+        air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
+        jnz->ct = make_basic_type(CTC_INT);
+        jnz->ops[0] = air_insn_label_operand_init(cstmt->lstmt_uid, 'L');
+        jnz->ops[1] = air_insn_register_operand_init(eqreg);
+        ADD_CODE(jnz);
+    }
+
+    if (syn->swstmt_default)
+    {
+        air_insn_t* jmp = air_insn_init(AIR_JMP, 1);
+        jmp->ops[0] = air_insn_label_operand_init(syn->swstmt_default->lstmt_uid, 'L');
+        ADD_CODE(jmp);
+    }
+
+    type_delete(pt);
+
+    COPY_CODE(syn->swstmt_body);
+
+    if (syn->break_label_no)
+    {
+        air_insn_t* label = air_insn_init(AIR_LABEL, 1);
+        label->ops[0] = air_insn_label_operand_init(syn->break_label_no, 'S');
+        ADD_CODE(label);
+    }
+
+    FINALIZE_LINEARIZE;
+}
 
 /*
 
@@ -2711,6 +2754,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_INTRINSIC_CALL_EXPRESSION] = linearize_intrinsic_call_expression_after;
     trav->after[SC_CONTINUE_STATEMENT] = linearize_continue_statement_after;
     trav->after[SC_BREAK_STATEMENT] = linearize_break_statement_after;
+    trav->after[SC_SWITCH_STATEMENT] = linearize_switch_statement_after;
 
     trav->after[SC_TRANSLATION_UNIT] = linearize_no_action_after;
     trav->after[SC_BASIC_TYPE_SPECIFIER] = linearize_no_action_after;

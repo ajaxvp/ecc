@@ -1266,6 +1266,7 @@ typedef struct syntax_component_t
             struct syntax_component_t* lstmt_stmt; // SC_STATEMENT
             // additional info
             unsigned long long lstmt_uid;
+            unsigned long long lstmt_value;
         };
 
         // SC_COMPOUND_STATEMENT - cstmt
@@ -1287,6 +1288,10 @@ typedef struct syntax_component_t
         {
             struct syntax_component_t* swstmt_condition; // SC_EXPRESSION
             struct syntax_component_t* swstmt_body; // SC_STATEMENT
+
+            // static analysis
+            vector_t* swstmt_cases; // <syntax_component_t> (SC_LABELED_STATEMENT)
+            syntax_component_t* swstmt_default; // SC_LABELED_STATEMENT
         };
 
         // SC_DO_STATEMENT - dostmt
@@ -1921,6 +1926,7 @@ designation_t* designation_concat(designation_t* d1, designation_t* d2);
 constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
 void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** ct);
 bool representable(unsigned long long value, c_type_class_t class);
+unsigned long long constexpr_convert(unsigned long long value, c_type_class_t class);
 
 /* ecc.c */
 program_options_t* get_program_options(void);

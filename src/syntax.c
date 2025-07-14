@@ -1570,6 +1570,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         {
             free_syntax(syn->swstmt_body, tlu);
             free_syntax(syn->swstmt_condition, tlu);
+            vector_delete(syn->swstmt_cases);
             break;
         }
         case SC_FOR_STATEMENT:

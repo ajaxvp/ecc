@@ -216,6 +216,29 @@ constexpr_t* ce_make_integer(c_type_t* ct, unsigned long long value)
     return ce;
 }
 
+unsigned long long constexpr_convert(unsigned long long value, c_type_class_t class)
+{
+    #define c(cl, ty) case cl: return (ty) value;
+    switch (class)
+    {
+        c(CTC_BOOL, bool);
+        c(CTC_CHAR, char);
+        c(CTC_SIGNED_CHAR, signed char);
+        c(CTC_UNSIGNED_CHAR, unsigned char);
+        c(CTC_SHORT_INT, short);
+        c(CTC_UNSIGNED_SHORT_INT, unsigned short);
+        c(CTC_INT, int);
+        c(CTC_UNSIGNED_INT, unsigned);
+        c(CTC_LONG_INT, long);
+        c(CTC_UNSIGNED_LONG_INT, unsigned long);
+        c(CTC_LONG_LONG_INT, long long);
+        c(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long);
+        default: return 0;
+    }
+    #undef c
+    return 0;
+}
+
 #define errret { *class = CTC_ERROR; return; }
 
 bool representable(unsigned long long value, c_type_class_t class)
