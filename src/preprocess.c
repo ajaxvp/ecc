@@ -2230,6 +2230,7 @@ bool preprocess_line_line(preprocessing_component_t* comp, preprocessing_state_t
 
         if (filename->string_literal.wide)
         {
+            // ISO: 6.10.4 (1)
             (void) fail(comp->start, "string literal used to specify file name in #line directive may not be wide");
             return false;
         }

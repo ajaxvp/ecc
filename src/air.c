@@ -408,6 +408,9 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_VA_END:
             TYPE OP(0) EQUALS printer("va_end"); LPAREN OP(1) RPAREN SEMICOLON
             break;
+        case AIR_SEQUENCE_POINT:
+            printer("<sequence point>");
+            break;
     }
     #undef SPACE
     #undef EQUALS
@@ -637,6 +640,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_JMP:
         case AIR_LABEL:
         case AIR_PUSH:
+        case AIR_SEQUENCE_POINT:
             return false;
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
@@ -698,6 +702,7 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_JMP:
         case AIR_LABEL:
         case AIR_PUSH:
+        case AIR_SEQUENCE_POINT:
             return false;
         case AIR_ASSIGN:
         case AIR_DIRECT_ADD:
@@ -752,6 +757,104 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_VA_END:
         case AIR_VA_START:
             return true;
+    }
+    return false;
+}
+
+bool air_insn_produces_side_effect(air_insn_t* insn)
+{
+    if (!insn) return false;
+    if (insn->type == AIR_FUNC_CALL)
+        return true;
+    // could modify an object
+    switch (insn->type)
+    {
+        case AIR_VA_ARG:
+        case AIR_VA_END:
+        case AIR_VA_START:
+            return true;
+        case AIR_ASSIGN:
+        case AIR_DIRECT_ADD:
+        case AIR_DIRECT_SUBTRACT:
+        case AIR_DIRECT_MULTIPLY:
+        case AIR_DIRECT_DIVIDE:
+        case AIR_DIRECT_MODULO:
+        case AIR_DIRECT_SHIFT_LEFT:
+        case AIR_DIRECT_SHIFT_RIGHT:
+        case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
+        case AIR_DIRECT_AND:
+        case AIR_DIRECT_XOR:
+        case AIR_DIRECT_OR:
+            air_insn_operand_type_t optype = insn->ops[0]->type;
+            if (optype == AOP_INDIRECT_REGISTER ||
+                optype == AOP_INDIRECT_SYMBOL ||
+                optype == AOP_SYMBOL)
+                return true;
+            break;
+        default:
+            break;
+    }
+    // could access a volatile object
+    // TODO
+    switch (insn->type)
+    {
+        case AIR_RETURN:
+        case AIR_JZ:
+        case AIR_JNZ:
+        case AIR_PUSH:
+        case AIR_ASSIGN:
+        case AIR_DIRECT_ADD:
+        case AIR_DIRECT_SUBTRACT:
+        case AIR_DIRECT_MULTIPLY:
+        case AIR_DIRECT_DIVIDE:
+        case AIR_DIRECT_MODULO:
+        case AIR_DIRECT_SHIFT_LEFT:
+        case AIR_DIRECT_SHIFT_RIGHT:
+        case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
+        case AIR_DIRECT_AND:
+        case AIR_DIRECT_XOR:
+        case AIR_DIRECT_OR:
+        case AIR_LOAD:
+        case AIR_ADD:
+        case AIR_SUBTRACT:
+        case AIR_FUNC_CALL:
+        case AIR_PHI:
+        case AIR_NEGATE:
+        case AIR_MULTIPLY:
+        case AIR_POSATE:
+        case AIR_COMPLEMENT:
+        case AIR_NOT:
+        case AIR_SEXT:
+        case AIR_ZEXT:
+        case AIR_S2D:
+        case AIR_D2S:
+        case AIR_S2SI:
+        case AIR_S2UI:
+        case AIR_D2SI:
+        case AIR_D2UI:
+        case AIR_SI2S:
+        case AIR_UI2S:
+        case AIR_SI2D:
+        case AIR_UI2D:
+        case AIR_DIVIDE:
+        case AIR_MODULO:
+        case AIR_SHIFT_LEFT:
+        case AIR_SHIFT_RIGHT:
+        case AIR_SIGNED_SHIFT_RIGHT:
+        case AIR_LESS_EQUAL:
+        case AIR_LESS:
+        case AIR_GREATER_EQUAL:
+        case AIR_GREATER:
+        case AIR_EQUAL:
+        case AIR_INEQUAL:
+        case AIR_AND:
+        case AIR_XOR:
+        case AIR_OR:
+        case AIR_VA_ARG:
+        case AIR_VA_END:
+        case AIR_VA_START:
+        default:
+            break;
     }
     return false;
 }
@@ -936,6 +1039,8 @@ static air_insn_t* copy_air_insn_sequence(air_insn_t* code)
     air_insn_delete(dummy);
 
 #define ADD_CODE(insn) (code->next = (insn), code->next->prev = code, code = code->next)
+
+#define ADD_SEQUENCE_POINT ADD_CODE(air_insn_init(AIR_SEQUENCE_POINT, 0))
 
 static void linearize_function_definition_before(syntax_traverser_t* trav, syntax_component_t* syn)
 {
@@ -1150,7 +1255,11 @@ static void linearize_expression_after(syntax_traverser_t* trav, syntax_componen
 {
     SETUP_LINEARIZE;
     VECTOR_FOR(syntax_component_t*, expr, syn->expr_expressions)
+    {
         COPY_CODE(expr);
+        if (i != syn->expr_expressions->size - 1)
+            ADD_SEQUENCE_POINT;
+    }
     if (syn->expr_expressions)
     {
         syntax_component_t* last = vector_get(syn->expr_expressions, syn->expr_expressions->size - 1);
@@ -1163,6 +1272,7 @@ static void linearize_expression_statement_after(syntax_traverser_t* trav, synta
 {
     SETUP_LINEARIZE;
     COPY_CODE(syn->estmt_expression);
+    ADD_SEQUENCE_POINT;
     FINALIZE_LINEARIZE;
 }
 
@@ -1172,6 +1282,7 @@ static void linearize_return_statement_after(syntax_traverser_t* trav, syntax_co
     if (syn->retstmt_expression)
     {
         COPY_CODE(syn->retstmt_expression);
+        ADD_SEQUENCE_POINT;
         air_insn_t* insn = air_insn_init(AIR_RETURN, 1);
         if (syn->retstmt_expression->ctype->class == CTC_STRUCTURE ||
             syn->retstmt_expression->ctype->class == CTC_UNION)
@@ -1347,6 +1458,7 @@ void initialize(syntax_traverser_t* trav, symbol_t* sy, syntax_component_t* syn,
         else
         {
             COPY_CODE(init);
+            ADD_SEQUENCE_POINT;
             while (et->class == CTC_STRUCTURE || et->class == CTC_UNION || et->class == CTC_ARRAY)
             {
                 vector_add(cot_stack, et);
@@ -1472,7 +1584,12 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     if (!enclosing) report_return;
     // nested initializer lists are handled in the highest initializer list
     if (enclosing->type == SC_INITIALIZER_LIST)
+    {
+        SETUP_LINEARIZE;
+        ADD_SEQUENCE_POINT;
+        FINALIZE_LINEARIZE;
         return;
+    }
     symbol_t* sy = NULL;
     if (enclosing->type == SC_INIT_DECLARATOR)
     {
@@ -1491,6 +1608,7 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     loadaddr->ops[1] = air_insn_symbol_operand_init(sy);
     ADD_CODE(loadaddr);
     initialize(trav, sy, syn, sy->type, la_result, &code);
+    ADD_SEQUENCE_POINT;
     FINALIZE_LINEARIZE;
 }
 
@@ -1623,6 +1741,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
         }
     }
 
+    ADD_SEQUENCE_POINT;
     FINALIZE_LINEARIZE;
 }
 
@@ -1754,6 +1873,7 @@ static void linearize_function_call_expression_after(syntax_traverser_t* trav, s
             continue;
         code = add_function_call_arg(trav, syn, i, insn, code);
     }
+    ADD_SEQUENCE_POINT;
     COPY_CODE(syn->fcallexpr_expression);
     if (syn->ctype->class == CTC_STRUCTURE || syn->ctype->class == CTC_UNION)
     {
@@ -2198,6 +2318,8 @@ static void linearize_logical_expression_after(syntax_traverser_t* trav, syntax_
 
     COPY_CODE(syn->bexpr_lhs);
 
+    ADD_SEQUENCE_POINT;
+
     air_insn_t* jzl = air_insn_init(or ? AIR_JNZ : AIR_JZ, 2);
     jzl->ct = type_copy(syn->bexpr_lhs->ctype);
     jzl->ops[0] = air_insn_label_operand_init(first_label_no, 'E');
@@ -2253,6 +2375,8 @@ static void linearize_conditional_expression_after(syntax_traverser_t* trav, syn
     SETUP_LINEARIZE;
 
     COPY_CODE(syn->cexpr_condition);
+
+    ADD_SEQUENCE_POINT;
 
     unsigned long long else_label_no = NEXT_LABEL;
     unsigned long long end_label_no = NEXT_LABEL;
@@ -2330,6 +2454,7 @@ static void linearize_if_statement_after(syntax_traverser_t* trav, syntax_compon
     unsigned long long end_label_no = NEXT_LABEL;
 
     COPY_CODE(syn->ifstmt_condition);
+    ADD_SEQUENCE_POINT;
 
     air_insn_t* jz = air_insn_init(AIR_JZ, 2);
     jz->ct = type_copy(syn->ifstmt_condition->ctype);
@@ -2364,6 +2489,7 @@ static void linearize_switch_statement_after(syntax_traverser_t* trav, syntax_co
     SETUP_LINEARIZE;
 
     COPY_CODE(syn->swstmt_condition);
+    ADD_SEQUENCE_POINT;
 
     c_type_t* pt = integer_promotions(syn->swstmt_condition->ctype);
 
@@ -2461,6 +2587,7 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
     unsigned long long condition_label_no = syn->forstmt_condition ? NEXT_LABEL : 0;
 
     COPY_CODE(syn->forstmt_init);
+    ADD_SEQUENCE_POINT;
 
     if (syn->forstmt_condition)
     {
@@ -2483,6 +2610,7 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
     }
 
     COPY_CODE(syn->forstmt_post);
+    ADD_SEQUENCE_POINT;
 
     if (syn->forstmt_condition)
     {
@@ -2492,6 +2620,7 @@ static void linearize_for_statement_after(syntax_traverser_t* trav, syntax_compo
     }
 
     COPY_CODE(syn->forstmt_condition);
+    ADD_SEQUENCE_POINT;
 
     if (syn->forstmt_condition)
     {
@@ -2540,6 +2669,7 @@ static void linearize_while_statement_after(syntax_traverser_t* trav, syntax_com
     ADD_CODE(condition_label);
 
     COPY_CODE(syn->whstmt_condition);
+    ADD_SEQUENCE_POINT;
 
     air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
     jnz->ct = type_copy(syn->whstmt_condition->ctype);
@@ -2577,6 +2707,7 @@ static void linearize_do_while_statement_after(syntax_traverser_t* trav, syntax_
     }
 
     COPY_CODE(syn->dostmt_condition);
+    ADD_SEQUENCE_POINT;
 
     air_insn_t* jnz = air_insn_init(AIR_JNZ, 2);
     jnz->ct = type_copy(syn->dostmt_condition->ctype);
@@ -2687,9 +2818,16 @@ air_t* airinize(syntax_component_t* tlu)
     air->routines = vector_init();
     air->st = tlu->tlu_st;
 
+    trav->after[SC_DECLARATOR_IDENTIFIER] = linearize_declarator_identifier_after;
+    trav->after[SC_FUNCTION_DECLARATOR] = linearize_function_declarator_after;
+    trav->after[SC_INIT_DECLARATOR] = linearize_init_declarator_after;
+    trav->after[SC_ARRAY_DECLARATOR] = linearize_array_declarator_after;
+    trav->after[SC_DECLARATOR] = linearize_declarator_after;
+    trav->after[SC_STRUCT_DECLARATOR] = linearize_no_action_after;
+    trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
+
     trav->before[SC_FUNCTION_DEFINITION] = linearize_function_definition_before;
     trav->after[SC_FUNCTION_DEFINITION] = linearize_function_definition_after;
-    trav->after[SC_DECLARATOR_IDENTIFIER] = linearize_declarator_identifier_after;
     trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = linearize_primary_expression_identifier_after;
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
     trav->after[SC_CHARACTER_CONSTANT] = linearize_character_constant_after;
@@ -2700,17 +2838,13 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_EXPRESSION_STATEMENT] = linearize_expression_statement_after;
     trav->after[SC_COMPOUND_STATEMENT] = linearize_compound_statement_after;
     trav->after[SC_RETURN_STATEMENT] = linearize_return_statement_after;
-    trav->after[SC_FUNCTION_DECLARATOR] = linearize_function_declarator_after;
-    trav->after[SC_INIT_DECLARATOR] = linearize_init_declarator_after;
     trav->after[SC_DECLARATION] = linearize_declaration_after;
     trav->after[SC_INITIALIZER_LIST] = linearize_initializer_list_after;
-    trav->after[SC_ARRAY_DECLARATOR] = linearize_array_declarator_after;
     trav->after[SC_SUBSCRIPT_EXPRESSION] = linearize_subscript_expression_after;
     trav->after[SC_STRING_LITERAL] = linearize_string_literal_after;
     trav->after[SC_FUNCTION_CALL_EXPRESSION] = linearize_function_call_expression_after;
     trav->after[SC_MEMBER_EXPRESSION] = linearize_member_expression_after;
     trav->after[SC_DEREFERENCE_MEMBER_EXPRESSION] = linearize_member_expression_after;
-    trav->after[SC_DECLARATOR] = linearize_declarator_after;
     trav->after[SC_PREFIX_INCREMENT_EXPRESSION] = linearize_increment_decrement_expression_after;
     trav->after[SC_POSTFIX_INCREMENT_EXPRESSION] = linearize_increment_decrement_expression_after;
     trav->after[SC_PREFIX_DECREMENT_EXPRESSION] = linearize_increment_decrement_expression_after;
@@ -2771,7 +2905,6 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_TYPEDEF_NAME] = linearize_no_action_after;
     trav->after[SC_PARAMETER_DECLARATION] = linearize_no_action_after;
     trav->after[SC_STRUCT_UNION_SPECIFIER] = linearize_no_action_after;
-    trav->after[SC_STRUCT_DECLARATOR] = linearize_no_action_after;
     trav->after[SC_STRUCT_DECLARATION] = linearize_no_action_after;
     trav->after[SC_IDENTIFIER] = linearize_no_action_after;
     trav->after[SC_DESIGNATION] = linearize_no_action_after;

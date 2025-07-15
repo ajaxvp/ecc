@@ -1337,6 +1337,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_VA_START:
         case AIR_VA_END:
 
+        // sequence points don't do anything, they are markers
+        case AIR_SEQUENCE_POINT:
+
             break;
     }
     return NULL;

@@ -655,7 +655,8 @@ typedef enum air_insn_type {
     AIR_PUSH,
     AIR_VA_ARG,
     AIR_VA_START,
-    AIR_VA_END
+    AIR_VA_END,
+    AIR_SEQUENCE_POINT
 } air_insn_type_t;
 
 typedef struct air_insn air_insn_t;
@@ -1883,6 +1884,7 @@ air_insn_t* air_insn_find_temporary_definition_from_insn(regid_t tmp, air_insn_t
 air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routine);
 bool air_insn_assigns(air_insn_t* insn);
 bool air_insn_uses(air_insn_t* insn, regid_t reg);
+bool air_insn_produces_side_effect(air_insn_t* insn);
 
 /* localize.c */
 void localize(air_t* air, air_locale_t locale);

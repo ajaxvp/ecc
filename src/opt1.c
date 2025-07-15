@@ -51,11 +51,14 @@ func(_3) <-- first_used
 static bool try_remove_fcall_passing_lifetimes(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     if (!insn) return false;
+    bool side = air_insn_produces_side_effect(insn);
     bool fcall_found = false;
     air_insn_t* first_used = NULL;
     regid_t reg = insn->ops[0]->content.reg;
     for (air_insn_t* trace = insn->next; trace; trace = trace->next)
     {
+        if (side && trace->type == AIR_SEQUENCE_POINT)
+            break;
         bool uses = air_insn_uses(trace, reg);
         bool fcall = trace->type == AIR_FUNC_CALL;
         if (uses && !fcall_found) // like: _1 where _1 is defining and we're before any function calls
