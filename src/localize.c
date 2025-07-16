@@ -1419,7 +1419,7 @@ air_insn_t* localize_x86_64_sse_negate(air_insn_t* insn, air_routine_t* routine,
             data->data = malloc(DOUBLE_WIDTH);
             *((unsigned long long*) (data->data)) = 0x8000000000000000;
         }
-        vector_add(air->data, data);
+        vector_add(air->rodata, data);
     }
 
     regid_t negater_reg = NEXT_VIRTUAL_REGISTER;

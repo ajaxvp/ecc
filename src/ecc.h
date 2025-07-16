@@ -827,6 +827,8 @@ typedef enum x86_insn_type
     X86I_UCOMISS,
     X86I_UCOMISD,
 
+    X86I_PTEST,
+
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
 
@@ -873,8 +875,11 @@ typedef struct x86_asm_file
     vector_t* routines; // vector_t<x86_asm_routine_t>
     symbol_table_t* st;
     air_t* air;
+
     size_t next_constant_local_label;
     uint64_t next_routine_id;
+    symbol_t* sse32_zero_checker;
+    symbol_t* sse64_zero_checker;
 } x86_asm_file_t;
 
 typedef struct opt1_options

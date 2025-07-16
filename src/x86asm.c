@@ -7,6 +7,8 @@
 
 #define MAX_CONSTANT_LOCAL_LABEL_LENGTH MAX_STRINGIFIED_INTEGER_LENGTH + 5
 
+#define SYMBOL_TABLE (file->st)
+
 bool x86_64_is_integer_register(regid_t reg)
 {
     return reg >= X86R_RAX && reg <= X86R_R15;
@@ -255,6 +257,7 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_XORPS:
         case X86I_UCOMISS:
         case X86I_UCOMISD:
+        case X86I_PTEST:
             return true;
     }
     return false;
@@ -287,6 +290,7 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_UCOMISD:
         case X86I_NOP:
         case X86I_SKIP:
+        case X86I_PTEST:
             return 0;
         case X86I_POP:
         case X86I_SETE:
@@ -556,6 +560,8 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_UCOMISS: USUAL_2OP("ucomiss")
         case X86I_UCOMISD: USUAL_2OP("ucomisd")
+
+        case X86I_PTEST: USUAL_2OP("ptest")
 
         case X86I_SHL:
             USUAL_START("shl");
@@ -1082,25 +1088,86 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
     return insn;
 }
 
+static symbol_t* x86_64_get_zero_checker(c_type_class_t class, x86_asm_file_t* file)
+{
+    bool is_float = class == CTC_FLOAT;
+    symbol_t* checker = is_float ? file->sse32_zero_checker : file->sse64_zero_checker;
+    if (checker)
+        return checker;
+    if (is_float)
+    {
+        checker = file->sse32_zero_checker = symbol_table_add(SYMBOL_TABLE, "__sse32_zero_checker", symbol_init(NULL));
+        checker->name = strdup("__sse32_zero_checker");
+    }
+    else
+    {
+        checker = file->sse64_zero_checker = symbol_table_add(SYMBOL_TABLE, "__sse64_zero_checker", symbol_init(NULL));
+        checker->name = strdup("__sse64_zero_checker");
+    }
+    checker->type = make_basic_type(CTC_ARRAY);
+    checker->type->derived_from = make_basic_type(CTC_UNSIGNED_CHAR);
+    checker->sd = SD_STATIC;
+
+    x86_asm_data_t* data = calloc(1, sizeof *data);
+    data->readonly = true;
+    data->alignment = 16;
+    data->length = 16;
+    data->data = malloc(data->length);
+    data->label = strdup(checker->name);
+    unsigned long long* uint64_data = (unsigned long long*) data->data;
+    if (is_float)
+        uint64_data[0] = 0x7FFFFFFF;
+    else
+        uint64_data[0] = 0x7FFFFFFFFFFFFFFF;
+    uint64_data[1] = 0;
+    vector_add(file->rodata, data);
+    return checker;
+}
+
+/*
+
+integer register NOT:
+    cmp $0, %reg
+    sete %resreg
+
+sse register NOT:
+    ptest __sse(size)_zero_checker(%rip), %reg
+    sete %resreg
+
+*/
+
 x86_insn_t* x86_generate_not(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
-    if (type_is_integer(ainsn->ct))
+    c_type_t* opt = ainsn->ops[1]->ct;
+
+    x86_insn_t* cmp = NULL;
+    if (type_is_integer(opt))
     {
-        x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
+        cmp = make_basic_x86_insn(X86I_CMP);
         cmp->size = c_type_to_x86_operand_size(ainsn->ct);
         cmp->op1 = make_operand_immediate(0);
         cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    }
+    else if (type_is_sse_floating(opt))
+    {
+        symbol_t* checker = x86_64_get_zero_checker(opt->class, file);
 
-        x86_insn_t* sete = make_basic_x86_insn(X86I_SETE);
-        sete->size = X86SZ_BYTE;
-        sete->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
-
-        cmp->next = sete;
-        return cmp;
+        cmp = make_basic_x86_insn(X86I_PTEST);
+        cmp->size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
+        cmp->op1 = make_operand_label_ref(symbol_get_name(checker), 0);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     }
     else
-        // TODO: support floats and doubles
+        // TODO: support long doubles and complex numbers
         report_return_value(NULL);
+    
+    x86_insn_t* sete = make_basic_x86_insn(X86I_SETE);
+    sete->size = X86SZ_BYTE;
+    sete->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    cmp->next = sete;
+
+    return cmp;
 }
 
 x86_insn_t* x86_generate_negate(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
@@ -1172,6 +1239,30 @@ x86_insn_t* x86_generate_complement(air_insn_t* ainsn, x86_asm_routine_t* routin
     return insn;
 }
 
+/*
+
+integer register jz:
+    cmp $0, %reg
+    je .L1
+
+sse register jz:
+    ptest __sse(size)_zero_checker(%rip), %reg
+    je .L1
+
+*/
+
+x86_insn_t* x86_generate_sse_conditional_jump_test(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    symbol_t* checker = x86_64_get_zero_checker(ainsn->ct->class, file);
+
+    x86_insn_t* ptest = make_basic_x86_insn(X86I_PTEST);
+    ptest->size = c_type_to_x86_operand_size(ainsn->ct);
+    ptest->op1 = make_operand_label_ref(symbol_get_name(checker), 0);
+    ptest->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+    return ptest;
+}
+
 x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     x86_insn_type_t type = X86I_UNKNOWN;
@@ -1191,8 +1282,10 @@ x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* 
         cmp->op1 = make_operand_immediate(0);
         cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     }
+    else if (type_is_sse_floating(ainsn->ct))
+        cmp = x86_generate_sse_conditional_jump_test(ainsn, routine, file);
     else
-        // TODO: support floats and doubles
+        // TODO: support long doubles and complex numbers
         report_return_value(NULL);
 
     x86_insn_t* jmp = make_basic_x86_insn(type);
@@ -1282,7 +1375,8 @@ x86_insn_t* x86_generate_relational_equality_operator(air_insn_t* ainsn, x86_asm
         cmp = make_basic_x86_insn(X86I_CMP);
     else if (opt_sse)
         cmp = make_basic_x86_insn(opt->class == CTC_FLOAT ? X86I_COMISS : X86I_COMISD);
-    else // TODO: long doubles and complex numbers
+    else
+        // TODO: support long doubles and complex numbers
         report_return_value(NULL);
 
     cmp->size = c_type_to_x86_operand_size(ainsn->ct);
