@@ -1045,6 +1045,75 @@ static air_insn_t* copy_air_insn_sequence(air_insn_t* code)
 
 #define ADD_SEQUENCE_POINT ADD_CODE(air_insn_init(AIR_SEQUENCE_POINT, 0))
 
+// signed -> larger integer: sign extension
+// signed -> smaller integer or same: truncate
+// unsigned -> larger integer: zero extension
+// unsigned -> smaller integer or same: truncate
+// float -> double: xor double reg then cvtss2sd
+// double -> float: xor float reg then cvtsd2ss
+// float -> signed integer type: cvttss2si
+// float -> unsigned integer type: brother
+// double -> signed integer type: cvttsd2si
+// double -> unsigned integer type: brother
+// signed integer type -> float: cvtsi2ss
+// unsigned integer type -> float: oh brother...
+// signed integer type -> double: cvtsi2sd
+// unsigned integer type -> double: oh brother againe
+static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, regid_t reg, air_insn_t** c)
+{
+    air_insn_t* code = *c;
+    air_insn_type_t type = AIR_NOP;
+
+    bool ff = from->class == CTC_FLOAT;
+    bool fd = from->class == CTC_DOUBLE || from->class == CTC_LONG_DOUBLE;
+    bool tf = to->class == CTC_FLOAT;
+    bool td = to->class == CTC_DOUBLE || to->class == CTC_LONG_DOUBLE;
+
+    int operands = 2;
+    
+    if ((type_is_signed_integer(from) || from->class == CTC_CHAR) && type_is_integer(to) && 
+        get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
+        type = AIR_SEXT;
+    else if (type_is_unsigned_integer(from) && (type_is_integer(to) || to->class == CTC_CHAR) && 
+        get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
+        type = AIR_ZEXT;
+    else if (ff & td)
+        type = AIR_S2D;
+    else if (fd && tf)
+        type = AIR_D2S;
+    else if (ff && type_is_signed_integer(to))
+        type = AIR_S2SI;
+    else if (ff && type_is_unsigned_integer(to))
+        type = AIR_S2UI;
+    else if (fd && type_is_signed_integer(to))
+        type = AIR_D2SI;
+    else if (fd && type_is_unsigned_integer(to))
+        type = AIR_D2UI;
+    else if (type_is_signed_integer(from) && tf)
+        type = AIR_SI2S;
+    else if (type_is_unsigned_integer(from) && tf)
+        type = AIR_UI2S;
+    else if (type_is_signed_integer(from) && td)
+        type = AIR_SI2D;
+    else if (type_is_unsigned_integer(from) && td)
+        type = AIR_UI2D;
+    
+    regid_t result = reg;
+    if (type != AIR_NOP)
+    {
+        air_insn_t* insn = air_insn_init(type, operands);
+        insn->ct = type_copy(to);
+        result = NEXT_VIRTUAL_REGISTER;
+        insn->ops[0] = air_insn_register_operand_init(result);
+        insn->ops[1] = air_insn_register_operand_init(reg);
+        if (type == AIR_SEXT || type == AIR_ZEXT)
+            insn->ops[1]->ct = type_copy(from);
+        ADD_CODE(insn);
+    }
+    *c = code;
+    return result;
+}
+
 static void linearize_function_definition_before(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     air_routine_t* routine = calloc(1, sizeof *routine);
@@ -1286,12 +1355,23 @@ static void linearize_return_statement_after(syntax_traverser_t* trav, syntax_co
     {
         COPY_CODE(syn->retstmt_expression);
         ADD_SEQUENCE_POINT;
+        regid_t reg = syn->retstmt_expression->expr_reg;
+
+        syntax_component_t* fdef = syntax_get_enclosing(syn, SC_FUNCTION_DEFINITION);
+        if (!fdef) report_return;
+        syntax_component_t* fdef_id = syntax_get_declarator_identifier(fdef->fdef_declarator);
+        if (!fdef_id) report_return;
+        symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fdef_id);
+        if (!fsy) report_return;
+
+        reg = convert(trav, syn->retstmt_expression->ctype, fsy->type->derived_from, reg, &code);
+
         air_insn_t* insn = air_insn_init(AIR_RETURN, 1);
         if (syn->retstmt_expression->ctype->class == CTC_STRUCTURE ||
             syn->retstmt_expression->ctype->class == CTC_UNION)
-            insn->ops[0] = air_insn_indirect_register_operand_init(syn->retstmt_expression->expr_reg, 0, INVALID_VREGID, 1);
+            insn->ops[0] = air_insn_indirect_register_operand_init(reg, 0, INVALID_VREGID, 1);
         else
-            insn->ops[0] = air_insn_register_operand_init(syn->retstmt_expression->expr_reg);
+            insn->ops[0] = air_insn_register_operand_init(reg);
         ADD_CODE(insn);
     }
     else
@@ -1504,75 +1584,6 @@ void initialize(syntax_traverser_t* trav, symbol_t* sy, syntax_component_t* syn,
     vector_delete(coei_stack);
 
     *c = code;
-}
-
-// signed -> larger integer: sign extension
-// signed -> smaller integer or same: truncate
-// unsigned -> larger integer: zero extension
-// unsigned -> smaller integer or same: truncate
-// float -> double: xor double reg then cvtss2sd
-// double -> float: xor float reg then cvtsd2ss
-// float -> signed integer type: cvttss2si
-// float -> unsigned integer type: brother
-// double -> signed integer type: cvttsd2si
-// double -> unsigned integer type: brother
-// signed integer type -> float: cvtsi2ss
-// unsigned integer type -> float: oh brother...
-// signed integer type -> double: cvtsi2sd
-// unsigned integer type -> double: oh brother againe
-static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, regid_t reg, air_insn_t** c)
-{
-    air_insn_t* code = *c;
-    air_insn_type_t type = AIR_NOP;
-
-    bool ff = from->class == CTC_FLOAT;
-    bool fd = from->class == CTC_DOUBLE || from->class == CTC_LONG_DOUBLE;
-    bool tf = to->class == CTC_FLOAT;
-    bool td = to->class == CTC_DOUBLE || to->class == CTC_LONG_DOUBLE;
-
-    int operands = 2;
-    
-    if ((type_is_signed_integer(from) || from->class == CTC_CHAR) && type_is_integer(to) && 
-        get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
-        type = AIR_SEXT;
-    else if (type_is_unsigned_integer(from) && (type_is_integer(to) || to->class == CTC_CHAR) && 
-        get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
-        type = AIR_ZEXT;
-    else if (ff & td)
-        type = AIR_S2D;
-    else if (fd && tf)
-        type = AIR_D2S;
-    else if (ff && type_is_signed_integer(to))
-        type = AIR_S2SI;
-    else if (ff && type_is_unsigned_integer(to))
-        type = AIR_S2UI;
-    else if (fd && type_is_signed_integer(to))
-        type = AIR_D2SI;
-    else if (fd && type_is_unsigned_integer(to))
-        type = AIR_D2UI;
-    else if (type_is_signed_integer(from) && tf)
-        type = AIR_SI2S;
-    else if (type_is_unsigned_integer(from) && tf)
-        type = AIR_UI2S;
-    else if (type_is_signed_integer(from) && td)
-        type = AIR_SI2D;
-    else if (type_is_unsigned_integer(from) && td)
-        type = AIR_UI2D;
-    
-    regid_t result = reg;
-    if (type != AIR_NOP)
-    {
-        air_insn_t* insn = air_insn_init(type, operands);
-        insn->ct = type_copy(to);
-        result = NEXT_VIRTUAL_REGISTER;
-        insn->ops[0] = air_insn_register_operand_init(result);
-        insn->ops[1] = air_insn_register_operand_init(reg);
-        if (type == AIR_SEXT || type == AIR_ZEXT)
-            insn->ops[1]->ct = type_copy(from);
-        ADD_CODE(insn);
-    }
-    *c = code;
-    return result;
 }
 
 static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_component_t* syn)

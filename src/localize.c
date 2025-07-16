@@ -31,6 +31,15 @@ static c_type_class_t largest_type_class_for_eightbyte(long long remaining)
         return CTC_UNSIGNED_LONG_LONG_INT;
 }
 
+static c_type_class_t largest_sse_type_class_for_eightbyte(long long remaining)
+{
+    if (remaining == FLOAT_WIDTH)
+        return CTC_FLOAT;
+    if (remaining == DOUBLE_WIDTH)
+        return CTC_DOUBLE;
+    report_return_value(CTC_ERROR);
+}
+
 static arg_class_t* arg_class_singleton(arg_class_t class)
 {
     arg_class_t* r = calloc(1, sizeof *r);
@@ -384,7 +393,7 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
         if (total_remaining >= UNSIGNED_LONG_LONG_INT_WIDTH)
         {
             air_insn_t* deref = air_insn_init(AIR_LOAD, 2);
-            deref->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+            deref->ct = make_basic_type(x86_64_is_sse_register(dest) ? CTC_DOUBLE : CTC_UNSIGNED_LONG_LONG_INT);
             deref->ops[0] = air_insn_register_operand_init(dest);
             deref->ops[1] = air_insn_indirect_register_operand_init(argreg, progress, INVALID_VREGID, 1);
             air_insn_insert_before(deref, loc);
@@ -402,7 +411,8 @@ air_insn_t* store_eightbyte_in_register(air_insn_t* loc, air_insn_t* tempdef, c_
 
             // find the type that can fit the largest number of bytes
             // for the amount remaining
-            c_type_t* cyt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+            c_type_t* cyt = make_basic_type(x86_64_is_sse_register(dest) ?
+                largest_sse_type_class_for_eightbyte(remaining) : largest_type_class_for_eightbyte(remaining));
             long long cytsize = type_size(cyt);
 
             // shift if we need to make space for the new data we copying
@@ -457,6 +467,7 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
 
     // initialize the next SSE register in the sequence
     regid_t nextssereg = X86R_XMM0;
+
     air_insn_t* inserting = insn;
 
     // loop thru every argument to the function call
@@ -526,14 +537,14 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
     }
 
     // TODO: check to see if the function has no prototype or varargs
-    if (nextssereg - X86R_XMM0 > 0)
-    {
-        air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-        assign->ct = make_basic_type(CTC_UNSIGNED_CHAR);
-        assign->ops[0] = air_insn_register_operand_init(X86R_RAX);
-        assign->ops[1] = air_insn_integer_constant_operand_init(nextssereg - X86R_XMM0);
-        air_insn_insert_before(assign, insn);
-    }
+    // if (nextssereg - X86R_XMM0 > 0)
+    // {
+    //     air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+    //     assign->ct = make_basic_type(CTC_UNSIGNED_CHAR);
+    //     assign->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    //     assign->ops[1] = air_insn_integer_constant_operand_init(nextssereg - X86R_XMM0);
+    //     air_insn_insert_before(assign, insn);
+    // }
 
     // delete all the old temporary usages in the original call instruction
     for (size_t i = 2; i < insn->noops; ++i)
@@ -902,6 +913,9 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
     size_t next_intretreg = 0;
 
+    regid_t sse_return_sequence[] = { X86R_XMM0, X86R_XMM1 };
+    size_t next_sseretreg = 0;
+
     // get the function's type
     c_type_t* ftype = routine->sy->type;
 
@@ -962,7 +976,7 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
         return;
     }
 
-    if (type_is_real_floating(rettype))
+    if (type_is_sse_floating(rettype))
     {
         air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
         ld->ct = type_copy(rettype);
@@ -985,14 +999,15 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     {
         arg_class_t class = classes[i];
 
-        if (class == ARG_INTEGER)
+        if (class == ARG_INTEGER || class == ARG_SSE)
         {
             long long copy_size = min(rtsize - (i * 8), UNSIGNED_LONG_LONG_INT_WIDTH);
 
             for (long long copied = 0; copied < copy_size;)
             {
                 long long remaining = copy_size - copied;
-                c_type_t* copytype = make_basic_type(largest_type_class_for_eightbyte(remaining));
+                c_type_t* copytype = make_basic_type(class == ARG_SSE ?
+                    largest_sse_type_class_for_eightbyte(remaining) : largest_type_class_for_eightbyte(remaining));
                 long long cpytsize = type_size(copytype);
 
                 if (copied)
@@ -1006,14 +1021,18 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
 
                 air_insn_t* copy = air_insn_init(copied ? AIR_ASSIGN : AIR_LOAD, 2);
                 copy->ct = copytype;
-                copy->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                copy->ops[0] = air_insn_register_operand_init(class == ARG_SSE ?
+                    sse_return_sequence[next_sseretreg] : integer_return_sequence[next_intretreg]);
                 copy->ops[1] = air_insn_indirect_register_operand_init(retreg, (i << 3) + remaining - cpytsize, INVALID_VREGID, 1);
                 pos = air_insn_insert_after(copy, pos);
 
                 copied += cpytsize;
             }
 
-            ++next_intretreg;
+            if (class == ARG_INTEGER)
+                ++next_intretreg;
+            else if (class == ARG_SSE)
+                ++next_sseretreg;
         }
         else
             report_return;
@@ -1106,8 +1125,13 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
                 inserting = air_insn_insert_after(insn, inserting);
             }
             else if (class == ARG_SSE && nextssereg <= X86R_XMM7)
-                // TODO: handle SSE
-                report_return
+            {
+                reg = nextssereg++;
+                air_insn_t* insn = air_insn_init(AIR_DECLARE_REGISTER, 1);
+                insn->ct = make_basic_type(CTC_DOUBLE);
+                insn->ops[0] = air_insn_register_operand_init(reg);
+                inserting = air_insn_insert_after(insn, inserting);
+            }
             else if (class == ARG_MEMORY || class == ARG_INTEGER || class == ARG_SSE)
             {
                 air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
@@ -1122,7 +1146,8 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
             for (long long copied = 0; copied < to_be_copied;)
             {
                 long long remaining = to_be_copied - copied;
-                c_type_t* tt = make_basic_type(largest_type_class_for_eightbyte(remaining));
+                c_type_t* tt = make_basic_type(class == ARG_SSE ? 
+                    largest_sse_type_class_for_eightbyte(remaining) : largest_type_class_for_eightbyte(remaining));
                 long long ttsize = type_size(tt);
 
                 air_insn_t* insn = air_insn_init(AIR_ASSIGN, 2);

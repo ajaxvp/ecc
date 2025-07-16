@@ -1191,10 +1191,8 @@ x86_insn_t* x86_generate_negate(air_insn_t* ainsn, x86_asm_routine_t* routine, x
         return insn;
     }
     else if (type_is_sse_floating(ainsn->ct))
-    {
         // negations for SSE operands get removed during localization
-        report_return_value(NULL);
-    }
+        report_return_value(NULL)
     else
         // TODO: support long doubles and complex numbers
         report_return_value(NULL);
