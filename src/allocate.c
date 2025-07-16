@@ -190,9 +190,15 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
                 continue;
             
             // if any of this register's aliases has the register we're merging as a conflict, skip it
+            // if any of this register's aliases is a physical register and the register we're merging is one too, we cannot coalesce
             bool found_conflict = false;
             VECTOR_FOR(regid_t, alias, ov->aliases)
             {
+                if (alias <= NO_PHYSICAL_REGISTERS && k <= NO_PHYSICAL_REGISTERS)
+                {
+                    found_conflict = true;
+                    break;
+                }
                 if (live_range_conflicts(a, k, alias))
                 {
                     found_conflict = true;

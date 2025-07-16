@@ -378,6 +378,18 @@ bool type_is_sua(c_type_t* ct)
     return type_is_sua_type(ct->class);
 }
 
+bool type_is_sse_floating_type(c_type_class_t class)
+{
+    return class == CTC_FLOAT ||
+        class == CTC_DOUBLE;
+}
+
+bool type_is_sse_floating(c_type_t* ct)
+{
+    if (!ct) return false;
+    return type_is_sse_floating_type(ct->class);
+}
+
 bool type_is_real_floating_type(c_type_class_t class)
 {
     return class == CTC_FLOAT ||

@@ -161,6 +161,20 @@ bool syntax_is_declaration_type(syntax_component_type_t type)
         type == SC_PARAMETER_DECLARATION;
 }
 
+bool syntax_is_relational_expression_type(syntax_component_type_t type)
+{
+    return type == SC_GREATER_EQUAL_EXPRESSION ||
+        type == SC_LESS_EQUAL_EXPRESSION ||
+        type == SC_GREATER_EXPRESSION ||
+        type == SC_LESS_EXPRESSION;
+}
+
+bool syntax_is_equality_expression_type(syntax_component_type_t type)
+{
+    return type == SC_EQUALITY_EXPRESSION ||
+        type == SC_INEQUALITY_EXPRESSION;
+}
+
 // SC_DIRECT_DECLARATOR = SC_IDENTIFIER | SC_DECLARATOR | SC_ARRAY_DECLARATOR | SC_FUNCTION_DECLARATOR
 
 // supports the following declarator types: SC_INIT_DECLARATOR, SC_STRUCT_DECLARATOR, SC_DECLARATOR, SC_DIRECT_DECLARATOR

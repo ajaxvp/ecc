@@ -1374,6 +1374,81 @@ void localize_x86_64_shift(air_insn_t* insn, air_routine_t* routine, air_t* air,
     insn->ops[index]->content.reg = X86R_RCX;
 }
 
+/*
+
+sse _2 = -_1;
+
+becomes:
+
+sse _3 = __fcX; (__fcX = 0x80000000 for floats, __fcX = 0x8000000000000000 for doubles)
+sse _2 = _1 ^ _3;
+
+*/
+air_insn_t* localize_x86_64_sse_negate(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    bool is_float = insn->ct->class == CTC_FLOAT;
+    symbol_t* negater = is_float ? air->sse32_negater : air->sse64_negater;
+    bool to_define = !negater;
+    if (!negater && is_float)
+    {
+        negater = air->sse32_negater = symbol_table_add(SYMBOL_TABLE, "__sse32_negater", symbol_init(NULL));
+        negater->name = strdup("__sse32_negater");
+        negater->type = make_basic_type(CTC_FLOAT);
+        negater->sd = SD_STATIC;
+    }
+    if (!negater && !is_float)
+    {
+        negater = air->sse64_negater = symbol_table_add(SYMBOL_TABLE, "__sse64_negater", symbol_init(NULL));
+        negater->name = strdup("__sse64_negater");
+        negater->type = make_basic_type(CTC_DOUBLE);
+        negater->sd = SD_STATIC;
+    }
+
+    if (to_define)
+    {
+        air_data_t* data = calloc(1, sizeof *data);
+        data->readonly = true;
+        data->sy = negater;
+        if (is_float)
+        {
+            data->data = malloc(FLOAT_WIDTH);
+            *((unsigned*) (data->data)) = 0x80000000;
+        }
+        else
+        {
+            data->data = malloc(DOUBLE_WIDTH);
+            *((unsigned long long*) (data->data)) = 0x8000000000000000;
+        }
+        vector_add(air->data, data);
+    }
+
+    regid_t negater_reg = NEXT_VIRTUAL_REGISTER;
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(negater_reg);
+    ld->ops[1] = air_insn_symbol_operand_init(negater);
+    air_insn_insert_before(ld, insn);
+
+    air_insn_t* xor = air_insn_init(AIR_XOR, 3);
+    xor->ct = type_copy(insn->ct);
+    xor->ops[0] = air_insn_operand_copy(insn->ops[0]);
+    xor->ops[1] = air_insn_operand_copy(insn->ops[1]);
+    xor->ops[2] = air_insn_register_operand_init(negater_reg);
+    air_insn_insert_before(xor, insn);
+
+    air_insn_remove(insn);
+
+    return xor;
+}
+
+air_insn_t* localize_x86_64_negate(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    if (type_is_sse_floating(insn->ct))
+        return localize_x86_64_sse_negate(insn, routine, air);
+    return insn;
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1424,6 +1499,9 @@ void localize_x86_64(air_t* air)
                 case AIR_INEQUAL:
                 case AIR_NOT:
                     localize_x86_64_setcc_comparison(insn, routine, air);
+                    break;
+                case AIR_NEGATE:
+                    insn = localize_x86_64_negate(insn, routine, air);
                     break;
                 default:
                     break;

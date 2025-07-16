@@ -27,6 +27,7 @@ void air_data_delete(air_data_t* ad)
 void air_insn_operand_delete(air_insn_operand_t* op)
 {
     if (!op) return;
+    type_delete(op->ct);
     free(op);
 }
 
@@ -36,6 +37,7 @@ void air_insn_delete(air_insn_t* insn)
     for (size_t i = 0; i < insn->noops; ++i)
         air_insn_operand_delete(insn->ops[i]);
     free(insn->ops);
+    type_delete(insn->ct);
     free(insn);
 }
 
@@ -87,7 +89,7 @@ void air_data_print(air_data_t* ad, air_t* air, int (*printer)(const char* fmt, 
     printer("\n}\n");
 }
 
-void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const char* fmt, ...))
+void register_print(regid_t reg, c_type_t* ct, air_t* air, int (*printer)(const char* fmt, ...))
 {
     if (reg == INVALID_VREGID)
         printer("(invalid register)");
@@ -96,12 +98,12 @@ void register_print(regid_t reg, c_type_t* ict, air_t* air, int (*printer)(const
         switch (air->locale)
         {
             case LOC_X86_64:
-                if (type_is_real_floating(ict))
+                if (type_is_real_floating(ct))
                 {
                     printer("%%%s", X86_64_SSE_REGISTERS[reg - X86R_XMM0]);
                     break;
                 }
-                long long size = type_size(ict);
+                long long size = type_size(ct);
                 const char** list = NULL;
                 if (size == 1)
                     list = X86_64_BYTE_REGISTERS;
@@ -139,13 +141,13 @@ void air_insn_operand_print(air_insn_operand_t* op, c_type_t* ict, air_t* air, i
                 if (op->content.inreg.factor != 1 || op->content.inreg.offset != 0 || op->content.inreg.roffset != INVALID_VREGID)
                     printer("(");
             }
-            register_print(op->content.reg, ict, air, printer);
+            register_print(op->content.reg, op->ct ? op->ct : ict, air, printer);
             if (op->type == AOP_INDIRECT_REGISTER)
             {
                 if (op->content.inreg.roffset != INVALID_VREGID)
                 {
                     printer(" + ");
-                    register_print(op->content.inreg.roffset, ict, air, printer);
+                    register_print(op->content.inreg.roffset, op->ct ? op->ct : ict, air, printer);
                 }
                 if (op->content.inreg.offset != 0)
                     printer(" + %lld", op->content.inreg.offset);
@@ -193,7 +195,7 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
     #define AMP printer("&");
     #define ASTERISK printer("*");
     #define COMMA printer(", ");
-    #define OP(x) air_insn_operand_print(insn->ops[x], insn->ct, air, printer);
+    #define OP(x) air_insn_operand_print(insn->ops[x], insn->ops[x]->ct ? insn->ops[x]->ct : insn->ct, air, printer);
     #define TYPE type_humanized_print(insn->ct, printer); printer(" ");
     #define OPERATOR(x) printer(" " #x " ");
     switch (insn->type)
@@ -267,10 +269,10 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             TYPE OP(0) EQUALS OP(1) OPERATOR(*) OP(2) SEMICOLON
             break;
         case AIR_SEXT:
-            TYPE OP(0) EQUALS printer("sext"); LPAREN OP(1) COMMA OP(2) RPAREN SEMICOLON
+            TYPE OP(0) EQUALS printer("sext"); LPAREN OP(1) RPAREN SEMICOLON
             break;
         case AIR_ZEXT:
-            TYPE OP(0) EQUALS printer("zext"); LPAREN OP(1) COMMA OP(2) RPAREN SEMICOLON
+            TYPE OP(0) EQUALS printer("zext"); LPAREN OP(1) RPAREN SEMICOLON
             break;
         case AIR_S2D:
         case AIR_SI2D:
@@ -494,6 +496,7 @@ air_insn_operand_t* air_insn_operand_copy(air_insn_operand_t* op)
     if (!op) return NULL;
     air_insn_operand_t* n = calloc(1, sizeof *n);
     n->type = op->type;
+    n->ct = type_copy(op->ct);
     switch (n->type)
     {
         case AOP_SYMBOL:
@@ -1531,16 +1534,10 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
     
     if ((type_is_signed_integer(from) || from->class == CTC_CHAR) && type_is_integer(to) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
-    {
         type = AIR_SEXT;
-        operands = 3;
-    }
     else if (type_is_unsigned_integer(from) && (type_is_integer(to) || to->class == CTC_CHAR) && 
         get_integer_conversion_rank(to) > get_integer_conversion_rank(from))
-    {
         type = AIR_ZEXT;
-        operands = 3;
-    }
     else if (ff & td)
         type = AIR_S2D;
     else if (fd && tf)
@@ -1571,7 +1568,7 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
         insn->ops[0] = air_insn_register_operand_init(result);
         insn->ops[1] = air_insn_register_operand_init(reg);
         if (type == AIR_SEXT || type == AIR_ZEXT)
-            insn->ops[2] = air_insn_type_operand_init(from);
+            insn->ops[1]->ct = type_copy(from);
         ADD_CODE(insn);
     }
     *c = code;
@@ -2007,10 +2004,21 @@ static void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_co
     air_insn_t* insn = air_insn_init(type, 2);
     insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    regid_t srcreg = syn->uexpr_operand->expr_reg;
+    c_type_t* ut = NULL;
+    if (syn->type == SC_NOT_EXPRESSION)
+    {
+        c_type_t* int_type = make_basic_type(CTC_INT);
+        ut = usual_arithmetic_conversions_result_type(syn->uexpr_operand->ctype, int_type);
+        srcreg = convert(trav, syn->uexpr_operand->ctype, ut, srcreg, &code);
+        type_delete(int_type);
+    }
     if (syn->type == SC_DEREFERENCE_EXPRESSION)
-        insn->ops[1] = air_insn_indirect_register_operand_init(syn->uexpr_operand->expr_reg, 0, INVALID_VREGID, 1);
+        insn->ops[1] = air_insn_indirect_register_operand_init(srcreg, 0, INVALID_VREGID, 1);
     else
-        insn->ops[1] = air_insn_register_operand_init(syn->uexpr_operand->expr_reg);
+        insn->ops[1] = air_insn_register_operand_init(srcreg);
+    if (syn->type == SC_NOT_EXPRESSION)
+        insn->ops[1]->ct = ut;
     ADD_CODE(insn);
     FINALIZE_LINEARIZE;
 }
@@ -2190,14 +2198,22 @@ static void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_c
     }
     regid_t lreg = syn->bexpr_lhs->expr_reg;
     regid_t rreg = syn->bexpr_rhs->expr_reg;
-    lreg = convert(trav, syn->bexpr_lhs->ctype, syn->ctype, lreg, &code);
-    rreg = convert(trav, syn->bexpr_rhs->ctype, syn->ctype, rreg, &code);
+    c_type_t* opt = NULL;
+    if (syntax_is_relational_expression_type(syn->type) || syntax_is_equality_expression_type(syn->type))
+        opt = usual_arithmetic_conversions_result_type(syn->bexpr_lhs->ctype, syn->bexpr_rhs->ctype);
+    else
+        opt = type_copy(syn->ctype);
+    lreg = convert(trav, syn->bexpr_lhs->ctype, opt, lreg, &code);
+    rreg = convert(trav, syn->bexpr_rhs->ctype, opt, rreg, &code);
     air_insn_t* insn = air_insn_init(type, 3);
     insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
     insn->ops[1] = air_insn_register_operand_init(lreg);
+    insn->ops[1]->ct = type_copy(opt);
     insn->ops[2] = air_insn_register_operand_init(rreg);
+    insn->ops[2]->ct = type_copy(opt);
     ADD_CODE(insn);
+    type_delete(opt);
     FINALIZE_LINEARIZE;
 }
 

@@ -37,6 +37,7 @@ bool x86_operand_equals(x86_operand_t* op1, x86_operand_t* op2)
     if (!op1 || !op2) return false;
     #define check(condition) if (!(condition)) return false;
     check(op1->type == op2->type);
+    check(op1->size == op2->size);
     switch (op1->type)
     {
         case X86OP_REGISTER:
@@ -138,6 +139,16 @@ void x86_asm_file_delete(x86_asm_file_t* file)
     free(file);
 }
 
+static char* x86_asm_file_create_next_label(x86_asm_file_t* file)
+{
+    if (!file) return NULL;
+    // .LGEN(num)\0
+    size_t length = 5 + 1 + MAX_STRINGIFIED_INTEGER_LENGTH;
+    char* str = malloc(length);
+    snprintf(str, length, ".LGEN%lu", ++(file->next_constant_local_label));
+    return str;
+}
+
 bool x86_64_c_type_registers_compatible(c_type_t* t1, c_type_t* t2)
 {
     if (!t1 && !t2) return false;
@@ -221,6 +232,10 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_SHR:
         case X86I_SAR:
         case X86I_SKIP:
+        case X86I_SETA:
+        case X86I_SETNB:
+        case X86I_SETP:
+        case X86I_SETNP:
             return false;
         case X86I_MOVSS:
         case X86I_MOVSD:
@@ -232,6 +247,14 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_MULSD:
         case X86I_DIVSS:
         case X86I_DIVSD:
+        case X86I_CVTSD2SS:
+        case X86I_CVTSS2SD:
+        case X86I_COMISS:
+        case X86I_COMISD:
+        case X86I_XORPD:
+        case X86I_XORPS:
+        case X86I_UCOMISS:
+        case X86I_UCOMISD:
             return true;
     }
     return false;
@@ -258,6 +281,10 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_JE:
         case X86I_JNE:
         case X86I_CMP:
+        case X86I_COMISS:
+        case X86I_COMISD:
+        case X86I_UCOMISS:
+        case X86I_UCOMISD:
         case X86I_NOP:
         case X86I_SKIP:
             return 0;
@@ -268,6 +295,10 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_SETL:
         case X86I_SETGE:
         case X86I_SETG:
+        case X86I_SETA:
+        case X86I_SETNB:
+        case X86I_SETP:
+        case X86I_SETNP:
         case X86I_NOT:
         case X86I_NEG:
         case X86I_MUL:
@@ -297,6 +328,10 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_MULSD:
         case X86I_DIVSS:
         case X86I_DIVSD:
+        case X86I_XORPS:
+        case X86I_XORPD:
+        case X86I_CVTSD2SS:
+        case X86I_CVTSS2SD:
             return X86_INSN_WRITES_OP2;
     }
     return 0;
@@ -326,11 +361,11 @@ void x86_write_operand(x86_operand_t* op, x86_insn_size_t size, FILE* file)
     switch (op->type)
     {
         case X86OP_REGISTER:
-            x86_write_register(op->reg, size, file);
+            x86_write_register(op->reg, op->size ? op->size : size, file);
             break;
         case X86OP_PTR_REGISTER:
             fprintf(file, "*");
-            x86_write_register(op->reg, size, file);
+            x86_write_register(op->reg, op->size ? op->size : size, file);
             break;
         case X86OP_DEREF_REGISTER:
             if (op->deref_reg.offset != 0)
@@ -380,7 +415,9 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
     if (!insn) return;
     #define INDENT "    "
     char suffix[32];
-    if (x86_insn_has_sse_operands(insn))
+    if (x86_insn_has_sse_operands(insn) ||
+        insn->type == X86I_MOVSX ||
+        insn->type == X86I_MOVZX)
         suffix[0] = '\0';
     else
         snprintf(suffix, 32, "%c", x86_operand_size_character(insn->size));
@@ -455,28 +492,37 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
             x86_write_operand(insn->op1, X86SZ_BYTE, file);
             break;
         
+        case X86I_SETA:
+            fprintf(file, INDENT "seta ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETNB:
+            fprintf(file, INDENT "setnb ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETP:
+            fprintf(file, INDENT "setp ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+
+        case X86I_SETNP:
+            fprintf(file, INDENT "setnp ");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            break;
+        
         case X86I_PUSH: USUAL_1OP("push")
         case X86I_NEG: USUAL_1OP("neg")
 
         case X86I_MOV: USUAL_2OP("mov")
         case X86I_MOVSS: USUAL_2OP("movss")
         case X86I_MOVSD: USUAL_2OP("movsd")
-        case X86I_MOVSX:
-            fprintf(file, INDENT "movsx ");
-            x86_write_operand(insn->op1, insn->source_size, file);
-            fprintf(file, ", ");
-            x86_write_operand(insn->op2, insn->size, file);
-            break;
-        case X86I_MOVZX:
-            fprintf(file, INDENT "movzx ");
-            x86_write_operand(insn->op1, insn->source_size, file);
-            fprintf(file, ", ");
-            x86_write_operand(insn->op2, insn->size, file);
-            break;
+        case X86I_MOVSX: USUAL_2OP("movsx")
+        case X86I_MOVZX: USUAL_2OP("movzx")
         case X86I_LEA: USUAL_2OP("lea")
         case X86I_AND: USUAL_2OP("and")
         case X86I_OR: USUAL_2OP("or")
-        case X86I_XOR: USUAL_2OP("xor")
         case X86I_CMP: USUAL_2OP("cmp")
         case X86I_NOT: USUAL_2OP("not")
     
@@ -497,6 +543,19 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_IDIV: USUAL_1OP("idiv")
         case X86I_DIVSS: USUAL_2OP("divss")
         case X86I_DIVSD: USUAL_2OP("divsd")
+
+        case X86I_XOR: USUAL_2OP("xor")
+        case X86I_XORPS: USUAL_2OP("xorps")
+        case X86I_XORPD: USUAL_2OP("xorpd")
+
+        case X86I_CVTSD2SS: USUAL_2OP("cvtsd2ss")
+        case X86I_CVTSS2SD: USUAL_2OP("cvtss2sd")
+    
+        case X86I_COMISS: USUAL_2OP("comiss")
+        case X86I_COMISD: USUAL_2OP("comisd")
+
+        case X86I_UCOMISS: USUAL_2OP("ucomiss")
+        case X86I_UCOMISD: USUAL_2OP("ucomisd")
 
         case X86I_SHL:
             USUAL_START("shl");
@@ -901,6 +960,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_ADD: type = X86I_ADDSS; break;
             case AIR_SUBTRACT: type = X86I_SUBSS; break;
             case AIR_MULTIPLY: type = X86I_MULSS; break;
+            case AIR_XOR: type = X86I_XORPS; break;
             default: report_return_value(NULL);
         }
     }
@@ -912,10 +972,11 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_ADD: type = X86I_ADDSD; break;
             case AIR_SUBTRACT: type = X86I_SUBSD; break;
             case AIR_MULTIPLY: type = X86I_MULSD; break;
+            case AIR_XOR: type = X86I_XORPD; break;
             default: report_return_value(NULL);
         }
     }
-    else if (type_is_signed_integer(ainsn->ct))
+    else if (type_is_signed_integer(ainsn->ct) || ainsn->ct->class == CTC_CHAR || ainsn->ct->class == CTC_POINTER)
     {
         movtype = X86I_MOV;
         switch (ainsn->type)
@@ -1062,8 +1123,13 @@ x86_insn_t* x86_generate_negate(air_insn_t* ainsn, x86_asm_routine_t* routine, x
 
         return insn;
     }
+    else if (type_is_sse_floating(ainsn->ct))
+    {
+        // negations for SSE operands get removed during localization
+        report_return_value(NULL);
+    }
     else
-        // TODO: support floats and doubles
+        // TODO: support long doubles and complex numbers
         report_return_value(NULL);
 }
 
@@ -1160,35 +1226,167 @@ x86_insn_t* x86_generate_push(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
 
 x86_insn_t* x86_generate_relational_equality_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
-    if (type_is_integer(ainsn->ct))
+    // this type should also be equal to ainsn->ops[2]->ct
+    c_type_t* opt = ainsn->ops[1]->ct;
+    if (!opt) report_return_value(NULL);
+
+    bool opt_sse = type_is_sse_floating(opt);
+
+    x86_insn_type_t type = X86I_UNKNOWN;
+    switch (ainsn->type)
     {
-        x86_insn_type_t type = X86I_UNKNOWN;
-        switch (ainsn->type)
-        {
-            case AIR_LESS_EQUAL: type = X86I_SETLE; break;
-            case AIR_LESS: type = X86I_SETL; break;
-            case AIR_GREATER_EQUAL: type = X86I_SETGE; break;
-            case AIR_GREATER: type = X86I_SETG; break;
-            case AIR_EQUAL: type = X86I_SETE; break;
-            case AIR_INEQUAL: type = X86I_SETNE; break;
-            default: report_return_value(NULL);
-        }
+        case AIR_LESS_EQUAL:
+            if (opt_sse)
+            {
+                type = X86I_SETNB;
+                break;
+            }
+            type = X86I_SETLE;
+            break;
+        case AIR_LESS: 
+            if (opt_sse)
+            {
+                type = X86I_SETA;
+                break;
+            }
+            type = X86I_SETL;
+            break;
+        case AIR_GREATER_EQUAL:
+            if (opt_sse)
+            {
+                type = X86I_SETNB;
+                break;
+            }
+            type = X86I_SETGE;
+            break;
+        case AIR_GREATER:
+            if (opt_sse)
+            {
+                type = X86I_SETA;
+                break;
+            }
+            type = X86I_SETG;
+            break;
+        case AIR_EQUAL:
+            type = X86I_SETE;
+            break;
+        case AIR_INEQUAL:
+            type = X86I_SETNE;
+            break;
+        default:
+            report_return_value(NULL);
+    }
 
-        x86_insn_t* cmp = make_basic_x86_insn(X86I_CMP);
-        cmp->size = c_type_to_x86_operand_size(ainsn->ct);
-        cmp->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
-        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    x86_insn_t* cmp = NULL;
+    if (type_is_integer(opt))
+        cmp = make_basic_x86_insn(X86I_CMP);
+    else if (opt_sse)
+        cmp = make_basic_x86_insn(opt->class == CTC_FLOAT ? X86I_COMISS : X86I_COMISD);
+    else // TODO: long doubles and complex numbers
+        report_return_value(NULL);
 
-        x86_insn_t* insn = make_basic_x86_insn(type);
-        insn->size = X86SZ_BYTE;
-        insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    cmp->size = c_type_to_x86_operand_size(ainsn->ct);
 
-        cmp->next = insn;
-
-        return cmp;
+    // flip operands for SSE <= and <
+    if (opt_sse && (ainsn->type == AIR_LESS_EQUAL || ainsn->type == AIR_LESS))
+    {
+        cmp->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[2], routine);
     }
     else
-        // TODO: support floats and doubles
+    {
+        cmp->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+        cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    }
+    
+    x86_insn_t* insn = make_basic_x86_insn(type);
+    insn->size = X86SZ_BYTE;
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    cmp->next = insn;
+
+    return cmp;
+}
+
+/*
+
+SSE equals:
+
+	movsd	-16(%rbp), %xmm0
+	ucomisd	-8(%rbp), %xmm0
+	setnp	%al
+	andq	$1, %rax
+	movsd	-16(%rbp), %xmm0
+	ucomisd	-8(%rbp), %xmm0
+	je		.L1
+	movl	$0, %eax
+.L1:
+
+SSE not equals:
+
+	movsd	-16(%rbp), %xmm0
+	ucomisd	-8(%rbp), %xmm0
+	setp	%al
+	andq	$1, %rax
+	movsd	-16(%rbp), %xmm0
+	ucomisd	-8(%rbp), %xmm0
+	je      .L1
+	movl    $1, %eax
+.L1:
+
+*/
+
+x86_insn_t* x86_generate_sse_equality_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    bool eq = ainsn->type == AIR_EQUAL;
+    c_type_t* opt = ainsn->ops[1]->ct;
+    bool is_float = opt->class == CTC_FLOAT;
+
+    x86_insn_t* cmp1 = make_basic_x86_insn(is_float ? X86I_UCOMISS : X86I_UCOMISD);
+    cmp1->size = c_type_to_x86_operand_size(opt);
+    cmp1->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+    cmp1->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+
+    x86_insn_t* parity = make_basic_x86_insn(eq ? X86I_SETNP : X86I_SETP);
+    parity->size = X86SZ_BYTE;
+    parity->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    cmp1->next = parity;
+
+    x86_insn_t* cmp2 = make_basic_x86_insn(is_float ? X86I_UCOMISS : X86I_UCOMISD);
+    cmp2->size = c_type_to_x86_operand_size(opt);
+    cmp2->op1 = air_operand_to_x86_operand(ainsn->ops[2], routine);
+    cmp2->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    parity->next = cmp2;
+
+    x86_insn_t* je = make_basic_x86_insn(X86I_JE);
+    char* label_name = x86_asm_file_create_next_label(file);
+    je->op1 = make_operand_label(label_name);
+    cmp2->next = je;
+
+    x86_insn_t* mov = make_basic_x86_insn(X86I_MOV);
+    mov->size = c_type_to_x86_operand_size(ainsn->ct);
+    mov->op1 = make_operand_immediate(!eq);
+    mov->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    je->next = mov;
+
+    x86_insn_t* label = make_basic_x86_insn(X86I_LABEL);
+    label->op1 = make_operand_label(label_name);
+    mov->next = label;
+
+    free(label_name);
+
+    return cmp1;
+}
+
+x86_insn_t* x86_generate_equality_operator(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+    if (type_is_sse_floating(opt))
+        return x86_generate_sse_equality_operator(ainsn, routine, file);
+    else if (type_is_integer(opt))
+        return x86_generate_relational_equality_operator(ainsn, routine, file);
+    else
+        // TODO: support long doubles and complex numbers
         report_return_value(NULL);
 }
 
@@ -1196,8 +1394,8 @@ x86_insn_t* x86_generate_extension(air_insn_t* ainsn, x86_asm_routine_t* routine
 {
     x86_insn_t* insn = make_basic_x86_insn(ainsn->type == AIR_SEXT ? X86I_MOVSX : X86I_MOVZX);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
-    insn->source_size = c_type_to_x86_operand_size(ainsn->ops[2]->content.ct);
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op1->size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     return insn;
 }
@@ -1237,6 +1435,26 @@ x86_insn_t* x86_generate_divide(air_insn_t* ainsn, x86_asm_routine_t* routine, x
         div->next = insn;
 
     return div;
+}
+
+x86_insn_t* x86_generate_s2d(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_CVTSS2SD);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    return insn;
+}
+
+x86_insn_t* x86_generate_d2s(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_CVTSD2SS);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    return insn;
 }
 
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
@@ -1299,18 +1517,24 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_LESS:
         case AIR_GREATER_EQUAL:
         case AIR_GREATER:
+            return x86_generate_relational_equality_operator(ainsn, routine, file);
+
         case AIR_EQUAL:
         case AIR_INEQUAL:
-            return x86_generate_relational_equality_operator(ainsn, routine, file);
+            return x86_generate_equality_operator(ainsn, routine, file);
         
         case AIR_SEXT:
         case AIR_ZEXT:
             return x86_generate_extension(ainsn, routine, file);
+
+        case AIR_S2D:
+            return x86_generate_s2d(ainsn, routine, file);
+
+        case AIR_D2S:
+            return x86_generate_d2s(ainsn, routine, file);
         
         case AIR_DIRECT_DIVIDE:
 
-        case AIR_S2D:
-        case AIR_D2S:
         case AIR_S2SI:
         case AIR_S2UI:
         case AIR_D2SI:

@@ -96,6 +96,8 @@ bool scope_is_file(syntax_component_t* scope)
 
 storage_duration_t symbol_get_storage_duration(symbol_t* sy)
 {
+    if (sy->sd != SD_UNKNOWN)
+        return sy->sd;
     if (sy->declarer->type == SC_STRING_LITERAL ||
         sy->declarer->type == SC_FLOATING_CONSTANT)
         return SD_STATIC;
@@ -163,6 +165,7 @@ static char* syntax_get_identifier_name(syntax_component_t* syn)
 char* symbol_get_name(symbol_t* sy)
 {
     if (!sy) return NULL;
+    if (sy->name) return sy->name;
     if (!sy->declarer) return "__anonymous_lv__";
     return syntax_get_identifier_name(sy->declarer);
 }
@@ -243,6 +246,7 @@ void symbol_delete(symbol_t* sy)
         vector_deep_delete(sy->designations, (void (*)(void*)) designation_delete_all);
     if (sy->initial_values)
         vector_deep_delete(sy->initial_values, (void (*)(void*)) constexpr_delete);
+    free(sy->name);
     free(sy);
 }
 

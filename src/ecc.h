@@ -512,6 +512,7 @@ typedef enum air_insn_operand_type {
 
 typedef struct air_insn_operand {
     air_insn_operand_type_t type;
+    c_type_t* ct;
     union
     {
         symbol_t* sy;
@@ -693,8 +694,11 @@ typedef struct air {
     vector_t* routines; // <air_routine_t*>
     symbol_table_t* st;
     air_locale_t locale;
+
     regid_t next_available_temporary;
     unsigned long long next_available_lv;
+    symbol_t* sse32_negater;
+    symbol_t* sse64_negater;
 } air_t;
 
 typedef enum x86_operand_type
@@ -710,9 +714,19 @@ typedef enum x86_operand_type
     X86OP_STRING
 } x86_operand_type_t;
 
+typedef enum x86_insn_size
+{
+    X86SZ_NONE,
+    X86SZ_BYTE,
+    X86SZ_WORD,
+    X86SZ_DWORD,
+    X86SZ_QWORD
+} x86_insn_size_t;
+
 typedef struct x86_operand
 {
     x86_operand_type_t type;
+    x86_insn_size_t size;
     union
     {
         regid_t reg;
@@ -740,14 +754,6 @@ typedef struct x86_operand
     };
 } x86_operand_t;
 
-typedef enum x86_insn_size
-{
-    X86SZ_BYTE,
-    X86SZ_WORD,
-    X86SZ_DWORD,
-    X86SZ_QWORD
-} x86_insn_size_t;
-
 typedef enum x86_insn_type
 {
     X86I_UNKNOWN,
@@ -768,9 +774,12 @@ typedef enum x86_insn_type
     X86I_SETL,
     X86I_SETGE,
     X86I_SETG,
+    X86I_SETA,
+    X86I_SETNB,
+    X86I_SETP,
+    X86I_SETNP,
     X86I_AND,
     X86I_OR,
-    X86I_XOR,
     X86I_NOT,
     X86I_NOP,
     X86I_NEG,
@@ -799,11 +808,24 @@ typedef enum x86_insn_type
     X86I_DIVSS,
     X86I_DIVSD,
 
+    X86I_XOR,
+    X86I_XORPS,
+    X86I_XORPD,
+
     X86I_SHL,
     X86I_SHR,
     X86I_SAR,
 
     X86I_SKIP,
+
+    X86I_CVTSS2SD,
+    X86I_CVTSD2SS,
+
+    X86I_COMISS,
+    X86I_COMISD,
+
+    X86I_UCOMISS,
+    X86I_UCOMISD,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
@@ -812,7 +834,6 @@ typedef struct x86_insn
 {
     x86_insn_type_t type;
     x86_insn_size_t size;
-    x86_insn_size_t source_size;
     x86_operand_t* op1;
     x86_operand_t* op2;
     x86_operand_t* op3;
@@ -1513,6 +1534,8 @@ typedef struct symbol_t
     c_type_t* type;
     c_namespace_t* ns;
     long long stack_offset;
+    char* name; // explicit name, if needed
+    storage_duration_t sd; // explicit storage duration, if needed
     vector_t* designations;
     vector_t* initial_values;
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
@@ -1725,6 +1748,8 @@ symbol_t* symbol_table_get_by_classes(symbol_table_t* t, char* k, c_type_class_t
 bool syntax_is_declarator_type(syntax_component_type_t type);
 bool syntax_is_expression_type(syntax_component_type_t type);
 bool syntax_is_abstract_declarator_type(syntax_component_type_t type);
+bool syntax_is_relational_expression_type(syntax_component_type_t type);
+bool syntax_is_equality_expression_type(syntax_component_type_t type);
 bool syntax_is_typedef_name(syntax_component_t* id);
 bool syntax_is_lvalue(syntax_component_t* syn);
 bool can_evaluate(syntax_component_t* expr, constexpr_type_t ce_type);
@@ -1786,6 +1811,8 @@ bool type_is_integer(c_type_t* ct);
 int get_integer_type_conversion_rank(c_type_class_t class);
 int get_integer_conversion_rank(c_type_t* ct);
 bool type_is_object_type(c_type_t* ct);
+bool type_is_sse_floating_type(c_type_class_t class);
+bool type_is_sse_floating(c_type_t* ct);
 bool type_is_real_floating_type(c_type_class_t class);
 bool type_is_real_floating(c_type_t* ct);
 bool type_is_real_type(c_type_class_t class);
