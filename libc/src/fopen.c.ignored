@@ -1,0 +1,22 @@
+#include "../include/stdio.h"
+#include "../include/string.h"
+#include "../include/stdlib.h"
+
+FILE* fopen(const char* filename, const char* mode)
+{
+    static FILE files[FOPEN_MAX];
+    static int open = 0;
+    size_t len = strlen(mode);
+    int flags = 0;
+    if (len == 1)
+    {
+        if (mode[0] == 'r')
+            flags = 0;
+        else if (mode[0] == 'w')
+            flags = 1;
+    }
+    int fd = __ecc_sys_open(filename, flags, 0);
+    if (fd == -1)
+        return NULL;
+    FILE* file = files + (fd % FOPEN_MAX);
+}
