@@ -2010,6 +2010,8 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     if (!sy) report_return;
     storage_duration_t sd = symbol_get_storage_duration(sy);
+    if (init->type != SC_INITIALIZER_LIST && !can_assign(sy->type, init->ctype, init))
+        ADD_ERROR(syn, "invalid initialization");
     if (sd == SD_STATIC)
         analyze_static_initializer_after(trav, init, sy, NULL);
     else if (sd == SD_AUTOMATIC)

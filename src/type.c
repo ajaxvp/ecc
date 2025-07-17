@@ -818,6 +818,12 @@ long long type_size(c_type_t* ct)
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
 {
     if (!ct) return;
+    if (ct->qualifiers & TQ_B_CONST)
+        printer("const ");
+    if (ct->qualifiers & TQ_B_VOLATILE)
+        printer("volatile ");
+    if (ct->qualifiers & TQ_B_RESTRICT)
+        printer("restrict ");
     printer("%s", C_TYPE_CLASS_NAMES[ct->class]);
     switch (ct->class)
     {
@@ -1477,8 +1483,10 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
                 return NULL;
             }
             assign_sus_type(errors, struct_sy);
+            c_type_t* st = type_copy(struct_sy->type);
+            st->qualifiers |= ct->qualifiers;
             type_delete(ct);
-            return type_copy(struct_sy->type);
+            return st;
         }
         return create_struct_type(errors, sus, NULL);
     }
@@ -1495,8 +1503,10 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
             return NULL;
         }
         assign_es_type(errors, enum_sy);
+        c_type_t* et = type_copy(enum_sy->type);
+        et->qualifiers |= ct->qualifiers;
         type_delete(ct);
-        return type_copy(enum_sy->type);
+        return et;
     }
 
     // typedef name
@@ -1510,8 +1520,10 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
             return NULL;
         }
         assign_type(errors, tn_sy);
+        c_type_t* tt = type_copy(tn_sy->type);
+        tt->qualifiers |= ct->qualifiers;
         type_delete(ct);
-        return type_copy(tn_sy->type);
+        return tt;
     }
 
     #undef check
