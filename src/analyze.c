@@ -1186,6 +1186,15 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
         // ISO: 6.5.15 (5)
         if (!ft) ft = make_basic_type(CTC_VOID);
     }
+    /*
+    combine type qualifiers for (3) cases 4-6
+
+    scalar ? ptr : ptr = composite (lhs & rhs) type
+    scalar ? npc : ptr = rhs type
+    scalar ? ptr : npc = lhs type
+    scalar ? vp : ptr = vp
+    scalar ? ptr : vp = vp
+    */
     else if (op2_type->class == CTC_POINTER && op3_type->class == CTC_POINTER &&
             type_is_compatible_ignore_qualifiers(op2_type->derived_from, op3_type->derived_from))
     {
@@ -1198,30 +1207,62 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
             ft = rt;
         }
     }
-    // 6.5.15 (6) is so hard to read omgggggggggggggggggggggggggggggggggg
     else if (op2_type->class == CTC_POINTER && syntax_is_null_ptr_constant(syn->cexpr_else, NULL))
     {
-        // ISO: 6.5.15 (6)
-        //c_type_t* rt = make_basic_type(CTC_POINTER);
+        if (!ft)
+        {
+            // ISO: 6.5.15 (6)
+            c_type_t* rt = make_basic_type(CTC_POINTER);
+            rt->derived_from = type_copy(op2_type->derived_from);
+            rt->derived_from->qualifiers = op2_type->derived_from->qualifiers | op3_type->derived_from->qualifiers;
+            ft = rt;
+        }
     }
     else if (op3_type->class == CTC_POINTER && syntax_is_null_ptr_constant(syn->cexpr_if, NULL))
     {
-
+        if (!ft)
+        {
+            // ISO: 6.5.15 (6)
+            c_type_t* rt = make_basic_type(CTC_POINTER);
+            rt->derived_from = type_copy(op3_type->derived_from);
+            rt->derived_from->qualifiers = op2_type->derived_from->qualifiers | op3_type->derived_from->qualifiers;
+            ft = rt;
+        }
     }
     else if (op2_type->class == CTC_POINTER &&
         (type_is_object_type(op2_type->derived_from) || !type_is_complete(op2_type->derived_from)) &&
         op3_type->class == CTC_VOID)
     {
-        
+        if (!ft)
+        {
+            // ISO: 6.5.15 (6)
+            c_type_t* rt = make_basic_type(CTC_POINTER);
+            rt->derived_from = make_basic_type(CTC_VOID);
+            rt->derived_from->qualifiers = op2_type->derived_from->qualifiers | op3_type->derived_from->qualifiers;
+            ft = rt;
+        }
     }
     else if (op3_type->class == CTC_POINTER &&
         (type_is_object_type(op3_type->derived_from) || !type_is_complete(op3_type->derived_from)) &&
         op2_type->class == CTC_VOID)
     {
-        
+        if (!ft)
+        {
+            // ISO: 6.5.15 (6)
+            c_type_t* rt = make_basic_type(CTC_POINTER);
+            rt->derived_from = make_basic_type(CTC_VOID);
+            rt->derived_from->qualifiers = op2_type->derived_from->qualifiers | op3_type->derived_from->qualifiers;
+            ft = rt;
+        }
     }
-        
-    // TODO: ISO: 6.5.15 (6)
+
+    if (!ft)
+    {
+        // ISO: 6.5.15 (6)
+        ADD_ERROR(syn, "invalid operands of conditional expression");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        return;
+    }
 
     syn->ctype = ft;
 }
