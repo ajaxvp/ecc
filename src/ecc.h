@@ -821,6 +821,12 @@ typedef enum x86_insn_type
     X86I_CVTSS2SD,
     X86I_CVTSD2SS,
 
+    X86I_CVTTSS2SI,
+    X86I_CVTTSD2SI,
+
+    X86I_CVTSI2SS,
+    X86I_CVTSI2SD,
+
     X86I_COMISS,
     X86I_COMISD,
 

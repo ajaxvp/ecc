@@ -191,9 +191,9 @@ char x86_operand_size_character(x86_insn_size_t size)
     }
 }
 
-bool x86_insn_has_sse_operands(x86_insn_t* insn)
+bool x86_insn_uses_suffix(x86_insn_t* insn)
 {
-    if (!insn) return false;
+    if (!insn) return true;
     switch (insn->type)
     {
         case X86I_UNKNOWN:
@@ -222,8 +222,6 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_NOP:
         case X86I_NEG:
         case X86I_MOV:
-        case X86I_MOVZX:
-        case X86I_MOVSX:
         case X86I_ADD:
         case X86I_SUB:
         case X86I_MUL:
@@ -238,7 +236,11 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_SETNB:
         case X86I_SETP:
         case X86I_SETNP:
-            return false;
+        case X86I_CVTTSD2SI:
+        case X86I_CVTTSS2SI:
+        case X86I_CVTSI2SS:
+        case X86I_CVTSI2SD:
+            return true;
         case X86I_MOVSS:
         case X86I_MOVSD:
         case X86I_ADDSS:
@@ -258,9 +260,11 @@ bool x86_insn_has_sse_operands(x86_insn_t* insn)
         case X86I_UCOMISS:
         case X86I_UCOMISD:
         case X86I_PTEST:
-            return true;
+        case X86I_MOVZX:
+        case X86I_MOVSX:
+            return false;
     }
-    return false;
+    return true;
 }
 
 #define X86_INSN_WRITES_OP1 (uint8_t) 0x01
@@ -336,6 +340,10 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_XORPD:
         case X86I_CVTSD2SS:
         case X86I_CVTSS2SD:
+        case X86I_CVTSI2SS:
+        case X86I_CVTSI2SD:
+        case X86I_CVTTSS2SI:
+        case X86I_CVTTSD2SI:
             return X86_INSN_WRITES_OP2;
     }
     return 0;
@@ -419,12 +427,10 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
     if (!insn) return;
     #define INDENT "    "
     char suffix[32];
-    if (x86_insn_has_sse_operands(insn) ||
-        insn->type == X86I_MOVSX ||
-        insn->type == X86I_MOVZX)
-        suffix[0] = '\0';
-    else
+    if (x86_insn_uses_suffix(insn))
         snprintf(suffix, 32, "%c", x86_operand_size_character(insn->size));
+    else
+        suffix[0] = '\0';
     #define USUAL_START(name) fprintf(file, INDENT name "%s ", suffix)
     #define USUAL_1OP(name) USUAL_START(name); goto op1;
     #define USUAL_2OP(name) USUAL_START(name); goto op2;
@@ -554,6 +560,12 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_CVTSD2SS: USUAL_2OP("cvtsd2ss")
         case X86I_CVTSS2SD: USUAL_2OP("cvtss2sd")
+
+        case X86I_CVTSI2SS: USUAL_2OP("cvtsi2ss")
+        case X86I_CVTSI2SD: USUAL_2OP("cvtsi2sd")
+
+        case X86I_CVTTSS2SI: USUAL_2OP("cvttss2si")
+        case X86I_CVTTSD2SI: USUAL_2OP("cvttsd2si")
     
         case X86I_COMISS: USUAL_2OP("comiss")
         case X86I_COMISD: USUAL_2OP("comisd")
@@ -1549,6 +1561,57 @@ x86_insn_t* x86_generate_d2s(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_
     return insn;
 }
 
+// float -> signed integer type: cvttss2si
+// double -> signed integer type: cvttsd2si
+// signed integer type -> float: cvtsi2ss
+// signed integer type -> double: cvtsi2sd
+
+// cvttss2si %xmm0, %eax
+x86_insn_t* x86_generate_sse2signed(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+    bool is_float = opt->class == CTC_FLOAT;
+    x86_insn_t* insn = make_basic_x86_insn(is_float ? X86I_CVTTSS2SI : X86I_CVTTSD2SI);
+    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    if (insn->size < X86SZ_DWORD) insn->size = X86SZ_DWORD;
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op1->size = c_type_to_x86_operand_size(opt);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+
+    return insn;
+}
+
+// movsx %ax, %eax
+// cvtsi2ss %eax, %xmm0
+x86_insn_t* x86_generate_signed2sse(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+    x86_insn_t* start = NULL;
+    if (get_integer_conversion_rank(opt) < get_integer_type_conversion_rank(CTC_INT))
+    {
+        x86_insn_t* movsx = make_basic_x86_insn(X86I_MOVSX);
+        movsx->size = X86SZ_DWORD;
+        movsx->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        movsx->op1->size = c_type_to_x86_operand_size(opt);
+        movsx->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        start = movsx;
+    }
+    bool is_float = ainsn->ct->class == CTC_FLOAT;
+    x86_insn_t* insn = make_basic_x86_insn(is_float ? X86I_CVTSI2SS : X86I_CVTSI2SD);
+    insn->size = c_type_to_x86_operand_size(opt);
+    if (insn->size < X86SZ_DWORD) insn->size = X86SZ_DWORD;
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op1->size = c_type_to_x86_operand_size(opt);
+    if (insn->op1->size < X86SZ_DWORD) insn->op1->size = X86SZ_DWORD;
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    if (start)
+        start->next = insn;
+    else
+        start = insn;
+
+    return start;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -1624,17 +1687,21 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
 
         case AIR_D2S:
             return x86_generate_d2s(ainsn, routine, file);
-        
+
+        case AIR_S2SI: // float -> signed integer
+        case AIR_D2SI: // double -> signed integer
+            return x86_generate_sse2signed(ainsn, routine, file);
+
+        case AIR_SI2S: // signed integer -> float
+        case AIR_SI2D: // signed integer -> double
+            return x86_generate_signed2sse(ainsn, routine, file);
+
         case AIR_DIRECT_DIVIDE:
 
-        case AIR_S2SI:
-        case AIR_S2UI:
-        case AIR_D2SI:
-        case AIR_D2UI:
-        case AIR_SI2S:
-        case AIR_UI2S:
-        case AIR_SI2D:
-        case AIR_UI2D:
+        case AIR_S2UI: // float -> unsigned integer
+        case AIR_D2UI: // double -> unsigned integer
+        case AIR_UI2S: // unsigned integer -> float
+        case AIR_UI2D: // unsigned integer -> double
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
         

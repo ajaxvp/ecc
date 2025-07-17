@@ -1106,8 +1106,7 @@ static regid_t convert(syntax_traverser_t* trav, c_type_t* from, c_type_t* to, r
         result = NEXT_VIRTUAL_REGISTER;
         insn->ops[0] = air_insn_register_operand_init(result);
         insn->ops[1] = air_insn_register_operand_init(reg);
-        if (type == AIR_SEXT || type == AIR_ZEXT)
-            insn->ops[1]->ct = type_copy(from);
+        insn->ops[1]->ct = type_copy(from);
         ADD_CODE(insn);
     }
     *c = code;
