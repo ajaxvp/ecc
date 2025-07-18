@@ -2061,7 +2061,12 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
 
     preprocessing_token_t* included = NULL;
     if (!preprocess_include_file(file, path, state, &included))
+    {
+        fclose(file);
         return false;
+    }
+    
+    fclose(file);
 
     if (included)
     {

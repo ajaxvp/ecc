@@ -208,6 +208,8 @@ bool x86_insn_uses_suffix(x86_insn_t* insn)
         case X86I_JMP:
         case X86I_JE:
         case X86I_JNE:
+        case X86I_JNB:
+        case X86I_JS:
         case X86I_CMP:
         case X86I_SETE:
         case X86I_SETNE:
@@ -231,6 +233,8 @@ bool x86_insn_uses_suffix(x86_insn_t* insn)
         case X86I_SHL:
         case X86I_SHR:
         case X86I_SAR:
+        case X86I_ROR:
+        case X86I_TEST:
         case X86I_SKIP:
         case X86I_SETA:
         case X86I_SETNB:
@@ -262,6 +266,7 @@ bool x86_insn_uses_suffix(x86_insn_t* insn)
         case X86I_PTEST:
         case X86I_MOVZX:
         case X86I_MOVSX:
+        case X86I_STC:
             return false;
     }
     return true;
@@ -287,6 +292,8 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_JMP:
         case X86I_JE:
         case X86I_JNE:
+        case X86I_JNB:
+        case X86I_JS:
         case X86I_CMP:
         case X86I_COMISS:
         case X86I_COMISD:
@@ -294,7 +301,9 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_UCOMISD:
         case X86I_NOP:
         case X86I_SKIP:
+        case X86I_TEST:
         case X86I_PTEST:
+        case X86I_STC:
             return 0;
         case X86I_POP:
         case X86I_SETE:
@@ -326,6 +335,7 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_SHL:
         case X86I_SHR:
         case X86I_SAR:
+        case X86I_ROR:
         case X86I_MOVSS:
         case X86I_MOVSD:
         case X86I_ADDSS:
@@ -448,6 +458,10 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
             fprintf(file, INDENT "ret");
             break;
 
+        case X86I_STC:
+            fprintf(file, INDENT "stc");
+            break;
+
         case X86I_NOP:
             fprintf(file, INDENT "nop");
             break;
@@ -469,6 +483,16 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_JNE:
             fprintf(file, INDENT "jne ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_JNB:
+            fprintf(file, INDENT "jnb ");
+            x86_write_operand(insn->op1, X86SZ_QWORD, file);
+            break;
+
+        case X86I_JS:
+            fprintf(file, INDENT "js ");
             x86_write_operand(insn->op1, X86SZ_QWORD, file);
             break;
 
@@ -573,6 +597,7 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
         case X86I_UCOMISS: USUAL_2OP("ucomiss")
         case X86I_UCOMISD: USUAL_2OP("ucomisd")
 
+        case X86I_TEST: USUAL_2OP("test")
         case X86I_PTEST: USUAL_2OP("ptest")
 
         case X86I_SHL:
@@ -591,6 +616,13 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_SAR:
             USUAL_START("sar");
+            x86_write_operand(insn->op1, X86SZ_BYTE, file);
+            fprintf(file, ", ");
+            x86_write_operand(insn->op2, insn->size, file);
+            break;
+
+        case X86I_ROR:
+            USUAL_START("ror");
             x86_write_operand(insn->op1, X86SZ_BYTE, file);
             fprintf(file, ", ");
             x86_write_operand(insn->op2, insn->size, file);
@@ -1100,7 +1132,7 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
     return insn;
 }
 
-static symbol_t* x86_64_get_zero_checker(c_type_class_t class, x86_asm_file_t* file)
+static symbol_t* x86_64_get_sse_zero_checker(c_type_class_t class, x86_asm_file_t* file)
 {
     bool is_float = class == CTC_FLOAT;
     symbol_t* checker = is_float ? file->sse32_zero_checker : file->sse64_zero_checker;
@@ -1162,7 +1194,7 @@ x86_insn_t* x86_generate_not(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_
     }
     else if (type_is_sse_floating(opt))
     {
-        symbol_t* checker = x86_64_get_zero_checker(opt->class, file);
+        symbol_t* checker = x86_64_get_sse_zero_checker(opt->class, file);
 
         cmp = make_basic_x86_insn(X86I_PTEST);
         cmp->size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
@@ -1263,7 +1295,7 @@ sse register jz:
 
 x86_insn_t* x86_generate_sse_conditional_jump_test(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
-    symbol_t* checker = x86_64_get_zero_checker(ainsn->ct->class, file);
+    symbol_t* checker = x86_64_get_sse_zero_checker(ainsn->ct->class, file);
 
     x86_insn_t* ptest = make_basic_x86_insn(X86I_PTEST);
     ptest->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1496,10 +1528,16 @@ x86_insn_t* x86_generate_equality_operator(air_insn_t* ainsn, x86_asm_routine_t*
 
 x86_insn_t* x86_generate_extension(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
+    x86_insn_size_t src_size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
+    x86_insn_size_t dest_size = c_type_to_x86_operand_size(ainsn->ct);
+    if (src_size == dest_size)
+        return NULL;
+    if (ainsn->type == AIR_ZEXT && src_size == X86SZ_DWORD && dest_size == X86SZ_QWORD)
+        return NULL;
     x86_insn_t* insn = make_basic_x86_insn(ainsn->type == AIR_SEXT ? X86I_MOVSX : X86I_MOVZX);
-    insn->size = c_type_to_x86_operand_size(ainsn->ct);
+    insn->size = dest_size;
     insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
-    insn->op1->size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
+    insn->op1->size = src_size;
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
     return insn;
 }
@@ -1612,6 +1650,306 @@ x86_insn_t* x86_generate_signed2sse(air_insn_t* ainsn, x86_asm_routine_t* routin
     return start;
 }
 
+static symbol_t* x86_64_get_sse_i64_limit(c_type_class_t class, x86_asm_file_t* file)
+{
+    bool is_float = class == CTC_FLOAT;
+    symbol_t* limit = is_float ? file->sse32_i64_limit : file->sse64_i64_limit;
+    if (limit)
+        return limit;
+    if (is_float)
+    {
+        limit = file->sse32_i64_limit = symbol_table_add(SYMBOL_TABLE, "__sse32_i64_limit", symbol_init(NULL));
+        limit->name = strdup("__sse32_i64_limit");
+    }
+    else
+    {
+        limit = file->sse64_i64_limit = symbol_table_add(SYMBOL_TABLE, "__sse64_i64_limit", symbol_init(NULL));
+        limit->name = strdup("__sse64_i64_limit");
+    }
+    limit->sd = SD_STATIC;
+
+    x86_asm_data_t* data = calloc(1, sizeof *data);
+    data->readonly = true;
+    data->label = strdup(limit->name);
+    if (is_float)
+    {
+        limit->type = make_basic_type(CTC_FLOAT);
+        data->alignment = data->length = FLOAT_WIDTH;
+        data->data = malloc(data->length);
+        *((float*) (data->data)) = 9223372036854775808.0f;
+    }
+    else
+    {
+        limit->type = make_basic_type(CTC_DOUBLE);
+        data->alignment = data->length = DOUBLE_WIDTH;
+        data->data = malloc(data->length);
+        *((double*) (data->data)) = 9223372036854775808.0;
+    }
+    vector_add(file->rodata, data);
+    return limit;
+}
+
+/*
+
+SSE -> unsigned integer operation
+unsigned long long int %rax = (unsigned long long int) %xmm0;
+
+if (%xmm0 >= 9223372036854775808.0)
+{
+    %xmm0 = %xmm0 - 9223372036854775808.0;
+    %rax = cvt(%xmm0)
+    %rdx = 9223372036854775808;
+    %rax <<= 1;
+    %al |= 1;
+    ror(%rax);
+}
+else
+    %rax = cvt(%xmm0)
+
+    comisd %xmm0, __sse64_i64_limit(%rip)
+    jnb .L2
+    cvttsd2siq %xmm0, %rax
+    jmp .L3
+.L2:
+    subsd __sse64_i64_limit(%rip), %xmm0
+    cvttsd2siq %xmm0, %rax
+    shlq $1, %rax
+    orb $1, %al
+    rorq $1, %rax
+.L3:
+
+*/
+
+x86_insn_t* x86_generate_sse2u64(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+    bool is_float = opt->class == CTC_FLOAT;
+    symbol_t* limit = x86_64_get_sse_i64_limit(opt->class, file);
+
+    x86_insn_t* cmp = make_basic_x86_insn(is_float ? X86I_COMISS : X86I_COMISD);
+    cmp->size = c_type_to_x86_operand_size(opt);
+    cmp->op1 = make_operand_label_ref(symbol_get_name(limit), 0);
+    cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    x86_insn_t* inserting = cmp;
+
+    char* gte_label_name = x86_asm_file_create_next_label(file);
+    char* after_label_name = x86_asm_file_create_next_label(file);
+
+    x86_insn_t* jnb = make_basic_x86_insn(X86I_JNB);
+    jnb->op1 = make_operand_label(gte_label_name);
+    inserting = inserting->next = jnb;
+
+    x86_insn_t* cvt1 = make_basic_x86_insn(is_float ? X86I_CVTTSS2SI : X86I_CVTTSD2SI);
+    cvt1->size = X86SZ_QWORD;
+    cvt1->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    cvt1->op1->size = c_type_to_x86_operand_size(opt);
+    cvt1->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = cvt1;
+
+    x86_insn_t* jmp = make_basic_x86_insn(X86I_JMP);
+    jmp->op1 = make_operand_label(after_label_name);
+    inserting = inserting->next = jmp;
+
+    x86_insn_t* gte_label = make_basic_x86_insn(X86I_LABEL);
+    gte_label->op1 = make_operand_label(gte_label_name);
+    inserting = inserting->next = gte_label;
+
+    x86_insn_t* sub = make_basic_x86_insn(is_float ? X86I_SUBSS : X86I_SUBSD);
+    sub->size = c_type_to_x86_operand_size(opt);
+    sub->op1 = make_operand_label_ref(symbol_get_name(limit), 0);
+    sub->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    inserting = inserting->next = sub;
+
+    x86_insn_t* cvt2 = make_basic_x86_insn(is_float ? X86I_CVTTSS2SI : X86I_CVTTSD2SI);
+    cvt2->size = X86SZ_QWORD;
+    cvt2->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    cvt2->op1->size = c_type_to_x86_operand_size(opt);
+    cvt2->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = cvt2;
+
+    x86_insn_t* shl = make_basic_x86_insn(X86I_SHL);
+    shl->size = X86SZ_QWORD;
+    shl->op1 = make_operand_immediate(1);
+    shl->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = shl;
+
+    x86_insn_t* or = make_basic_x86_insn(X86I_OR);
+    or->size = X86SZ_BYTE;
+    or->op1 = make_operand_immediate(1);
+    or->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = or;
+
+    x86_insn_t* sar = make_basic_x86_insn(X86I_ROR);
+    sar->size = X86SZ_QWORD;
+    sar->op1 = make_operand_immediate(1);
+    sar->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = sar;
+
+    x86_insn_t* after_label = make_basic_x86_insn(X86I_LABEL);
+    after_label->op1 = make_operand_label(after_label_name);
+    inserting = inserting->next = after_label;
+
+    free(gte_label_name);
+    free(after_label_name);
+
+    return cmp;
+}
+
+x86_insn_t* x86_generate_sse2unsigned(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+    x86_insn_size_t size = c_type_to_x86_operand_size(ainsn->ct);
+
+    if (size == X86SZ_QWORD)
+        return x86_generate_sse2u64(ainsn, routine, file);
+    
+    bool is_float = opt->class == CTC_FLOAT;
+    x86_insn_t* insn = make_basic_x86_insn(is_float ? X86I_CVTTSS2SI : X86I_CVTTSD2SI);
+    insn->size = size;
+    if (insn->size == X86SZ_DWORD) insn->size = X86SZ_QWORD;
+    if (insn->size < X86SZ_DWORD) insn->size = X86SZ_DWORD;
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op1->size = c_type_to_x86_operand_size(opt);
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    return insn;
+}
+
+/*
+
+unsigned integer -> SSE operation
+%xmm0 = (double) %rax;
+
+%xmm0 ^= %xmm0;
+if (%rax >= 9223372036854775808) // (sign bit is set)
+{
+    %rax <<= 1;
+    %rax >>>= 1;
+    %xmm0 = cvt(%rax);
+    %xmm0 += 9223372036854775808.0;
+}
+else
+    %xmm0 = cvt(%rax);
+
+    xorpd %xmm0, %xmm0
+    testq %rax, %rax
+    js .L2
+    cvtsi2sdq %rax, %xmm0
+    jmp .L3
+.L2:
+    shlq $1, %rax
+    shrq $1, %rax
+    cvtsi2sdq %rax, %xmm0
+    addsd __sse64_i64_limit(%rip), %xmm0
+.L3:
+
+*/
+x86_insn_t* x86_generate_u642sse(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_size_t size = c_type_to_x86_operand_size(ainsn->ct);
+    c_type_t* opt = ainsn->ops[1]->ct;
+    bool is_float = ainsn->ct->class == CTC_FLOAT;
+    symbol_t* limit = x86_64_get_sse_i64_limit(ainsn->ct->class, file);
+
+    x86_insn_t* xor = make_basic_x86_insn(is_float ? X86I_XORPS : X86I_XORPD);
+    xor->size = size;
+    xor->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    xor->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    x86_insn_t* inserting = xor;
+
+    x86_insn_t* test = make_basic_x86_insn(X86I_TEST);
+    test->size = X86SZ_QWORD;
+    test->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    test->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    inserting = inserting->next = test;
+
+    char* gte_label_name = x86_asm_file_create_next_label(file);
+    char* after_label_name = x86_asm_file_create_next_label(file);
+
+    x86_insn_t* js = make_basic_x86_insn(X86I_JS);
+    js->op1 = make_operand_label(gte_label_name);
+    inserting = inserting->next = js;
+
+    x86_insn_t* cvt1 = make_basic_x86_insn(is_float ? X86I_CVTSI2SS : X86I_CVTSI2SD);
+    cvt1->size = X86SZ_QWORD;
+    cvt1->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    cvt1->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = cvt1;
+
+    x86_insn_t* jmp = make_basic_x86_insn(X86I_JMP);
+    jmp->op1 = make_operand_label(after_label_name);
+    inserting = inserting->next = jmp;
+
+    x86_insn_t* gte_label = make_basic_x86_insn(X86I_LABEL);
+    gte_label->op1 = make_operand_label(gte_label_name);
+    inserting = inserting->next = gte_label;
+
+    x86_insn_t* shl = make_basic_x86_insn(X86I_SHL);
+    shl->size = X86SZ_QWORD;
+    shl->op1 = make_operand_immediate(1);
+    shl->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    inserting = inserting->next = shl;
+
+    x86_insn_t* shr = make_basic_x86_insn(X86I_SHR);
+    shr->size = X86SZ_QWORD;
+    shr->op1 = make_operand_immediate(1);
+    shr->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    inserting = inserting->next = shr;
+
+    x86_insn_t* cvt2 = make_basic_x86_insn(is_float ? X86I_CVTSI2SS : X86I_CVTSI2SD);
+    cvt2->size = X86SZ_QWORD;
+    cvt2->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    cvt2->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = cvt2;
+
+    x86_insn_t* add = make_basic_x86_insn(is_float ? X86I_ADDSS : X86I_ADDSD);
+    add->size = c_type_to_x86_operand_size(opt);
+    add->op1 = make_operand_label_ref(symbol_get_name(limit), 0);
+    add->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    inserting = inserting->next = add;
+
+    x86_insn_t* after_label = make_basic_x86_insn(X86I_LABEL);
+    after_label->op1 = make_operand_label(after_label_name);
+    inserting = inserting->next = after_label;
+
+    free(gte_label_name);
+    free(after_label_name);
+
+    return xor;
+}
+
+x86_insn_t* x86_generate_unsigned2sse(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    c_type_t* opt = ainsn->ops[1]->ct;
+
+    if (c_type_to_x86_operand_size(opt) == X86SZ_QWORD)
+        return x86_generate_u642sse(ainsn, routine, file);
+    
+    x86_insn_t* start = NULL;
+    if (get_integer_conversion_rank(opt) < get_integer_type_conversion_rank(CTC_INT))
+    {
+        x86_insn_t* movzx = make_basic_x86_insn(X86I_MOVZX);
+        movzx->size = X86SZ_DWORD;
+        movzx->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        movzx->op1->size = c_type_to_x86_operand_size(opt);
+        movzx->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+        start = movzx;
+    }
+    bool is_float = ainsn->ct->class == CTC_FLOAT;
+    x86_insn_t* insn = make_basic_x86_insn(is_float ? X86I_CVTSI2SS : X86I_CVTSI2SD);
+    insn->size = c_type_to_x86_operand_size(opt);
+    insn->size = X86SZ_QWORD;
+    insn->op1 = air_operand_to_x86_operand(ainsn->ops[1], routine);
+    insn->op1->size = c_type_to_x86_operand_size(opt);
+    insn->op1->size = X86SZ_QWORD;
+    insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
+    if (start)
+        start->next = insn;
+    else
+        start = insn;
+
+    return start;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -1696,12 +2034,15 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_SI2D: // signed integer -> double
             return x86_generate_signed2sse(ainsn, routine, file);
 
-        case AIR_DIRECT_DIVIDE:
-
         case AIR_S2UI: // float -> unsigned integer
         case AIR_D2UI: // double -> unsigned integer
+            return x86_generate_sse2unsigned(ainsn, routine, file);
+
         case AIR_UI2S: // unsigned integer -> float
         case AIR_UI2D: // unsigned integer -> double
+            return x86_generate_unsigned2sse(ainsn, routine, file);
+
+        case AIR_DIRECT_DIVIDE:
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
         
@@ -1782,14 +2123,14 @@ x86_asm_file_t* x86_generate(air_t* air, symbol_table_t* st)
     file->rodata = vector_init();
     file->routines = vector_init();
 
+    VECTOR_FOR(air_routine_t*, routine, air->routines)
+        vector_add(file->routines, x86_generate_routine(routine, file));
+
     VECTOR_FOR(air_data_t*, data, air->data)
         vector_add(file->data, x86_generate_data(data, file));
 
     VECTOR_FOR(air_data_t*, rodata, air->rodata)
         vector_add(file->rodata, x86_generate_data(rodata, file));
-
-    VECTOR_FOR(air_routine_t*, routine, air->routines)
-        vector_add(file->routines, x86_generate_routine(routine, file));
 
     return file;
 }

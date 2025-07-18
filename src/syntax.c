@@ -1906,7 +1906,7 @@ unsigned long long process_integer_constant(char* con, c_type_class_t* class)
 long double process_floating_constant(char* con, c_type_class_t* class)
 {
     char* end = NULL;
-    long double value = strtof(con, &end);
+    long double value = strtold(con, &end);
 
     if (end && (streq(end, "f") || streq(end, "F")))
     {

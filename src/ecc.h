@@ -767,6 +767,8 @@ typedef enum x86_insn_type
     X86I_JMP,
     X86I_JE,
     X86I_JNE,
+    X86I_JNB,
+    X86I_JS,
     X86I_CMP,
     X86I_SETE,
     X86I_SETNE,
@@ -833,7 +835,12 @@ typedef enum x86_insn_type
     X86I_UCOMISS,
     X86I_UCOMISD,
 
+    X86I_TEST,
     X86I_PTEST,
+
+    X86I_STC,
+
+    X86I_ROR,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
@@ -886,6 +893,8 @@ typedef struct x86_asm_file
     uint64_t next_routine_id;
     symbol_t* sse32_zero_checker;
     symbol_t* sse64_zero_checker;
+    symbol_t* sse32_i64_limit;
+    symbol_t* sse64_i64_limit;
 } x86_asm_file_t;
 
 typedef struct opt1_options
