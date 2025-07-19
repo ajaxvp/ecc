@@ -1949,46 +1949,17 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
-void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, designation_t* prefix)
+void check_static_initializer_constexprs(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
     if (syn->type != SC_INITIALIZER_LIST)
     {
-        constexpr_t* ce = ce_evaluate(syn, CE_ANY);
-        if (!ce)
-        {
+        if (!can_evaluate(syn, CE_ANY))
             // ISO: 6.7.8 (4)
             ADD_ERROR(syn, "initializer for object with static storage duration must be constant");
-            return;
-        }
-        symbol_init_initializer(sy);
-        vector_add(sy->designations, NULL);
-        vector_add(sy->initial_values, ce);
         return;
     }
-    symbol_init_initializer(sy);
-    VECTOR_FOR(syntax_component_t*, d, syn->inlist_designations)
-    {
-        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
-        if (init->type != SC_INITIALIZER_LIST)
-        {
-            constexpr_t* ce = ce_evaluate(init, CE_ANY);
-            if (!ce)
-            {
-                // ISO: 6.7.8 (4)
-                ADD_ERROR(init, "initializer for object with static storage duration must be constant");
-                return;
-            }
-            designation_t* suffix = syntax_to_designation(d);
-            designation_t* desig = designation_concat(prefix, suffix);
-            designation_delete_all(suffix);
-            vector_add(sy->designations, desig);
-            vector_add(sy->initial_values, ce);
-            continue;
-        }
-        designation_t* desig = syntax_to_designation(d);
-        analyze_static_initializer_after(trav, init, sy, desig);
-        designation_delete_all(desig);
-    }
+    VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
+        check_static_initializer_constexprs(trav, init, sy);
 }
 
 void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
@@ -2001,27 +1972,235 @@ void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_compon
     }
 }
 
+static long long get_aggregate_type_element_count(c_type_t* ct)
+{
+    if (!ct) return -1;
+    if (ct->class == CTC_UNION) return 1;
+    if (ct->class == CTC_STRUCTURE)
+        return ct->struct_union.member_types->size;
+    if (ct->class == CTC_ARRAY)
+    {
+        constexpr_t* ce = ce_evaluate(ct->array.length_expression, CE_INTEGER);
+        if (!ce) return -1;
+        unsigned long long val = ce->ivalue;
+        constexpr_delete(ce);
+        return val;
+    }
+    return 0;
+}
+
+// adds semantics to initializers in an initializer list for how and where to initialize its elements
+static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_component_t* syn, c_type_t* ct)
+{
+    vector_t* cot_stack = vector_init();
+    vector_t* coei_stack = vector_init();
+
+    vector_add(cot_stack, ct);
+    vector_add(coei_stack, (void*) 0);
+
+    int64_t offset = 0;
+
+    for (unsigned i = 0; i < syn->inlist_initializers->size; ++i)
+    {
+        syntax_component_t* desig = vector_get(syn->inlist_designations, i);
+        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
+
+        if (desig)
+        {
+            offset = 0;
+            vector_delete(cot_stack);
+            vector_delete(coei_stack);
+            cot_stack = vector_init();
+            coei_stack = vector_init();
+            c_type_t* nav = ct;
+            VECTOR_FOR(syntax_component_t*, desigr, desig->desig_designators)
+            {
+                vector_add(cot_stack, nav);
+                if (desigr->type == SC_IDENTIFIER)
+                {
+                    if (nav->class != CTC_STRUCTURE && nav->class != CTC_UNION)
+                    {
+                        // ISO: 6.7.8 (7)
+                        ADD_ERROR(desigr, "struct initialization designators may not be used to initialize non-struct and non-union types");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    long long midx = -1;
+                    type_get_struct_union_member_info(nav, desigr->id, &midx, &offset);
+                    if (midx == -1)
+                    {
+                        // ISO: 6.7.8 (7)
+                        ADD_ERROR(desigr, "struct initialization designators must specify a valid member of the struct or union it is initializing");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    vector_add(coei_stack, (void*) midx);
+                    nav = vector_get(nav->struct_union.member_types, midx);
+                }
+                else
+                {
+                    if (nav->class != CTC_ARRAY)
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators may not be used to initialize non-array types");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    constexpr_t* ce = ce_evaluate(desigr, CE_INTEGER);
+                    if (!ce)
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators must have a constant expression for its index");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    if (!ce_is_positive(ce))
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators must have a non-negative index");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    vector_add(coei_stack, (void*) ce->ivalue);
+                    offset += type_size(nav->derived_from) * ce->ivalue;
+                    constexpr_delete(ce);
+                    nav = nav->derived_from;
+                }
+            }
+        }
+
+        c_type_t* cot = vector_peek(cot_stack);
+
+        if (!cot)
+        {
+            // ISO: 6.7.8 (2)
+            init->initializer_offset = -1;
+            ADD_WARNING(init, "this initializer and any after it would write outside the object being initialized");
+            break;
+        }
+
+        // current element index
+        size_t ei = (size_t) vector_peek(coei_stack);
+        // current element type
+        c_type_t* et = cot->class == CTC_ARRAY ? cot->derived_from : vector_get(cot->struct_union.member_types, ei);
+
+        long long alignment = type_alignment(et);
+        offset += (alignment - (offset % alignment)) % alignment;
+
+        init->initializer_offset = offset;
+
+        // like: { { ... } }
+        if (init->type == SC_INITIALIZER_LIST)
+            add_initializer_list_semantics(trav, init, et);
+
+        // like: { ... }
+        else
+        {
+            while (et->class == CTC_STRUCTURE || et->class == CTC_UNION || et->class == CTC_ARRAY)
+            {
+                vector_add(cot_stack, et);
+                vector_add(coei_stack, (void*) ei);
+                ei = 0;
+                cot = et;
+                et = et->class == CTC_ARRAY ? et->derived_from : vector_get(et->struct_union.member_types, ei);
+            }
+            init->initializer_ctype = type_copy(et);
+        }
+
+        offset += type_size(et);
+
+        for (;;)
+        {
+            ++ei;
+            vector_pop(coei_stack);
+            vector_add(coei_stack, (void*) ei);
+            long long count = get_aggregate_type_element_count(cot);
+            // incomplete array type prob, let it keep going till the initializer list is ova
+            if (count == -1)
+                break;
+            if (ei >= count)
+            {
+                vector_pop(cot_stack);
+                vector_pop(coei_stack);
+                cot = vector_peek(cot_stack);
+                ei = (size_t) vector_peek(coei_stack);
+            }
+            else 
+                break;
+        }
+    }
+
+    vector_delete(cot_stack);
+    vector_delete(coei_stack);
+}
+
+static int64_t get_initializer_largest_offset(syntax_traverser_t* trav, syntax_component_t* syn, int64_t base)
+{
+    if (syntax_is_expression_type(syn->type))
+        return base;
+    int64_t largest = base;
+    VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
+    {
+        int64_t sublargest = get_initializer_largest_offset(trav, init, base + init->initializer_offset);
+        if (sublargest > largest)
+            largest = sublargest;
+    }
+    return largest;
+}
+
+// largest offset / size of array element + 1
+static void update_array_declarator_length_expr(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
+    syntax_component_t* adeclr = syn->ideclr_declarator;
+    if (adeclr->adeclr_length_expression)
+        return;
+    syntax_component_t* init = syn->ideclr_initializer;
+    int64_t offset = get_initializer_largest_offset(trav, init, 0);
+    syntax_component_t* intc = calloc(1, sizeof *intc);
+    intc->type = SC_INTEGER_CONSTANT;
+    intc->row = adeclr->row;
+    intc->col = adeclr->col;
+    intc->intc = offset / type_size(sy->type->derived_from) + 1;
+    intc->ctype = make_basic_type(C_TYPE_SIZE_T);
+    intc->parent = adeclr;
+    adeclr->adeclr_length_expression = sy->type->array.length_expression = intc;
+}
+
 void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    syntax_component_t* declr = syn->ideclr_declarator;
     syntax_component_t* init = syn->ideclr_initializer;
     if (!init) return;
     syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
     if (!id) report_return;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     if (!sy) report_return;
+    if (!type_is_object_type(sy->type) && (sy->type->class != CTC_ARRAY || type_is_vla(sy->type)))
+    {
+        // ISO: 6.7.8 (3)
+        ADD_ERROR(syn, "initialization target '%s' must be an object type or an array of unknown size that is not variable-length", symbol_get_name(sy));
+        return;
+    }
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (init->type != SC_INITIALIZER_LIST && !can_assign(sy->type, init->ctype, init))
         ADD_ERROR(syn, "invalid initialization");
+    if (init->type == SC_INITIALIZER_LIST)
+        add_initializer_list_semantics(trav, init, sy->type);
+    if (declr->type == SC_ARRAY_DECLARATOR)
+        update_array_declarator_length_expr(trav, syn, sy);
     if (sd == SD_STATIC)
-        analyze_static_initializer_after(trav, init, sy, NULL);
+        check_static_initializer_constexprs(trav, init, sy);
     else if (sd == SD_AUTOMATIC)
         analyze_automatic_initializer_after(trav, init, sy);
 }
 
 void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (!syn->adeclr_length_expression)
-        ADD_ERROR(syn, "arrays without a given length are not supported yet");
     if (syntax_is_vla(syn))
         ADD_ERROR(syn, "variable-length arrays are not supported yet");
 }

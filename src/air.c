@@ -1007,7 +1007,7 @@ air_insn_t* air_insn_remove(air_insn_t* insn)
     return prev;
 }
 
-static air_insn_t* copy_code_impl(syntax_component_t* dest, syntax_component_t* src, air_insn_t* start)
+static air_insn_t* copy_code_impl(syntax_component_t* src, air_insn_t* start)
 {
     if (!start)
         return NULL;
@@ -1034,7 +1034,7 @@ static air_insn_t* copy_air_insn_sequence(air_insn_t* code)
     dummy->type = AIR_NOP; \
     air_insn_t* code = dummy;
 
-#define COPY_CODE(s) code = copy_code_impl(syn, s, code)
+#define COPY_CODE(s) code = copy_code_impl(s, code)
 
 #define FINALIZE_LINEARIZE \
     syn->code = dummy->next; \
@@ -1252,43 +1252,6 @@ static void linearize_character_constant_after(syntax_traverser_t* trav, syntax_
     FINALIZE_LINEARIZE;
 }
 
-/*
-
-    syntax_component_t* parent = syn->parent;
-    if (parent && parent->type == SC_INITIALIZER_LIST)
-        parent = parent->parent;
-    if (parent->type == SC_INIT_DECLARATOR)
-    {
-        syntax_component_t* id = syntax_get_declarator_identifier(parent->ideclr_declarator);
-        symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-        if (!sy) report_return;
-        if (sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from))
-            return;
-    }
-    air_t* air = AIRINIZING_TRAVERSER->air;
-    air_data_t* data = calloc(1, sizeof *data);
-    data->readonly = true;
-    data->sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (syn->strl_reg)
-    {
-        data->data = calloc(syn->strl_length->intc + 1, sizeof(unsigned char));
-        memcpy(data->data, syn->strl_reg, syn->strl_length->intc + 1);
-    }
-    else
-    {
-        data->data = calloc(syn->strl_length->intc + 1, sizeof(int));
-        memcpy(data->data, syn->strl_wide, sizeof(int) * (syn->strl_length->intc + 1));
-    }
-    vector_add(air->data, data);
-    SETUP_LINEARIZE;
-    air_insn_t* insn = air_insn_init(AIR_LOAD_ADDR, 2);
-    insn->ct = make_reference_type(syn->ctype);
-    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
-    insn->ops[1] = air_insn_symbol_operand_init(data->sy);
-    ADD_CODE(insn);
-    FINALIZE_LINEARIZE;
-*/
-
 static void linearize_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     air_t* air = AIRINIZING_TRAVERSER->air;
@@ -1404,184 +1367,21 @@ static void linearize_array_declarator_after(syntax_traverser_t* trav, syntax_co
     FINALIZE_LINEARIZE;
 }
 
-// { 1, [2] = 3, [5] = 7 }
-
-// offset, type
-
-// current object: aggregate that we're currently initializing
-// once the current object is fully initialized, it will become the higher aggregate to finish initializing that
-
-// .more.y = { ... } makes current object .more (superaggregate of .more.y)
-// adds sizeof(.more.y) to the offset
-
-// .more.y = ... makes current object .more.y[0] (lowest aggregate field under .more, including .more)
-// adds sizeof(.more.y[0][0]) to the offset
-
-// ... makes current object lowest aggregate field
-// adds sizeof(new current object's next element) to the offset
-
-// { ... } doesn't mess with the current object
-// adds sizeof(current object's next element)
-
-// adds sizeof(new current object's next element) every time hmmmmmm
-
-void get_struct_union_member_info(c_type_t* ct, char* name, long long* index, unsigned* offset)
+static void initialize(syntax_traverser_t* trav, syntax_component_t* initializer, regid_t addr, int64_t base_offset, air_insn_t** c)
 {
-    if (index) *index = -1;
-    if (offset) *offset = 0;
-    if (!ct) return;
-    if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) return;
-    VECTOR_FOR(c_type_t*, mt, ct->struct_union.member_types)
+    if (initializer->type == SC_INITIALIZER_LIST)
     {
-        char* mn = vector_get(ct->struct_union.member_names, i);
-        if (streq(mn, name))
-        {
-            if (index) *index = i;
-            return;
-        }
-        if (offset)
-        {
-            long long size = type_size(mt);
-            long long alignment = type_alignment(mt);
-            *offset += (alignment - (*offset % alignment)) % alignment;
-            *offset += size != -1 ? size : 0;
-        }
+        VECTOR_FOR(syntax_component_t*, init, initializer->inlist_initializers)
+            initialize(trav, init, addr, base_offset + initializer->initializer_offset, c);
+        return;
     }
-}
-
-long long get_aggregate_type_element_count(c_type_t* ct)
-{
-    if (!ct) return -1;
-    if (ct->class == CTC_UNION) return 1;
-    if (ct->class == CTC_STRUCTURE)
-        return ct->struct_union.member_types->size;
-    if (ct->class == CTC_ARRAY)
-    {
-        constexpr_t* ce = ce_evaluate(ct->array.length_expression, CE_INTEGER);
-        if (!ce) return -1;
-        unsigned long long val = ce->ivalue;
-        constexpr_delete(ce);
-        return val;
-    }
-    return 0;
-}
-
-// important things TODO for this:
-// initialize everything else to zero
-// allow struct/unions to be initialized with a single expression if that expression is a struct/union
-
-// trav is the current syntax traverser
-// sy is the current object being initialized
-// syn is the current initializer list being read from
-// ct is the type of the initial current object for this initializer list
-// addr is the register where a reference to sy is held
-// c is some internal garbage with the way the ADD_CODE and COPY_CODE macros work
-void initialize(syntax_traverser_t* trav, symbol_t* sy, syntax_component_t* syn, c_type_t* ct, regid_t addr, air_insn_t** c)
-{
     air_insn_t* code = *c;
-    vector_t* cot_stack = vector_init();
-    vector_t* coei_stack = vector_init();
-
-    vector_add(cot_stack, ct);
-    vector_add(coei_stack, (void*) 0);
-
-    unsigned offset = 0;
-
-    for (unsigned i = 0; i < syn->inlist_initializers->size; ++i)
-    {
-        syntax_component_t* desig = vector_get(syn->inlist_designations, i);
-        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
-
-        if (desig)
-        {
-            offset = 0;
-            vector_delete(cot_stack);
-            vector_delete(coei_stack);
-            cot_stack = vector_init();
-            coei_stack = vector_init();
-            c_type_t* nav = ct;
-            VECTOR_FOR(syntax_component_t*, desigr, desig->desig_designators)
-            {
-                vector_add(cot_stack, nav);
-                if (desigr->type == SC_IDENTIFIER)
-                {
-                    long long midx = -1;
-                    get_struct_union_member_info(nav, desigr->id, &midx, &offset);
-                    vector_add(coei_stack, (void*) midx);
-                    nav = vector_get(nav->struct_union.member_types, midx);
-                }
-                else
-                {
-                    constexpr_t* ce = ce_evaluate(desigr, CE_INTEGER);
-                    if (!ce) report_return;
-                    vector_add(coei_stack, (void*) ce->ivalue);
-                    offset += type_size(nav->derived_from) * ce->ivalue;
-                    constexpr_delete(ce);
-                    nav = nav->derived_from;
-                }
-            }
-        }
-
-        c_type_t* cot = vector_peek(cot_stack);
-
-        // current element index
-        size_t ei = (size_t) vector_peek(coei_stack);
-        // current element type
-        c_type_t* et = cot->class == CTC_ARRAY ? cot->derived_from : vector_get(cot->struct_union.member_types, ei);
-
-        long long alignment = type_alignment(et);
-        offset += (alignment - (offset % alignment)) % alignment;
-
-        // like: { { ... } }
-        if (init->type == SC_INITIALIZER_LIST)
-            initialize(trav, sy, init, et, addr, &code);
-
-        // like: { ... }
-        else
-        {
-            COPY_CODE(init);
-            ADD_SEQUENCE_POINT;
-            while (et->class == CTC_STRUCTURE || et->class == CTC_UNION || et->class == CTC_ARRAY)
-            {
-                vector_add(cot_stack, et);
-                vector_add(coei_stack, (void*) ei);
-                ei = 0;
-                cot = et;
-                et = et->class == CTC_ARRAY ? et->derived_from : vector_get(et->struct_union.member_types, ei);
-            }
-            air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-            assign->ct = type_copy(et);
-            assign->ops[0] = air_insn_indirect_register_operand_init(addr, offset, INVALID_VREGID, 1);
-            assign->ops[1] = air_insn_register_operand_init(init->expr_reg);
-            ADD_CODE(assign);
-        }
-
-        offset += type_size(et);
-
-        for (;;)
-        {
-            ++ei;
-            vector_pop(coei_stack);
-            vector_add(coei_stack, (void*) ei);
-            long long count = get_aggregate_type_element_count(cot);
-            // incomplete array type prob, let it keep going till the initializer list is ova
-            if (count == -1)
-                break;
-            if (ei >= count)
-            {
-                vector_pop(cot_stack);
-                vector_pop(coei_stack);
-                cot = vector_peek(cot_stack);
-                ei = (size_t) vector_peek(coei_stack);
-            }
-            else 
-                break;
-        }
-    }
-
-    vector_delete(cot_stack);
-    vector_delete(coei_stack);
-
+    COPY_CODE(initializer);
+    air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+    assign->ct = type_copy(initializer->initializer_ctype);
+    assign->ops[0] = air_insn_indirect_register_operand_init(addr, base_offset + initializer->initializer_offset, INVALID_VREGID, 1);
+    assign->ops[1] = air_insn_register_operand_init(initializer->expr_reg);
+    ADD_CODE(assign);
     *c = code;
 }
 
@@ -1589,6 +1389,7 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
 {
     syntax_component_t* enclosing = syn->parent;
     if (!enclosing) report_return;
+
     // nested initializer lists are handled in the highest initializer list
     if (enclosing->type == SC_INITIALIZER_LIST)
     {
@@ -1597,6 +1398,7 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
         FINALIZE_LINEARIZE;
         return;
     }
+
     symbol_t* sy = NULL;
     if (enclosing->type == SC_INIT_DECLARATOR)
     {
@@ -1607,16 +1409,61 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     else if (enclosing->type == SC_COMPOUND_LITERAL)
         sy = symbol_table_get_syn_id(SYMBOL_TABLE, enclosing);
     if (!sy) report_return;
+
+    storage_duration_t sd = symbol_get_storage_duration(sy);
+
+    if (sd == SD_STATIC)
+        // TODO: support static initializer lists
+        report_return;
+
     SETUP_LINEARIZE;
+
     air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
     regid_t la_result = NEXT_VIRTUAL_REGISTER;
     loadaddr->ct = make_reference_type(sy->type);
     loadaddr->ops[0] = air_insn_register_operand_init(la_result);
     loadaddr->ops[1] = air_insn_symbol_operand_init(sy);
     ADD_CODE(loadaddr);
-    initialize(trav, sy, syn, sy->type, la_result, &code);
+
+    initialize(trav, syn, la_result, 0, &code);
+
     ADD_SEQUENCE_POINT;
+
     FINALIZE_LINEARIZE;
+}
+
+static void linearize_static_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, air_insn_t** c)
+{
+    air_insn_t* code = *c;
+
+    air_data_t* data = calloc(1, sizeof *data);
+    data->sy = sy;
+    data->readonly = false;
+    long long size = type_size(sy->type);
+    data->data = calloc(size, sizeof(unsigned char));
+
+    syntax_component_t* init = syn->ideclr_initializer;
+    bool is_scalar = type_is_scalar(sy->type);
+    bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
+
+    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
+    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
+    type_delete(wct);
+
+    if (init->type == SC_INITIALIZER_LIST && (is_scalar || is_char_array || is_wchar_array))
+        init = vector_get(init->inlist_initializers, 0);
+
+    if (init->type == SC_INITIALIZER_LIST)
+        return;
+    
+    // constexpr_t* ce = ce_evaluate(init, CE_ANY);
+    // if (!ce) report_return;
+
+    // in progress...
+
+    vector_add(AIRINIZING_TRAVERSER->air->data, data);
+
+    *c = code;
 }
 
 static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1633,6 +1480,16 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     {
         FINALIZE_LINEARIZE;
         return;
+    }
+
+    storage_duration_t sd = symbol_get_storage_duration(sy);
+
+    if (sd == SD_STATIC)
+    {
+        report_return;
+        // linearize_static_init_declarator_after(trav, syn, sy, &code);
+        // FINALIZE_LINEARIZE;
+        // return;
     }
 
     bool is_scalar = type_is_scalar(sy->type);
@@ -1899,12 +1756,12 @@ static void linearize_member_expression_after(syntax_traverser_t* trav, syntax_c
 {
     SETUP_LINEARIZE;
     COPY_CODE(syn->memexpr_expression);
-    unsigned offset = 0;
+    int64_t offset = 0;
     long long idx = 0;
     c_type_t* ct = syn->memexpr_expression->ctype;
     if (syn->type == SC_DEREFERENCE_MEMBER_EXPRESSION)
         ct = ct->derived_from;
-    get_struct_union_member_info(ct, syn->memexpr_id->id, &idx, &offset);
+    type_get_struct_union_member_info(ct, syn->memexpr_id->id, &idx, &offset);
     c_type_t* mt = vector_get(ct->struct_union.member_types, idx);
     air_insn_t* insn = NULL;
     if (syntax_is_in_lvalue_context(syn))

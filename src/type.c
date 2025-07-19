@@ -481,6 +481,7 @@ bool type_is_vla(c_type_t* ct)
 {
     if (!ct) return false;
     if (ct->class != CTC_ARRAY) return false;
+    if (!ct->array.length_expression) return false;
     if (ct->array.unspecified_size) return true;
     return !can_evaluate(ct->array.length_expression, CE_INTEGER);
 }
@@ -675,6 +676,30 @@ c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2)
     return conv_t2;
 }
 
+void type_get_struct_union_member_info(c_type_t* ct, char* name, long long* index, int64_t* offset)
+{
+    if (index) *index = -1;
+    if (offset) *offset = 0;
+    if (!ct) return;
+    if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) return;
+    VECTOR_FOR(c_type_t*, mt, ct->struct_union.member_types)
+    {
+        char* mn = vector_get(ct->struct_union.member_names, i);
+        if (streq(mn, name))
+        {
+            if (index) *index = i;
+            return;
+        }
+        if (offset)
+        {
+            long long size = type_size(mt);
+            long long alignment = type_alignment(mt);
+            *offset += (alignment - (*offset % alignment)) % alignment;
+            *offset += size != -1 ? size : 0;
+        }
+    }
+}
+
 long long type_alignment(c_type_t* ct)
 {
     if (!ct) return -1;
@@ -832,6 +857,12 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
                 printer(" %s", ct->enumerated.name);
             break;
         case CTC_ARRAY:
+            constexpr_t* ce = ce_evaluate(ct->array.length_expression, CE_INTEGER);
+            if (ce)
+            {
+                printer("[%llu]", ce->ivalue);
+                constexpr_delete(ce);
+            }
             printer(" of ");
             break;
         case CTC_STRUCTURE:

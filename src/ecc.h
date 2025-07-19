@@ -1126,6 +1126,10 @@ typedef struct syntax_component_t
     // switch & loop types
     uint64_t break_label_no;
 
+    // initializer types
+    int64_t initializer_offset;
+    c_type_t* initializer_ctype;
+
     union
     {
         // SC_TRANSLATION_UNIT - tlu
@@ -1804,6 +1808,7 @@ bool syntax_is_assignment_expression(syntax_component_type_t type);
 bool syntax_is_identifier(syntax_component_type_t type);
 bool syntax_is_in_lvalue_context(syntax_component_t* syn);
 bool syntax_contains_subelement(syntax_component_t* syn, syntax_component_type_t type);
+int64_t syntax_get_full_initialization_offset(syntax_component_t* initializer);
 
 /* type.c */
 c_type_t* make_basic_type(c_type_class_t class);
@@ -1812,6 +1817,7 @@ c_type_t* integer_promotions(c_type_t* ct);
 c_type_t* default_argument_promotions(c_type_t* ct);
 void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
+void type_get_struct_union_member_info(c_type_t* ct, char* name, long long* index, int64_t* offset);
 long long type_alignment(c_type_t* ct);
 long long type_size(c_type_t* ct);
 void type_delete(c_type_t* ct);
@@ -1973,6 +1979,7 @@ void designation_delete(designation_t* desig);
 void designation_delete_all(designation_t* desig);
 designation_t* designation_concat(designation_t* d1, designation_t* d2);
 constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
+bool ce_is_positive(constexpr_t* ce);
 void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** ct);
 bool representable(unsigned long long value, c_type_class_t class);
 unsigned long long constexpr_convert(unsigned long long value, c_type_class_t class);

@@ -207,6 +207,12 @@ bool designation_equals(designation_t* d1, designation_t* d2)
     return designation_equals(d1->next, d2->next);
 }
 
+bool ce_is_positive(constexpr_t* ce)
+{
+    // TODO
+    return true;
+}
+
 constexpr_t* ce_make_integer(c_type_t* ct, unsigned long long value)
 {
     constexpr_t* ce = calloc(1, sizeof *ce);

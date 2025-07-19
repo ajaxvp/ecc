@@ -666,6 +666,20 @@ bool syntax_has_initializer(syntax_component_t* id)
     return true;
 }
 
+int64_t syntax_get_full_initialization_offset(syntax_component_t* initializer)
+{
+    if (!initializer)
+        return -1;
+    if (!syntax_is_expression_type(initializer->type) && initializer->type != SC_INITIALIZER_LIST)
+        return 0;
+    if (initializer->initializer_offset == -1)
+        return -1;
+    int64_t upper = syntax_get_full_initialization_offset(initializer->parent);
+    if (upper == -1)
+        return -1;
+    return upper + initializer->initializer_offset;
+}
+
 typedef struct contains_traverser
 {
     syntax_traverser_t base;
@@ -1305,6 +1319,16 @@ static void print_syntax_indented(syntax_component_t* s, unsigned indent, int (*
         type_humanized_print(s->ctype, printer);
         pf("\n");
     }
+    if ((s->type == SC_INITIALIZER_LIST || syntax_is_expression_type(s->type)) && s->parent->type == SC_INITIALIZER_LIST)
+    {
+        pf("offset for initialization: %lld\n", s->initializer_offset, printer);
+        if (s->initializer_ctype)
+        {
+            pf("object initialization type: ");
+            type_humanized_print(s->initializer_ctype, printer);
+            pf("\n");
+        }
+    }
     if (debug)
     {
         if (s->parent)
@@ -1663,6 +1687,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
             break;
         }
     }
+    type_delete(syn->initializer_ctype);
     type_delete(syn->ctype);
     air_insn_delete_all(syn->code);
     free(syn);

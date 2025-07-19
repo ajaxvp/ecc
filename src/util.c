@@ -53,10 +53,6 @@ int* strdup_wide(const int* str)
     return dup;
 }
 
-// farting
-// 0123456
-// substrdup("farting", 2, 4);
-
 char* substrdup(const char* str, size_t start, size_t end)
 {
     if (start > end)
@@ -96,6 +92,8 @@ bool contains_char(char* str, char c)
 
 bool streq(char* s1, char* s2)
 {
+    if (!s1 || !s2)
+        return false;
     if (s1 == NULL && s2 == NULL)
         return true;
     return !strcmp(s1, s2);
