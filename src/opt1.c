@@ -85,77 +85,77 @@ int _2 = 5;
 
 */
 
-static bool try_inline_integer_constant(air_insn_t* insn, air_routine_t* routine, air_t* air)
-{
-    if (!insn) return false;
-    if (insn->type != AIR_LOAD) return false;
-    if (insn->ops[1]->type != AOP_INTEGER_CONSTANT) return false;
-    regid_t reg = insn->ops[0]->content.reg;
-    unsigned long long value = insn->ops[1]->content.ic;
-    for (air_insn_t* trace = insn->next; trace; trace = trace->next)
-    {
-        for (size_t i = 0; i < trace->noops; ++i)
-        {
-            air_insn_operand_t* op = trace->ops[i];
-            if (!op) continue;
-            if (op->type == AOP_REGISTER && op->content.reg == reg)
-            {
-                op->type = AOP_INTEGER_CONSTANT;
-                op->content.ic = value;
-            }
-        }
-    }
-    air_insn_remove(insn);
-    return true;
-}
+// static bool try_inline_integer_constant(air_insn_t* insn, air_routine_t* routine, air_t* air)
+// {
+//     if (!insn) return false;
+//     if (insn->type != AIR_LOAD) return false;
+//     if (insn->ops[1]->type != AOP_INTEGER_CONSTANT) return false;
+//     regid_t reg = insn->ops[0]->content.reg;
+//     unsigned long long value = insn->ops[1]->content.ic;
+//     for (air_insn_t* trace = insn->next; trace; trace = trace->next)
+//     {
+//         for (size_t i = 0; i < trace->noops; ++i)
+//         {
+//             air_insn_operand_t* op = trace->ops[i];
+//             if (!op) continue;
+//             if (op->type == AOP_REGISTER && op->content.reg == reg)
+//             {
+//                 op->type = AOP_INTEGER_CONSTANT;
+//                 op->content.ic = value;
+//             }
+//         }
+//     }
+//     air_insn_remove(insn);
+//     return true;
+// }
 
-static bool try_simplify_integer_add(air_insn_t* insn, air_routine_t* routine, air_t* air)
-{
-    if (!insn) return false;
-    if (insn->type != AIR_ADD) return false;
-    if (insn->ops[1]->type != AOP_INTEGER_CONSTANT ||
-        insn->ops[2]->type != AOP_INTEGER_CONSTANT)
-        return false;
-    unsigned long long result = insn->ops[1]->content.ic + insn->ops[2]->content.ic;
-    if (!representable(result, insn->ct->class))
-        return false;
-    air_insn_operand_delete(insn->ops[1]);
-    air_insn_operand_delete(insn->ops[2]);
-    insn->ops[1] = air_insn_integer_constant_operand_init(result);
-    insn->noops = 2;
-    insn->type = AIR_LOAD;
-    return true;
-}
+// static bool try_simplify_integer_add(air_insn_t* insn, air_routine_t* routine, air_t* air)
+// {
+//     if (!insn) return false;
+//     if (insn->type != AIR_ADD) return false;
+//     if (insn->ops[1]->type != AOP_INTEGER_CONSTANT ||
+//         insn->ops[2]->type != AOP_INTEGER_CONSTANT)
+//         return false;
+//     unsigned long long result = insn->ops[1]->content.ic + insn->ops[2]->content.ic;
+//     if (!representable(result, insn->ct->class))
+//         return false;
+//     air_insn_operand_delete(insn->ops[1]);
+//     air_insn_operand_delete(insn->ops[2]);
+//     insn->ops[1] = air_insn_integer_constant_operand_init(result);
+//     insn->noops = 2;
+//     insn->type = AIR_LOAD;
+//     return true;
+// }
 
-static bool constexpr_simplification(air_routine_t* routine, air_t* air)
-{
-    bool success = false;
-    for (air_insn_t* insn = routine->insns; insn;)
-    {
-        air_insn_t* next = insn->next;
-        switch (insn->type)
-        {
-            case AIR_LOAD:
-                success |= try_inline_integer_constant(insn, routine, air);
-                break;
-            case AIR_ADD:
-                success |= try_simplify_integer_add(insn, routine, air);
-                break;
-            default:
-                break;
-        }
-        insn = next;
-    }
-    return success;
-}
+// static bool constexpr_simplification(air_routine_t* routine, air_t* air)
+// {
+//     bool success = false;
+//     for (air_insn_t* insn = routine->insns; insn;)
+//     {
+//         air_insn_t* next = insn->next;
+//         switch (insn->type)
+//         {
+//             case AIR_LOAD:
+//                 success |= try_inline_integer_constant(insn, routine, air);
+//                 break;
+//             case AIR_ADD:
+//                 success |= try_simplify_integer_add(insn, routine, air);
+//                 break;
+//             default:
+//                 break;
+//         }
+//         insn = next;
+//     }
+//     return success;
+// }
 
 void opt1(air_t* air, opt1_options_t* options)
 {
     if (!options) return;
     VECTOR_FOR(air_routine_t*, routine, air->routines)
     {
-        if (get_program_options()->xflag)
-            while (constexpr_simplification(routine, air));
+        // if (get_program_options()->xflag)
+            // while (constexpr_simplification(routine, air));
         air_insn_t* last = NULL;
         for (air_insn_t* insn = routine->insns; insn;)
         {

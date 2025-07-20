@@ -295,6 +295,7 @@ typedef struct x86_insn x86_insn_t;
 typedef struct symbol_t symbol_t;
 typedef struct designation designation_t;
 typedef struct vector_t vector_t;
+typedef struct constexpr constexpr_t;
 
 typedef struct program_options
 {
@@ -449,13 +450,13 @@ typedef struct vector_t
     unsigned size;
 } vector_t;
 
-typedef enum constexpr_type
+typedef enum constexpr_old_type
 {
-    CE_ANY,
-    CE_INTEGER,
-    CE_ARITHMETIC,
-    CE_ADDRESS
-} constexpr_type_t;
+    CEOLD_ANY,
+    CEOLD_INTEGER,
+    CEOLD_ARITHMETIC,
+    CEOLD_ADDRESS
+} constexpr_old_type_t;
 
 typedef struct c_type c_type_t;
 
@@ -469,6 +470,7 @@ typedef struct c_type
         struct
         {
             syntax_component_t* length_expression;
+            uint64_t length;
             bool unspecified_size;
         } array;
         struct
@@ -1085,6 +1087,7 @@ typedef enum syntax_component_type_t
     SC_PRIMARY_EXPRESSION_IDENTIFIER,
     SC_DECLARATOR_IDENTIFIER,
     SC_INTRINSIC_CALL_EXPRESSION,
+    SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT,
 
     SC_NO_ELEMENTS
 } syntax_component_type_t;
@@ -1209,14 +1212,15 @@ typedef struct syntax_component_t
         {
             struct syntax_component_t* enumr_constant; // SC_ENUMERATION_CONSTANT
             struct syntax_component_t* enumr_expression; // SC_CONSTANT_EXPRESSION
+            int enumr_value;
         };
 
         // id (general identifier)
         // SC_IDENTIFIER
-        // SC_ENUMERATION_CONSTANT
         // SC_TYPEDEF_NAME
         // SC_PRIMARY_EXPRESSION_IDENTIFIER
         // SC_DECLARATOR_IDENTIFIER
+        // SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT
         char* id;
 
         // SC_STRING_LITERAL - strl
@@ -1533,9 +1537,9 @@ tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
 
 */
 
-typedef struct constexpr
+typedef struct constexpr_old
 {
-    constexpr_type_t type;
+    constexpr_old_type_t type;
     c_type_t* ct;
     union
     {
@@ -1543,14 +1547,38 @@ typedef struct constexpr
         long double fvalue;
         syntax_component_t* addrexpr;
     };
-} constexpr_t;
+} constexpr_old_t;
 
 typedef struct designation
 {
-    constexpr_t* index;
+    constexpr_old_t* index;
     symbol_t* member;
     designation_t* next;
 } designation_t;
+
+typedef enum constexpr_type
+{
+    CE_INTEGER,
+    CE_ARITHMETIC,
+    CE_ADDRESS
+} constexpr_type_t;
+
+typedef struct constexpr
+{
+    constexpr_type_t type;
+    c_type_t* ct;
+    char* error;
+    union
+    {
+        uint8_t* data;
+        struct
+        {
+            symbol_t* sy; // null if the constant is a null pointer
+            bool negative_offset;
+            int64_t offset;
+        } addr;
+    } content;
+} constexpr_t;
 
 typedef struct symbol_t
 {
@@ -1560,8 +1588,6 @@ typedef struct symbol_t
     long long stack_offset;
     char* name; // explicit name, if needed
     storage_duration_t sd; // explicit storage duration, if needed
-    vector_t* designations;
-    vector_t* initial_values;
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
 } symbol_t;
 
@@ -1756,7 +1782,6 @@ linkage_t symbol_get_linkage(symbol_t* sy);
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...));
 void symbol_delete(symbol_t* sy);
 char* symbol_get_name(symbol_t* sy);
-symbol_t* symbol_init_initializer(symbol_t* sy);
 symbol_table_t* symbol_table_init(void);
 symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
@@ -1776,7 +1801,6 @@ bool syntax_is_relational_expression_type(syntax_component_type_t type);
 bool syntax_is_equality_expression_type(syntax_component_type_t type);
 bool syntax_is_typedef_name(syntax_component_t* id);
 bool syntax_is_lvalue(syntax_component_t* syn);
-bool can_evaluate(syntax_component_t* expr, constexpr_type_t ce_type);
 bool syntax_is_vla(syntax_component_t* declr);
 bool syntax_is_known_size_array(syntax_component_t* declr);
 bool syntax_is_modifiable_lvalue(syntax_component_t* syn);
@@ -1802,7 +1826,6 @@ bool syntax_has_specifier(vector_t* specifiers, syntax_component_type_t sc_type,
 void free_syntax(syntax_component_t* syn, syntax_component_t* tlu);
 unsigned long long process_integer_constant(char* con, c_type_class_t* class);
 long double process_floating_constant(char* con, c_type_class_t* class);
-unsigned long long evaluate_constant_expression(syntax_component_t* expr, c_type_class_t* class, constexpr_type_t cexpr_type);
 unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr);
 bool syntax_is_assignment_expression(syntax_component_type_t type);
 bool syntax_is_identifier(syntax_component_type_t type);
@@ -1856,6 +1879,7 @@ bool type_is_sua(c_type_t* ct);
 bool type_is_character_type(c_type_class_t class);
 bool type_is_character(c_type_t* ct);
 bool type_is_vla(c_type_t* ct);
+int64_t type_get_array_length(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);
 c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr);
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));
@@ -1967,22 +1991,23 @@ bool x86_64_is_sse_register(regid_t reg);
 
 /* constexpr.c */
 
-constexpr_t* ce_make_integer(c_type_t* ct, unsigned long long value);
-void constexpr_print(constexpr_t* ce, int (*printer)(const char* fmt, ...));
 void constexpr_delete(constexpr_t* ce);
-designation_t* syntax_to_designation(syntax_component_t* d);
-designation_t* get_full_designation(syntax_component_t* d);
-bool designation_equals(designation_t* d1, designation_t* d2);
-designation_t* designation_copy(designation_t* desig);
-void designation_print(designation_t* desig, int (*printer)(const char* fmt, ...));
-void designation_delete(designation_t* desig);
-void designation_delete_all(designation_t* desig);
-designation_t* designation_concat(designation_t* d1, designation_t* d2);
-constexpr_t* ce_evaluate(syntax_component_t* expr, constexpr_type_t type);
-bool ce_is_positive(constexpr_t* ce);
-void designation_info(syntax_component_t* desig, unsigned** offset, c_type_t** ct);
-bool representable(unsigned long long value, c_type_class_t class);
-unsigned long long constexpr_convert(unsigned long long value, c_type_class_t class);
+void constexpr_print_value(constexpr_t* ce, int (*printer)(const char*, ...));
+bool constexpr_evaluation_succeeded(constexpr_t* ce);
+bool constexpr_can_evaluate_integer(syntax_component_t* expr);
+bool constexpr_can_evaluate_arithmetic(syntax_component_t* expr);
+bool constexpr_can_evaluate_address(syntax_component_t* expr);
+constexpr_t* constexpr_evaluate_integer(syntax_component_t* expr);
+constexpr_t* constexpr_evaluate_arithmetic(syntax_component_t* expr);
+constexpr_t* constexpr_evaluate_address(syntax_component_t* expr);
+constexpr_t* constexpr_evaluate(syntax_component_t* expr);
+void constexpr_convert(constexpr_t* ce, c_type_t* to);
+void constexpr_convert_class(constexpr_t* ce, c_type_class_t class);
+int64_t constexpr_as_i64(constexpr_t* ce);
+uint64_t constexpr_as_u64(constexpr_t* ce);
+int32_t constexpr_as_i32(constexpr_t* ce);
+bool constexpr_equals_zero(constexpr_t* ce);
+bool constexpr_can_evaluate(syntax_component_t* expr);
 
 /* ecc.c */
 program_options_t* get_program_options(void);

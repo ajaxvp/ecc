@@ -1882,13 +1882,15 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
     }
     error_delete_all(errors);
 
-    constexpr_t* ce = ce_evaluate(expr, CE_INTEGER);
-    if (!ce)
+    constexpr_t* ce = constexpr_evaluate_integer(expr);
+    if (!constexpr_evaluation_succeeded(ce))
     {
         (void) fail(condition->start, "#if/#elif directive expression must be a constant expression and have a representable value for its type");
+        constexpr_delete(ce);
         return 2;
     }
-    unsigned long long value = ce->ivalue;
+    constexpr_convert_class(ce, CTC_UNSIGNED_LONG_LONG_INT);
+    uint64_t value = constexpr_as_u64(ce);
 
     constexpr_delete(ce);
     token_delete_all(tokens);

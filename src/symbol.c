@@ -147,6 +147,7 @@ static char* syntax_get_identifier_name(syntax_component_t* syn)
     {
         case SC_IDENTIFIER:
         case SC_PRIMARY_EXPRESSION_IDENTIFIER:
+        case SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT:
         case SC_ENUMERATION_CONSTANT:
         case SC_DECLARATOR_IDENTIFIER:
         case SC_TYPEDEF_NAME:
@@ -217,23 +218,6 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
         namespace_print(sy->ns, printer);
     else
         printer("(none)");
-    if (sy->designations)
-    {
-        printer(", initializations: [");
-        for (size_t i = 0; i < sy->designations->size; ++i)
-        {
-            if (i != 0)
-                printer(", ");
-            designation_t* desig = vector_get(sy->designations, i);
-            constexpr_t* ce = vector_get(sy->initial_values, i);
-            printer("%s", symbol_get_name(sy));
-            if (desig)
-                designation_print(desig, printer);
-            printer(" = ");
-            constexpr_print(ce, printer);
-        }
-        printer("]");
-    }
     printer(" }");
 }
 
@@ -242,10 +226,6 @@ void symbol_delete(symbol_t* sy)
     if (!sy) return;
     type_delete(sy->type);
     namespace_delete(sy->ns);
-    if (sy->designations)
-        vector_deep_delete(sy->designations, (void (*)(void*)) designation_delete_all);
-    if (sy->initial_values)
-        vector_deep_delete(sy->initial_values, (void (*)(void*)) constexpr_delete);
     free(sy->name);
     free(sy);
 }
@@ -275,13 +255,6 @@ static symbol_t* symbol_table_get_internal(symbol_table_t* t, char* k, int* i)
     while (index != oidx);
     if (i) *i = -1;
     return NULL;
-}
-
-symbol_t* symbol_init_initializer(symbol_t* sy)
-{
-    if (!sy->designations) sy->designations = vector_init();
-    if (!sy->initial_values) sy->initial_values = vector_init();
-    return sy;
 }
 
 symbol_table_t* symbol_table_init(void)

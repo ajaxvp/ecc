@@ -34,6 +34,7 @@ c_type_t* type_copy(c_type_t* ct)
     {
         case CTC_ARRAY:
             nct->array.length_expression = ct->array.length_expression;
+            nct->array.length = ct->array.length;
             break;
         case CTC_STRUCTURE:
         case CTC_UNION:
@@ -94,12 +95,24 @@ bool type_is_compatible(c_type_t* t1, c_type_t* t2)
                         continue;
                     if (!bitexpr1 || !bitexpr2)
                         return false;
-                    c_type_class_t c1 = CTC_ERROR;
-                    unsigned long long v1 = evaluate_constant_expression(bitexpr1, &c1, CE_INTEGER);
-                    c_type_class_t c2 = CTC_ERROR;
-                    unsigned long long v2 = evaluate_constant_expression(bitexpr2, &c2, CE_INTEGER);
-                    if (c1 == CTC_ERROR || c2 == CTC_ERROR)
+
+                    constexpr_t* ce1 = constexpr_evaluate_integer(bitexpr1);
+                    constexpr_t* ce2 = constexpr_evaluate_integer(bitexpr2);
+                    if (!constexpr_evaluation_succeeded(ce1) || !constexpr_evaluation_succeeded(ce2))
+                    {
+                        constexpr_delete(ce1);
+                        constexpr_delete(ce2);
                         return false;
+                    }
+                    constexpr_convert_class(ce1, CTC_LONG_LONG_INT);
+                    constexpr_convert_class(ce2, CTC_LONG_LONG_INT);
+
+                    int64_t v1 = constexpr_as_i64(ce1);
+                    int64_t v2 = constexpr_as_i64(ce2);
+
+                    constexpr_delete(ce1);
+                    constexpr_delete(ce2);
+
                     if (v1 != v2)
                         return false;
                 }
@@ -135,12 +148,23 @@ bool type_is_compatible(c_type_t* t1, c_type_t* t2)
                         continue;
                     if (!bitexpr1 || !bitexpr2)
                         return false;
-                    c_type_class_t c1 = CTC_ERROR;
-                    unsigned long long v1 = evaluate_constant_expression(bitexpr1, &c1, CE_INTEGER);
-                    c_type_class_t c2 = CTC_ERROR;
-                    unsigned long long v2 = evaluate_constant_expression(bitexpr2, &c2, CE_INTEGER);
-                    if (c1 == CTC_ERROR || c2 == CTC_ERROR)
+                    constexpr_t* ce1 = constexpr_evaluate_integer(bitexpr1);
+                    constexpr_t* ce2 = constexpr_evaluate_integer(bitexpr2);
+                    if (!constexpr_evaluation_succeeded(ce1) || !constexpr_evaluation_succeeded(ce2))
+                    {
+                        constexpr_delete(ce1);
+                        constexpr_delete(ce2);
                         return false;
+                    }
+                    constexpr_convert_class(ce1, CTC_LONG_LONG_INT);
+                    constexpr_convert_class(ce2, CTC_LONG_LONG_INT);
+
+                    int64_t v1 = constexpr_as_i64(ce1);
+                    int64_t v2 = constexpr_as_i64(ce2);
+
+                    constexpr_delete(ce1);
+                    constexpr_delete(ce2);
+
                     if (v1 != v2)
                         return false;
                 }
@@ -194,15 +218,15 @@ c_type_t* type_compose(c_type_t* t1, c_type_t* t2)
     c_type_t* composed = NULL;
     
     // arrays of known constant size are composite
-    if (t1->class == CTC_ARRAY && can_evaluate(t1->array.length_expression, CE_INTEGER))
+    if (t1->class == CTC_ARRAY && type_get_array_length(t1) != -1)
         composed = type_copy(t1);
-    else if (t2->class == CTC_ARRAY && can_evaluate(t2->array.length_expression, CE_INTEGER))
+    else if (t2->class == CTC_ARRAY && type_get_array_length(t2) != -1)
         composed = type_copy(t2);
     
     // VLAs are composite
-    else if (t1->class == CTC_ARRAY && (t1->array.unspecified_size || !can_evaluate(t1->array.length_expression, CE_INTEGER)))
+    else if (t1->class == CTC_ARRAY && (t1->array.unspecified_size || type_get_array_length(t1) != -1))
         composed = type_copy(t1);
-    else if (t2->class == CTC_ARRAY && (t2->array.unspecified_size || !can_evaluate(t2->array.length_expression, CE_INTEGER)))
+    else if (t2->class == CTC_ARRAY && (t2->array.unspecified_size || type_get_array_length(t2) != -1))
         composed = type_copy(t2);
     
     else if (t1->class == CTC_FUNCTION && t2->class == CTC_FUNCTION)
@@ -483,7 +507,26 @@ bool type_is_vla(c_type_t* ct)
     if (ct->class != CTC_ARRAY) return false;
     if (!ct->array.length_expression) return false;
     if (ct->array.unspecified_size) return true;
-    return !can_evaluate(ct->array.length_expression, CE_INTEGER);
+    return type_get_array_length(ct) == -1;
+}
+
+int64_t type_get_array_length(c_type_t* ct)
+{
+    if (!ct) return -1;
+    if (ct->class != CTC_ARRAY) return -1;
+    if (ct->array.unspecified_size) return -1;
+    if (ct->array.length != 0)
+        return ct->array.length;
+    constexpr_t* ce = constexpr_evaluate_integer(ct->array.length_expression);
+    if (!constexpr_evaluation_succeeded(ce))
+    {
+        constexpr_delete(ce);
+        return -1;
+    }
+    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+    ct->array.length = constexpr_as_i64(ce);
+    constexpr_delete(ce);
+    return ct->array.length;
 }
 
 c_type_t* integer_promotions(c_type_t* ct)
@@ -789,9 +832,8 @@ long long type_size(c_type_t* ct)
             return 8;
         case CTC_ARRAY:
         {
-            c_type_class_t c = CTC_ERROR;
-            long long length = evaluate_constant_expression(ct->array.length_expression, &c, CE_INTEGER);
-            if (c == CTC_ERROR)
+            int64_t length = type_get_array_length(ct);
+            if (length == -1)
                 return -1;
             long long dsize = type_size(ct->derived_from);
             if (dsize == -1)
@@ -834,7 +876,6 @@ long long type_size(c_type_t* ct)
         case CTC_VOID:
         case CTC_ERROR:
         case CTC_LABEL:
-            return 0;
         default:
             return -1;
     }
@@ -857,12 +898,9 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
                 printer(" %s", ct->enumerated.name);
             break;
         case CTC_ARRAY:
-            constexpr_t* ce = ce_evaluate(ct->array.length_expression, CE_INTEGER);
-            if (ce)
-            {
-                printer("[%llu]", ce->ivalue);
-                constexpr_delete(ce);
-            }
+            int64_t length = type_get_array_length(ct);
+            if (length != -1)
+                printer("[%lld]", length);
             printer(" of ");
             break;
         case CTC_STRUCTURE:

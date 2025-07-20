@@ -1230,6 +1230,21 @@ static void linearize_primary_expression_identifier_after(syntax_traverser_t* tr
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_primary_expression_enumeration_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    c_namespace_t* ns = syntax_get_namespace(syn);
+    symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
+    namespace_delete(ns);
+    if (!sy) report_return;
+    SETUP_LINEARIZE;
+    air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_integer_constant_operand_init(sy->declarer->parent->enumr_value);
+    ADD_CODE(insn);
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_integer_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     SETUP_LINEARIZE;
@@ -1456,8 +1471,8 @@ static void linearize_static_init_declarator_after(syntax_traverser_t* trav, syn
     if (init->type == SC_INITIALIZER_LIST)
         return;
     
-    // constexpr_t* ce = ce_evaluate(init, CE_ANY);
-    // if (!ce) report_return;
+    // constexpr_t* ce = constexpr_evaluate_integer(init);
+    // if (!constexpr_evaluation_succeeded(ce)) report_return;
 
     // in progress...
 
@@ -1526,11 +1541,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
         // +1 fo the null byte
         unsigned long long length = init->strl_length->intc + 1;
         if (sy->type->array.length_expression)
-        {
-            constexpr_t* ce = ce_evaluate(sy->type->array.length_expression, CE_INTEGER);
-            if (ce) length = min(length, ce->ivalue);
-            constexpr_delete(ce);
-        }
+            length = min(length, type_get_array_length(sy->type));
         char* str = init->strl_reg;
         for (unsigned long long copied = 0; copied < length;)
         {
@@ -2712,6 +2723,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->before[SC_FUNCTION_DEFINITION] = linearize_function_definition_before;
     trav->after[SC_FUNCTION_DEFINITION] = linearize_function_definition_after;
     trav->after[SC_PRIMARY_EXPRESSION_IDENTIFIER] = linearize_primary_expression_identifier_after;
+    trav->after[SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT] = linearize_primary_expression_enumeration_constant_after;
     trav->after[SC_INTEGER_CONSTANT] = linearize_integer_constant_after;
     trav->after[SC_CHARACTER_CONSTANT] = linearize_character_constant_after;
     trav->after[SC_FLOATING_CONSTANT] = linearize_floating_constant_after;
@@ -2794,6 +2806,9 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_TYPE_QUALIFIER] = linearize_no_action_after;
     trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
+    trav->after[SC_ENUMERATOR] = linearize_no_action_after;
+    trav->after[SC_ENUMERATION_CONSTANT] = linearize_no_action_after;
+    trav->after[SC_ENUM_SPECIFIER] = linearize_no_action_after;
 
     trav->default_after = linearize_default_after;
 

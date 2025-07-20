@@ -110,14 +110,16 @@ static bool syntax_is_null_ptr_constant(syntax_component_t* expr, c_type_class_t
             return false;
         expr = expr->caexpr_operand;
     }
-    c_type_class_t c = CTC_ERROR;
-    unsigned long long value = evaluate_constant_expression(expr, &c, CE_INTEGER);
-    if (c == CTC_ERROR)
+    constexpr_t* ce = constexpr_evaluate_integer(expr);
+    if (!constexpr_evaluation_succeeded(ce))
+    {
+        constexpr_delete(ce);
         return false;
-    if (value != 0)
-        return false;
-    if (class) *class = c;
-    return true;
+    }
+    bool zero = constexpr_equals_zero(ce);
+    if (zero && class) *class = ce->ct->class;
+    constexpr_delete(ce);
+    return zero;
 }
 
 /*
@@ -659,7 +661,7 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
     if (!type_is_object_type(ct) && (ct->class != CTC_ARRAY || ct->array.length_expression || type_is_vla(ct)))
     {
         // ISO: 6.5.2.5 (1)
-        ADD_ERROR(syn, "compound literals may not have a variable length array type");
+        ADD_ERROR(syn, "compound literals may not have a variable-length array type");
         pass = false;
     }
     if (pass)
@@ -1372,24 +1374,26 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     // if enumerator has a constant value associated with it, use that value
     if (enumr->enumr_expression)
     {
-        constexpr_t* ce = ce_evaluate(enumr->enumr_expression, CE_INTEGER);
-        if (!ce)
+        constexpr_t* ce = constexpr_evaluate_integer(enumr->enumr_expression);
+        if (!constexpr_evaluation_succeeded(ce))
         {
             // ISO: 6.7.2.2 (2)
             ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
             constexpr_delete(ce);
             return;
         }
-        if (ce->ivalue != (int) ce->ivalue)
+        constexpr_convert_class(ce, CTC_INT);
+        int value = constexpr_as_i32(ce);
+        // TODO: check if representable
+        if (false)
         {
             // ISO: 6.7.2.2 (2)
             ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
             constexpr_delete(ce);
             return;
         }
-        symbol_init_initializer(sy);
-        vector_add(sy->designations, NULL);
-        vector_add(sy->initial_values, ce);
+        constexpr_delete(ce);
+        enumr->enumr_value = value;
         return;
     }
     // otherwise...
@@ -1410,41 +1414,31 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     // if there is no last one, take 0 to be the constant value of the first enum constant (go by placement index)
     if (last == -1)
     {
-        symbol_init_initializer(sy);
-        vector_add(sy->designations, NULL);
-        vector_add(sy->initial_values, ce_make_integer(make_basic_type(CTC_INT), idx));
+        enumr->enumr_value = idx;
         return;
     }
     // if there is, evaluate it
     syntax_component_t* last_er = vector_get(enums->enums_enumerators, last);
-    constexpr_t* lce = ce_evaluate(last_er->enumr_expression, CE_INTEGER);
-    if (!lce)
+    constexpr_t* ce = constexpr_evaluate_integer(last_er->enumr_expression);
+    if (!constexpr_evaluation_succeeded(ce))
     {
         // ISO: 6.7.2.2 (2)
         ADD_ERROR(last_er->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
-        constexpr_delete(lce);
+        constexpr_delete(ce);
         return;
     }
-    if (lce->ivalue != (int) lce->ivalue)
-    {
-        // ISO: 6.7.2.2 (2)
-        ADD_ERROR(last_er->enumr_expression, "enumeration constant value must be representable by type 'int'");
-        constexpr_delete(lce);
-        return;
-    }
-    // make this enum constant have the value of the found enum constant + the distance between the two
-    constexpr_t* ce = ce_make_integer(make_basic_type(CTC_INT), lce->ivalue + (idx - last));
-    constexpr_delete(lce);
-    if (ce->ivalue != (int) ce->ivalue)
+    constexpr_convert_class(ce, CTC_INT);
+    int value = constexpr_as_i32(ce) + (idx - last);
+    // TODO: check if representable
+    if (false)
     {
         // ISO: 6.7.2.2 (2)
         ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
         constexpr_delete(ce);
         return;
     }
-    symbol_init_initializer(sy);
-    vector_add(sy->designations, NULL);
-    vector_add(sy->initial_values, ce);
+    constexpr_delete(ce);
+    enumr->enumr_value = value;
 }
 
 void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, bool first, vector_t* symbols)
@@ -1511,8 +1505,10 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
 
 void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
+    if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
+        syn->type = SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT;
     syn->ctype = type_copy(sy->type);
-        if (sy->type->class == CTC_ARRAY && syn->parent &&
+    if (sy->type->class == CTC_ARRAY && syn->parent &&
         syn->parent->type != SC_REFERENCE_EXPRESSION &&
         syn->parent->type != SC_SIZEOF_EXPRESSION &&
         syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
@@ -1822,15 +1818,18 @@ void swbody_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t
         return;
     if (syn->lstmt_case_expression)
     {
-        constexpr_t* ce = ce_evaluate(syn->lstmt_case_expression, CE_INTEGER);
-        if (!ce)
+        constexpr_t* ce = constexpr_evaluate_integer(syn->lstmt_case_expression);
+        if (!constexpr_evaluation_succeeded(ce))
         {
             // ISO: 6.8.4.2 (3)
             ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "case statement must have a constant expression");
+            constexpr_delete(ce);
             return;
         }
         c_type_t* pt = integer_promotions(swstmt->swstmt_condition->ctype);
-        syn->lstmt_value = constexpr_convert(ce->ivalue, pt->class);
+        constexpr_convert(ce, pt);
+        // TODO: make better?
+        syn->lstmt_value = constexpr_as_u64(ce);
         type_delete(pt);
         constexpr_delete(ce);
         VECTOR_FOR(syntax_component_t*, lstmt, swstmt->swstmt_cases)
@@ -1953,9 +1952,21 @@ void check_static_initializer_constexprs(syntax_traverser_t* trav, syntax_compon
 {
     if (syn->type != SC_INITIALIZER_LIST)
     {
-        if (!can_evaluate(syn, CE_ANY))
+        if (!constexpr_can_evaluate(syn))
             // ISO: 6.7.8 (4)
             ADD_ERROR(syn, "initializer for object with static storage duration must be constant");
+        if (get_program_options()->iflag)
+        {
+            constexpr_t* ce = constexpr_evaluate(syn);
+            if (!constexpr_evaluation_succeeded(ce))
+                printf("%s\n", ce->error);
+            else
+            {
+                printf("value of static initializer on line %u: ", syn->row);
+                constexpr_print_value(ce, printf);
+                printf("\n");
+            }
+        }
         return;
     }
     VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
@@ -1979,13 +1990,7 @@ static long long get_aggregate_type_element_count(c_type_t* ct)
     if (ct->class == CTC_STRUCTURE)
         return ct->struct_union.member_types->size;
     if (ct->class == CTC_ARRAY)
-    {
-        constexpr_t* ce = ce_evaluate(ct->array.length_expression, CE_INTEGER);
-        if (!ce) return -1;
-        unsigned long long val = ce->ivalue;
-        constexpr_delete(ce);
-        return val;
-    }
+        return type_get_array_length(ct);
     return 0;
 }
 
@@ -2049,16 +2054,19 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                         vector_delete(coei_stack);
                         return;
                     }
-                    constexpr_t* ce = ce_evaluate(desigr, CE_INTEGER);
-                    if (!ce)
+                    constexpr_t* ce = constexpr_evaluate_integer(desigr);
+                    if (!constexpr_evaluation_succeeded(ce))
                     {
                         // ISO: 6.7.8 (6)
                         ADD_ERROR(desigr, "array initialization designators must have a constant expression for its index");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
+                        constexpr_delete(ce);
                         return;
                     }
-                    if (!ce_is_positive(ce))
+                    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+                    int64_t value = constexpr_as_i64(ce);
+                    if (value < 0)
                     {
                         // ISO: 6.7.8 (6)
                         ADD_ERROR(desigr, "array initialization designators must have a non-negative index");
@@ -2066,8 +2074,8 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                         vector_delete(coei_stack);
                         return;
                     }
-                    vector_add(coei_stack, (void*) ce->ivalue);
-                    offset += type_size(nav->derived_from) * ce->ivalue;
+                    vector_add(coei_stack, (void*) value);
+                    offset += type_size(nav->derived_from) * value;
                     constexpr_delete(ce);
                     nav = nav->derived_from;
                 }
@@ -2201,6 +2209,12 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
 
 void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    if (syn->adeclr_length_expression && !type_is_integer(syn->adeclr_length_expression->ctype))
+    {
+        // ISO: 6.7.5.2 (1)
+        ADD_ERROR(syn, "array length expression must have an integer type");
+        return;
+    }
     if (syntax_is_vla(syn))
         ADD_ERROR(syn, "variable-length arrays are not supported yet");
 }
