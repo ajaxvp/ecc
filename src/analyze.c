@@ -129,8 +129,6 @@ UNRESOLVED ISO SPECIFICATION REQUIREMENTS
 CONTRAINTS:
 
 EXPRESSIONS
-6.5.2.5 (2) - requires initializer offset analysis
-6.5.2.5 (3) - part of finding out the contents of a static storage comp-literal
 6.5.4 (3) - probably doesn't need to be checked *on* cast expressions?
 6.6 (3)
 6.6 (4)
@@ -172,6 +170,8 @@ EXPRESSIONS
 6.5.2.3 (2)
 6.5.2.4 (1)
 6.5.2.5 (1)
+6.5.2.5 (2)
+6.5.2.5 (3)
 6.5.3.1 (1)
 6.5.3.2 (1)
 6.5.3.2 (2)
@@ -650,7 +650,7 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = type_copy(syn->ctype);
     type_delete(syn->ctype);
-    bool unconverted = syntax_get_enclosing(syn, SC_SIZEOF_EXPRESSION) || syntax_get_enclosing(syn, SC_SIZEOF_TYPE_EXPRESSION) ||
+    bool unconverted = syn->parent->type == SC_SIZEOF_EXPRESSION || syn->parent->type == SC_SIZEOF_TYPE_EXPRESSION ||
         syn->parent->type == SC_REFERENCE_EXPRESSION;
     if (syn->parent->type == SC_INIT_DECLARATOR || (syn->parent->type == SC_INITIALIZER_LIST && syn->parent->parent->type == SC_INIT_DECLARATOR))
     {
@@ -2010,12 +2010,8 @@ static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t
     if (ct->function.param_types)
     {
         // enforce (void)
-        if (ct->function.param_types->size == 1)
-        {
-            c_type_t* pt = vector_get(ct->function.param_types, 0);
-            if (pt->class == CTC_VOID)
-                good_prototype = true;
-        }
+        if (ct->function.param_types->size == 0)
+            good_prototype = true;
         // enforce (int, char**) or (int, char*[])
         else if (ct->function.param_types->size == 2)
         {
@@ -2030,7 +2026,7 @@ static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t
     else
         good_prototype = true;
     if (!good_prototype)
-        ADD_ERROR(syn, "function prototype for 'main', if any, should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
+        ADD_ERROR(syn, "the function prototype for 'main', if any, should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
 }
 
 void analyze_function_definition_after(syntax_traverser_t* trav, syntax_component_t* syn)

@@ -1670,6 +1670,15 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
                 if (declr->abfdeclr_parameter_declarations)
                 {
                     ct->function.param_types = vector_init();
+
+                    if (declr->abfdeclr_parameter_declarations->size == 1)
+                    {
+                        syntax_component_t* pdecl = vector_get(declr->abfdeclr_parameter_declarations, 0);
+                        if (!pdecl->pdecl_declr && pdecl->pdecl_declaration_specifiers->size == 1 &&
+                            syntax_has_specifier(pdecl->pdecl_declaration_specifiers, SC_BASIC_TYPE_SPECIFIER, BTS_VOID))
+                            goto abfdeclr_finish;
+                    }
+
                     // loop over every parameter declaration
                     VECTOR_FOR(syntax_component_t*, s, declr->abfdeclr_parameter_declarations)
                     {
@@ -1691,6 +1700,7 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
                         }
                     }
                 }
+            abfdeclr_finish:
                 ct->function.variadic = declr->abfdeclr_ellipsis;
                 ct->derived_from = base;
                 base = ct;
@@ -1737,6 +1747,14 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
                 {
                     ct->function.param_types = vector_init();
                     
+                    if (declr->fdeclr_parameter_declarations->size == 1)
+                    {
+                        syntax_component_t* pdecl = vector_get(declr->fdeclr_parameter_declarations, 0);
+                        if (!pdecl->pdecl_declr && pdecl->pdecl_declaration_specifiers->size == 1 &&
+                            syntax_has_specifier(pdecl->pdecl_declaration_specifiers, SC_BASIC_TYPE_SPECIFIER, BTS_VOID))
+                            goto fdeclr_finish;
+                    }
+
                     // loop over every parameter declaration
                     VECTOR_FOR(syntax_component_t*, s, declr->fdeclr_parameter_declarations)
                     {
@@ -1758,6 +1776,7 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
                         }
                     }
                 }
+            fdeclr_finish:
                 ct->derived_from = base;
                 ct->function.variadic = declr->fdeclr_ellipsis;
                 base = ct;
