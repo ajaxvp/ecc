@@ -455,6 +455,69 @@ void constexpr_convert(constexpr_t* ce, c_type_t* to)
 
 #undef convert
 
+#define generate_constexpr_representable_function(operation, case_type) \
+    static bool constexpr_##operation##_representable(constexpr_t* lhs, constexpr_t* rhs, c_type_t* rt) \
+    {\
+        switch (rt->class) \
+        { \
+            case_type(CTC_BOOL, unsigned char, BOOL_MAX, BOOL_MIN) \
+            case_type(CTC_CHAR, char, CHAR_MAX, CHAR_MIN) \
+            case_type(CTC_SIGNED_CHAR, signed char, SIGNED_CHAR_MAX, SIGNED_CHAR_MIN) \
+            case_type(CTC_SHORT_INT, short, SHORT_INT_MAX, SHORT_INT_MIN) \
+            case_type(CTC_INT, int, INT_MAX, INT_MIN) \
+            case_type(CTC_LONG_INT, long, LONG_INT_MAX, LONG_INT_MIN) \
+            case_type(CTC_LONG_LONG_INT, long long, LONG_LONG_INT_MAX, LONG_LONG_INT_MIN) \
+            case_type(CTC_UNSIGNED_CHAR, unsigned char, UNSIGNED_CHAR_MAX, UNSIGNED_CHAR_MIN) \
+            case_type(CTC_UNSIGNED_SHORT_INT, unsigned short, UNSIGNED_SHORT_INT_MAX, UNSIGNED_SHORT_INT_MIN) \
+            case_type(CTC_UNSIGNED_INT, unsigned, UNSIGNED_INT_MAX, UNSIGNED_INT_MIN) \
+            case_type(CTC_UNSIGNED_LONG_INT, unsigned long, UNSIGNED_LONG_INT_MAX, UNSIGNED_LONG_INT_MIN) \
+            case_type(CTC_UNSIGNED_LONG_LONG_INT, unsigned long long, UNSIGNED_LONG_LONG_INT_MAX, UNSIGNED_LONG_LONG_INT_MIN) \
+            case_type(CTC_FLOAT, float, FLOAT_MAX, FLOAT_MIN) \
+            case_type(CTC_DOUBLE, double, DOUBLE_MAX, DOUBLE_MIN) \
+            case_type(CTC_LONG_DOUBLE, long double, LONG_DOUBLE_MAX, LONG_DOUBLE_MIN) \
+            default: return false; \
+        } \
+    }
+
+#define addition_representation_case(c, t, max, min) \
+    case c: \
+    { \
+        t vlhs = data_as(lhs->content.data, t), vrhs = data_as(rhs->content.data, t); \
+        bool overflow = vrhs > 0 && vlhs > (max) - vrhs; \
+        bool underflow = vrhs < 0 && vlhs < (min) - vrhs; \
+        return !overflow && !underflow; \
+    }
+
+generate_constexpr_representable_function(addition, addition_representation_case)
+
+#undef addition_representation_case
+
+#define subtraction_representation_case(c, t, max, min) \
+    case c: \
+    { \
+        t vlhs = data_as(lhs->content.data, t), vrhs = data_as(rhs->content.data, t); \
+        bool overflow = vrhs < 0 && vlhs > (max) + vrhs; \
+        bool underflow = vrhs > 0 && vlhs < (min) + vrhs; \
+        return !overflow && !underflow; \
+    }
+
+generate_constexpr_representable_function(subtraction, subtraction_representation_case)
+
+#undef subtraction_representation_case
+
+#define multiplication_representation_case(c, t, max, min) \
+    case c: \
+    { \
+        t vlhs = data_as(lhs->content.data, t), vrhs = data_as(rhs->content.data, t); \
+        bool overflow = (vlhs == -1 && vrhs == (min)) || (vrhs != 0 && vlhs > (max) / vrhs); \
+        bool underflow = (vrhs == -1 && vlhs == (min)) || (vrhs != 0 && vlhs < (min) / vrhs); \
+        return !overflow && !underflow; \
+    }
+
+generate_constexpr_representable_function(multiplication, multiplication_representation_case)
+
+#undef multiplication_representable_case
+
 void constexpr_convert_class(constexpr_t* ce, c_type_class_t class)
 {
     c_type_t* ct = make_basic_type(class);
@@ -465,7 +528,7 @@ void constexpr_convert_class(constexpr_t* ce, c_type_class_t class)
 static constexpr_t* constexpr_evaluate_type(syntax_component_t* expr, constexpr_type_t type);
 static void evaluate(syntax_component_t* expr, constexpr_t* ce);
 
-#define unop_case(rt, t, c, op) \
+#define unop_switch_case(rt, t, c, op) \
     case c: \
     { \
         t value = op data_as(operand->content.data, t); \
@@ -473,44 +536,7 @@ static void evaluate(syntax_component_t* expr, constexpr_t* ce);
         break; \
     }
 
-#define arithmetic_unop_switch(rt, op) \
-    switch ((rt)->class) \
-    { \
-        unop_case((rt), char, CTC_CHAR, op) \
-        unop_case((rt), signed char, CTC_SIGNED_CHAR, op) \
-        unop_case((rt), short, CTC_SHORT_INT, op) \
-        unop_case((rt), int, CTC_INT, op) \
-        unop_case((rt), long, CTC_LONG_INT, op) \
-        unop_case((rt), long long, CTC_LONG_LONG_INT, op) \
-        unop_case((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
-        unop_case((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
-        unop_case((rt), unsigned, CTC_UNSIGNED_INT, op) \
-        unop_case((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
-        unop_case((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
-        unop_case((rt), float, CTC_FLOAT, op) \
-        unop_case((rt), double, CTC_DOUBLE, op) \
-        unop_case((rt), long double, CTC_LONG_DOUBLE, op) \
-        default: report_return; \
-    }
-
-#define integer_unop_switch(rt, op) \
-    switch ((rt)->class) \
-    { \
-        unop_case((rt), char, CTC_CHAR, op) \
-        unop_case((rt), signed char, CTC_SIGNED_CHAR, op) \
-        unop_case((rt), short, CTC_SHORT_INT, op) \
-        unop_case((rt), int, CTC_INT, op) \
-        unop_case((rt), long, CTC_LONG_INT, op) \
-        unop_case((rt), long long, CTC_LONG_LONG_INT, op) \
-        unop_case((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
-        unop_case((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
-        unop_case((rt), unsigned, CTC_UNSIGNED_INT, op) \
-        unop_case((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
-        unop_case((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
-        default: report_return; \
-    }
-
-#define binop_case(rt, t, c, op) \
+#define binop_switch_case(rt, t, c, op) \
     case c: \
     { \
         t value = data_as(lhs->content.data, t) op data_as(rhs->content.data, t); \
@@ -518,40 +544,40 @@ static void evaluate(syntax_component_t* expr, constexpr_t* ce);
         break; \
     }
 
-#define arithmetic_binop_switch(rt, op) \
+#define arithmetic_operation_switch(rt, op, case_type) \
     switch ((rt)->class) \
     { \
-        binop_case((rt), char, CTC_CHAR, op) \
-        binop_case((rt), signed char, CTC_SIGNED_CHAR, op) \
-        binop_case((rt), short, CTC_SHORT_INT, op) \
-        binop_case((rt), int, CTC_INT, op) \
-        binop_case((rt), long, CTC_LONG_INT, op) \
-        binop_case((rt), long long, CTC_LONG_LONG_INT, op) \
-        binop_case((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
-        binop_case((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
-        binop_case((rt), unsigned, CTC_UNSIGNED_INT, op) \
-        binop_case((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
-        binop_case((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
-        binop_case((rt), float, CTC_FLOAT, op) \
-        binop_case((rt), double, CTC_DOUBLE, op) \
-        binop_case((rt), long double, CTC_LONG_DOUBLE, op) \
+        case_type((rt), char, CTC_CHAR, op) \
+        case_type((rt), signed char, CTC_SIGNED_CHAR, op) \
+        case_type((rt), short, CTC_SHORT_INT, op) \
+        case_type((rt), int, CTC_INT, op) \
+        case_type((rt), long, CTC_LONG_INT, op) \
+        case_type((rt), long long, CTC_LONG_LONG_INT, op) \
+        case_type((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
+        case_type((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
+        case_type((rt), unsigned, CTC_UNSIGNED_INT, op) \
+        case_type((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
+        case_type((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
+        case_type((rt), float, CTC_FLOAT, op) \
+        case_type((rt), double, CTC_DOUBLE, op) \
+        case_type((rt), long double, CTC_LONG_DOUBLE, op) \
         default: break; \
     }
 
-#define integer_binop_switch(rt, op) \
+#define integer_operation_switch(rt, op, case_type) \
     switch ((rt)->class) \
     { \
-        binop_case((rt), char, CTC_CHAR, op) \
-        binop_case((rt), signed char, CTC_SIGNED_CHAR, op) \
-        binop_case((rt), short, CTC_SHORT_INT, op) \
-        binop_case((rt), int, CTC_INT, op) \
-        binop_case((rt), long, CTC_LONG_INT, op) \
-        binop_case((rt), long long, CTC_LONG_LONG_INT, op) \
-        binop_case((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
-        binop_case((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
-        binop_case((rt), unsigned, CTC_UNSIGNED_INT, op) \
-        binop_case((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
-        binop_case((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
+        case_type((rt), char, CTC_CHAR, op) \
+        case_type((rt), signed char, CTC_SIGNED_CHAR, op) \
+        case_type((rt), short, CTC_SHORT_INT, op) \
+        case_type((rt), int, CTC_INT, op) \
+        case_type((rt), long, CTC_LONG_INT, op) \
+        case_type((rt), long long, CTC_LONG_LONG_INT, op) \
+        case_type((rt), unsigned char, CTC_UNSIGNED_CHAR, op) \
+        case_type((rt), unsigned short, CTC_UNSIGNED_SHORT_INT, op) \
+        case_type((rt), unsigned, CTC_UNSIGNED_INT, op) \
+        case_type((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
+        case_type((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
         default: report_return; \
     }
 
@@ -602,7 +628,7 @@ bool constexpr_equals(constexpr_t* ce1, constexpr_t* ce2)
     constexpr_convert(lhs, rt);
     constexpr_convert(rhs, rt);
 
-    arithmetic_binop_switch(rt, ==)
+    arithmetic_operation_switch(rt, ==, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -614,6 +640,12 @@ bool constexpr_equals(constexpr_t* ce1, constexpr_t* ce2)
 
 void evaluate_plus_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "unary plus operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* operand = constexpr_evaluate_type(expr->uexpr_operand, ce->type);
     if (!constexpr_evaluation_succeeded(operand))
     {
@@ -625,13 +657,19 @@ void evaluate_plus_expression(syntax_component_t* expr, constexpr_t* ce)
 
     constexpr_convert(operand, expr->ctype);
 
-    arithmetic_unop_switch(expr->ctype, +);
+    arithmetic_operation_switch(expr->ctype, +, unop_switch_case);
 
     constexpr_delete(operand);
 }
 
 void evaluate_minus_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "unary minus operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* operand = constexpr_evaluate_type(expr->uexpr_operand, ce->type);
     if (!constexpr_evaluation_succeeded(operand))
     {
@@ -643,13 +681,19 @@ void evaluate_minus_expression(syntax_component_t* expr, constexpr_t* ce)
 
     constexpr_convert(operand, expr->ctype);
 
-    arithmetic_unop_switch(expr->ctype, -);
+    arithmetic_operation_switch(expr->ctype, -, unop_switch_case);
 
     constexpr_delete(operand);
 }
 
 void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "addition operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -674,7 +718,15 @@ void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
         constexpr_convert(lhs, expr->ctype);
         constexpr_convert(rhs, expr->ctype);
 
-        arithmetic_binop_switch(expr->ctype, +)
+        if (!constexpr_addition_representable(lhs, rhs, expr->ctype))
+        {
+            SET_ERROR(expr, "addition in constant expression does not fit within its size");
+            constexpr_delete(lhs);
+            constexpr_delete(rhs);
+            return;
+        }
+
+        arithmetic_operation_switch(expr->ctype, +, binop_switch_case)
     }
     else
         // TODO: handle ptr arithmetic
@@ -686,6 +738,12 @@ void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "subtraction operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -710,7 +768,15 @@ void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
         constexpr_convert(lhs, expr->ctype);
         constexpr_convert(rhs, expr->ctype);
 
-        arithmetic_binop_switch(expr->ctype, -)
+        if (!constexpr_subtraction_representable(lhs, rhs, expr->ctype))
+        {
+            SET_ERROR(expr, "subtraction in constant expression does not fit within its size");
+            constexpr_delete(lhs);
+            constexpr_delete(rhs);
+            return;
+        }
+
+        arithmetic_operation_switch(expr->ctype, -, binop_switch_case)
     }
     else
         // TODO: handle ptr arithmetic
@@ -722,6 +788,12 @@ void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_multiplication_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "multiplication operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -744,7 +816,15 @@ void evaluate_multiplication_expression(syntax_component_t* expr, constexpr_t* c
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, *)
+    if (!constexpr_multiplication_representable(lhs, rhs, expr->ctype))
+    {
+        SET_ERROR(expr, "multiplication in constant expression does not fit within its size");
+        constexpr_delete(lhs);
+        constexpr_delete(rhs);
+        return;
+    }
+
+    arithmetic_operation_switch(expr->ctype, *, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -752,6 +832,12 @@ void evaluate_multiplication_expression(syntax_component_t* expr, constexpr_t* c
 
 void evaluate_division_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "division operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -774,7 +860,7 @@ void evaluate_division_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, /)
+    arithmetic_operation_switch(expr->ctype, /, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -782,6 +868,12 @@ void evaluate_division_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_modular_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "modulo operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -804,7 +896,7 @@ void evaluate_modular_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, %)
+    integer_operation_switch(expr->ctype, %, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -812,6 +904,12 @@ void evaluate_modular_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_complement_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "complement operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* operand = constexpr_evaluate_type(expr->uexpr_operand, ce->type);
     if (!constexpr_evaluation_succeeded(operand))
     {
@@ -823,13 +921,19 @@ void evaluate_complement_expression(syntax_component_t* expr, constexpr_t* ce)
 
     constexpr_convert(operand, expr->ctype);
 
-    integer_unop_switch(expr->ctype, ~);
+    integer_operation_switch(expr->ctype, ~, unop_switch_case);
 
     constexpr_delete(operand);
 }
 
 void evaluate_bitwise_and_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "bitwise AND operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -852,7 +956,7 @@ void evaluate_bitwise_and_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, &)
+    integer_operation_switch(expr->ctype, &, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -860,6 +964,12 @@ void evaluate_bitwise_and_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_bitwise_or_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "bitwise OR operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -882,7 +992,7 @@ void evaluate_bitwise_or_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, |)
+    integer_operation_switch(expr->ctype, |, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -890,6 +1000,12 @@ void evaluate_bitwise_or_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_bitwise_xor_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "bitwise XOR operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -912,7 +1028,7 @@ void evaluate_bitwise_xor_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, ^)
+    integer_operation_switch(expr->ctype, ^, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -920,6 +1036,12 @@ void evaluate_bitwise_xor_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_bitwise_left_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "left shift operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -942,7 +1064,7 @@ void evaluate_bitwise_left_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, <<)
+    integer_operation_switch(expr->ctype, <<, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -950,6 +1072,12 @@ void evaluate_bitwise_left_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_bitwise_right_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "right shift operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -972,7 +1100,7 @@ void evaluate_bitwise_right_expression(syntax_component_t* expr, constexpr_t* ce
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    integer_binop_switch(expr->ctype, >>)
+    integer_operation_switch(expr->ctype, >>, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -980,6 +1108,12 @@ void evaluate_bitwise_right_expression(syntax_component_t* expr, constexpr_t* ce
 
 void evaluate_not_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "NOT operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* operand = constexpr_evaluate_type(expr->uexpr_operand, ce->type);
     if (!constexpr_evaluation_succeeded(operand))
     {
@@ -991,13 +1125,19 @@ void evaluate_not_expression(syntax_component_t* expr, constexpr_t* ce)
 
     constexpr_convert(operand, expr->ctype);
 
-    arithmetic_unop_switch(expr->ctype, !);
+    arithmetic_operation_switch(expr->ctype, !, unop_switch_case);
 
     constexpr_delete(operand);
 }
 
 void evaluate_logical_and_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "logical AND operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1035,6 +1175,12 @@ void evaluate_logical_and_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_logical_or_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "logical OR operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1072,6 +1218,12 @@ void evaluate_logical_or_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_equality_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "equality operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1094,7 +1246,7 @@ void evaluate_equality_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, ==)
+    arithmetic_operation_switch(expr->ctype, ==, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1102,6 +1254,12 @@ void evaluate_equality_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_inequality_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "inequality operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1124,7 +1282,7 @@ void evaluate_inequality_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, !=)
+    arithmetic_operation_switch(expr->ctype, !=, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1132,6 +1290,12 @@ void evaluate_inequality_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_less_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "less than operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1154,7 +1318,7 @@ void evaluate_less_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, <)
+    arithmetic_operation_switch(expr->ctype, <, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1162,6 +1326,12 @@ void evaluate_less_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_less_equal_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "less than or equal operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1184,7 +1354,7 @@ void evaluate_less_equal_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, <=)
+    arithmetic_operation_switch(expr->ctype, <=, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1192,6 +1362,12 @@ void evaluate_less_equal_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_greater_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "greater than operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1214,7 +1390,7 @@ void evaluate_greater_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, >)
+    arithmetic_operation_switch(expr->ctype, >, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1222,6 +1398,12 @@ void evaluate_greater_expression(syntax_component_t* expr, constexpr_t* ce)
 
 void evaluate_greater_equal_expression(syntax_component_t* expr, constexpr_t* ce)
 {
+    if (ce->type == CE_ADDRESS)
+    {
+        SET_ERROR(expr, "greater than or equal operator is not allowed in an address constant");
+        return;
+    }
+
     constexpr_t* lhs = constexpr_evaluate_type(expr->bexpr_lhs, ce->type);
     if (!constexpr_evaluation_succeeded(lhs))
     {
@@ -1244,7 +1426,7 @@ void evaluate_greater_equal_expression(syntax_component_t* expr, constexpr_t* ce
     constexpr_convert(lhs, expr->ctype);
     constexpr_convert(rhs, expr->ctype);
 
-    arithmetic_binop_switch(expr->ctype, >=)
+    arithmetic_operation_switch(expr->ctype, >=, binop_switch_case)
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1658,10 +1840,10 @@ static constexpr_t* constexpr_evaluate_type(syntax_component_t* expr, constexpr_
         return ce;
     }
     evaluate(expr, ce);
-    if (type == CE_INTEGER && !type_is_integer(ce->ct))
+    if (type == CE_INTEGER && !ce->error && !type_is_integer(ce->ct))
         // ISO: 6.6 (6)
         SET_ERROR(expr, "integer constant expression must have an integer type");
-    if (type == CE_ARITHMETIC && !type_is_arithmetic(ce->ct))
+    if (type == CE_ARITHMETIC && !ce->error && !type_is_arithmetic(ce->ct))
         // ISO: 6.6 (8)
         SET_ERROR(expr, "arithmetic constant expression must have an arithmetic type");
     return ce;
@@ -1757,15 +1939,11 @@ bool constexpr_can_evaluate(syntax_component_t* expr)
 
 constexpr_t* constexpr_evaluate(syntax_component_t* expr)
 {
-    constexpr_t* ce = constexpr_evaluate_arithmetic(expr);
+    if (expr->ctype->class == CTC_POINTER)
+        return constexpr_evaluate_address(expr);
+
+    constexpr_t* ce = constexpr_evaluate_integer(expr);
     if (constexpr_evaluation_succeeded(ce)) return ce;
-
     constexpr_delete(ce);
-
-    ce = constexpr_evaluate_integer(expr);
-    if (constexpr_evaluation_succeeded(ce)) return ce;
-
-    constexpr_delete(ce);
-
-    return constexpr_evaluate_address(expr);
+    return constexpr_evaluate_arithmetic(expr);
 }

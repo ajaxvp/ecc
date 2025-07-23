@@ -20,6 +20,7 @@ typedef struct airinizing_syntax_traverser
 void air_data_delete(air_data_t* ad)
 {
     if (!ad) return;
+    vector_deep_delete(ad->addresses, free);
     free(ad->data);
     free(ad);
 }
@@ -78,12 +79,27 @@ void air_data_print(air_data_t* ad, air_t* air, int (*printer)(const char* fmt, 
     long long size = type_size(ad->sy->type);
     if (size == -1)
         report_return;
-    for (long long i = 0; i < size; ++i)
+    for (long long i = 0, j = 0; i < size;)
     {
         if (i % 16 == 0)
             printer("    ");
-        printer("%02X ", ad->data[i]);
-        if ((i + 1) < size && (i + 1) % 16 == 0)
+        if (ad->addresses && j < ad->addresses->size)
+        {
+            init_address_t* ia = vector_get(ad->addresses, j);
+            if (i == ia->data_location)
+            {
+                ++j;
+                if (i % 16 != 0)
+                    printer("\n");
+                printer("&%s + %lld", symbol_get_name(ia->sy), *((int64_t*) (ad->data + ia->data_location)));
+                if (i % 16 != 0)
+                    printer("\n");
+                i += POINTER_WIDTH;
+                continue;
+            }
+        }
+        printer("%02X ", ad->data[i++]);
+        if (i < size && i % 16 == 0)
             printer("\n");
     }
     printer("\n}\n");
@@ -1428,8 +1444,7 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
     if (sd == SD_STATIC)
-        // TODO: support static initializer lists
-        report_return;
+        return;
 
     SETUP_LINEARIZE;
 
@@ -1451,30 +1466,18 @@ static void linearize_static_init_declarator_after(syntax_traverser_t* trav, syn
 {
     air_insn_t* code = *c;
 
+    if (sy->type->class == CTC_FUNCTION ||
+        syntax_has_specifier(syn->parent->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_TYPEDEF))
+        return;
+
     air_data_t* data = calloc(1, sizeof *data);
     data->sy = sy;
     data->readonly = false;
     long long size = type_size(sy->type);
     data->data = calloc(size, sizeof(unsigned char));
-
-    syntax_component_t* init = syn->ideclr_initializer;
-    bool is_scalar = type_is_scalar(sy->type);
-    bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
-
-    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
-    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
-    type_delete(wct);
-
-    if (init->type == SC_INITIALIZER_LIST && (is_scalar || is_char_array || is_wchar_array))
-        init = vector_get(init->inlist_initializers, 0);
-
-    if (init->type == SC_INITIALIZER_LIST)
-        return;
-    
-    // constexpr_t* ce = constexpr_evaluate_integer(init);
-    // if (!constexpr_evaluation_succeeded(ce)) report_return;
-
-    // in progress...
+    if (sy->data)
+        memcpy(data->data, sy->data, size);
+    data->addresses = vector_deep_copy(sy->addresses, (void* (*)(void*)) init_address_copy);
 
     vector_add(AIRINIZING_TRAVERSER->air->data, data);
 
@@ -1491,20 +1494,20 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     if (!id) report_return;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     if (!sy) report_return;
-    if (!init)
-    {
-        FINALIZE_LINEARIZE;
-        return;
-    }
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
     if (sd == SD_STATIC)
     {
-        report_return;
-        // linearize_static_init_declarator_after(trav, syn, sy, &code);
-        // FINALIZE_LINEARIZE;
-        // return;
+        linearize_static_init_declarator_after(trav, syn, sy, &code);
+        FINALIZE_LINEARIZE;
+        return;
+    }
+
+    if (!init)
+    {
+        FINALIZE_LINEARIZE;
+        return;
     }
 
     bool is_scalar = type_is_scalar(sy->type);
@@ -1829,11 +1832,9 @@ static void linearize_increment_decrement_expression_after(syntax_traverser_t* t
     FINALIZE_LINEARIZE;
 }
 
-static void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
+static void linearize_automatic_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
     SETUP_LINEARIZE;
-    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
     air_insn_t* decl = air_insn_init(AIR_DECLARE, 1);
     decl->ct = type_copy(sy->type);
     decl->ops[0] = air_insn_symbol_operand_init(sy);
@@ -1846,6 +1847,29 @@ static void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_co
     insn->ops[1] = air_insn_symbol_operand_init(sy);
     ADD_CODE(insn);
     FINALIZE_LINEARIZE;
+}
+
+static void linearize_static_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
+    air_data_t* data = calloc(1, sizeof *data);
+    data->sy = sy;
+    data->readonly = false;
+    long long size = type_size(sy->type);
+    data->data = malloc(size);
+    memcpy(data->data, sy->data, size);
+    data->addresses = vector_deep_copy(sy->addresses, (void* (*)(void*)) init_address_copy);
+    vector_add(AIRINIZING_TRAVERSER->air->data, data);
+}
+
+static void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+    if (!sy) report_return;
+    storage_duration_t sd = symbol_get_storage_duration(sy);
+    if (sd == SD_STATIC)
+        linearize_static_compound_literal_after(trav, syn, sy);
+    else if (sd == SD_AUTOMATIC)
+        linearize_automatic_compound_literal_after(trav, syn, sy);
 }
 
 static void linearize_type_name_after(syntax_traverser_t* trav, syntax_component_t* syn)

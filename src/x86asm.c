@@ -19,6 +19,20 @@ bool x86_64_is_sse_register(regid_t reg)
     return reg >= X86R_XMM0 && reg <= X86R_XMM7;
 }
 
+bool x86_symbol_requires_disambiguation(symbol_t* sy)
+{
+    storage_duration_t sd = symbol_get_storage_duration(sy);
+    syntax_component_t* scope = symbol_get_scope(sy);
+    return sd == SD_STATIC && scope_is_block(scope);
+}
+
+void x86_asm_init_address_delete(x86_asm_init_address_t* ia)
+{
+    if (!ia) return;
+    free(ia->label);
+    free(ia);
+}
+
 const char* register_name(regid_t reg, x86_insn_size_t size)
 {
     if (x86_64_is_sse_register(reg))
@@ -120,6 +134,7 @@ void x86_asm_data_delete(x86_asm_data_t* data)
 {
     if (!data) return;
     free(data->data);
+    vector_deep_delete(data->addresses, (deleter_t) x86_asm_init_address_delete);
     free(data->label);
     free(data);
 }
@@ -654,8 +669,23 @@ void x86_write_data(x86_asm_data_t* data, FILE* out)
 {
     fprintf(out, "    .align %lu\n", data->alignment);
     fprintf(out, "%s:\n", data->label);
-    for (size_t i = 0; i < data->length;)
+    for (size_t i = 0, j = 0; i < data->length;)
     {
+        if (data->addresses && j < data->addresses->size)
+        {
+            x86_asm_init_address_t* ia = vector_get(data->addresses, j);
+            if (i == ia->data_location)
+            {
+                ++j;
+                int64_t offset = *((int64_t*) (data->data + ia->data_location));
+                if (offset != 0)
+                    fprintf(out, "    .quad %s%c%lld\n", ia->label, offset < 0 ? '-' : '+', llabs(offset));
+                else
+                    fprintf(out, "    .quad %s\n", ia->label);
+                i += POINTER_WIDTH;
+                continue;
+            }
+        }
         if (i + UNSIGNED_LONG_LONG_INT_WIDTH <= data->length)
             fprintf(out, "    .quad 0x%llX\n", *((unsigned long long*) (data->data + i))), i += UNSIGNED_LONG_LONG_INT_WIDTH;
         else if (i + UNSIGNED_INT_WIDTH <= data->length)
@@ -890,7 +920,17 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
 
             // if it has static storage duration, we use a label
             if (symbol_get_storage_duration(sy) == SD_STATIC)
-                return make_operand_label_ref(symbol_get_name(sy), offset);
+            {
+                if (x86_symbol_requires_disambiguation(sy))
+                {
+                    char* dname = symbol_get_disambiguated_name(sy);
+                    x86_operand_t* op = make_operand_label_ref(dname, offset);
+                    free(dname);
+                    return op;
+                }
+                else
+                    return make_operand_label_ref(symbol_get_name(sy), offset);
+            }
             
             // if it has a stack offset already, use that
             if (sy->stack_offset)
@@ -966,6 +1006,7 @@ x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_routine_t* routine
     switch (aop->type)
     {
         case AOP_REGISTER:
+            insn->op1 = make_operand_ptr_register(aop->content.reg);
             insn->op1 = make_operand_ptr_register(aop->content.reg);
             break;
         case AOP_SYMBOL:
@@ -2107,9 +2148,25 @@ x86_asm_data_t* x86_generate_data(air_data_t* adata, x86_asm_file_t* file)
         report_return_value(NULL);
     data->data = malloc(size);
     memcpy(data->data, adata->data, size);
+    data->addresses = vector_init();
+    if (adata->addresses)
+    {
+        VECTOR_FOR(init_address_t*, ia, adata->addresses)
+        {
+            x86_asm_init_address_t* aia = calloc(1, sizeof *aia);
+            aia->data_location = ia->data_location;
+            if (x86_symbol_requires_disambiguation(ia->sy))
+                aia->label = symbol_get_disambiguated_name(ia->sy);
+            else
+                aia->label = strdup(symbol_get_name(ia->sy));
+            vector_add(data->addresses, aia);
+        }
+    }
     data->length = size;
-    // TODO: something w/ static fields maybe here or earlier idk
-    data->label = strdup(symbol_get_name(adata->sy));
+    if (x86_symbol_requires_disambiguation(adata->sy))
+        data->label = symbol_get_disambiguated_name(adata->sy);
+    else
+        data->label = strdup(symbol_get_name(adata->sy));
     data->readonly = adata->readonly;
     return data;
 }

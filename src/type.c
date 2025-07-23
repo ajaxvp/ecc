@@ -75,7 +75,10 @@ bool type_is_compatible(c_type_t* t1, c_type_t* t2)
     switch (t1->class)
     {
         case CTC_ARRAY:
-            if (t1->array.length_expression != t2->array.length_expression)
+            int64_t len1 = type_get_array_length(t1);
+            int64_t len2 = type_get_array_length(t2);
+            // ISO: 6.7.5.2 (6)
+            if (len1 != -1 && len2 != -1 && len1 != len2)
                 return false;
             break;
         case CTC_STRUCTURE:
@@ -517,6 +520,8 @@ int64_t type_get_array_length(c_type_t* ct)
     if (ct->array.unspecified_size) return -1;
     if (ct->array.length != 0)
         return ct->array.length;
+    if (!ct->array.length_expression)
+        return -1;
     constexpr_t* ce = constexpr_evaluate_integer(ct->array.length_expression);
     if (!constexpr_evaluation_succeeded(ce))
     {

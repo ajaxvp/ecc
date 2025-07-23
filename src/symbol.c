@@ -171,6 +171,15 @@ char* symbol_get_name(symbol_t* sy)
     return syntax_get_identifier_name(sy->declarer);
 }
 
+char* symbol_get_disambiguated_name(symbol_t* sy)
+{
+    char* name = symbol_get_name(sy);
+    size_t length = strlen(name) + 1 + MAX_STRINGIFIED_INTEGER_LENGTH + 1;
+    char* dname = malloc(length);
+    snprintf(dname, length, "%s.%lu", name, sy->disambiguator);
+    return dname;
+}
+
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
 {
     if (!sy)
@@ -218,6 +227,22 @@ void symbol_print(symbol_t* sy, int (*printer)(const char*, ...))
         namespace_print(sy->ns, printer);
     else
         printer("(none)");
+    if (sy->data)
+    {
+        printer(", initial value:");
+        int64_t size = type_size(sy->type);
+        for (int64_t i = 0; i < size; ++i)
+            printer(" %02X", sy->data[i]);
+    }
+    if (sy->addresses)
+    {
+        printer(", initial address data: ");
+        VECTOR_FOR(init_address_t*, ia, sy->addresses)
+        {
+            if (i != 0) printer("; ");
+            printer("&%s + %lld (data + %llu)", symbol_get_name(ia->sy), *((int64_t*) (sy->data + ia->data_location)), ia->data_location);
+        }
+    }
     printer(" }");
 }
 
@@ -226,6 +251,8 @@ void symbol_delete(symbol_t* sy)
     if (!sy) return;
     type_delete(sy->type);
     namespace_delete(sy->ns);
+    vector_deep_delete(sy->addresses, free);
+    free(sy->data);
     free(sy->name);
     free(sy);
 }
@@ -288,11 +315,15 @@ symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy)
     symbol_t* ex = symbol_table_get_internal(t, k, &exi);
     if (ex) // append to the end
     {
+        uint64_t disambiguator = 1;
         symbol_t* last = ex;
-        for (; last->next; last = last->next);
+        for (; last->next; last = last->next, ++disambiguator);
         last->next = sy;
+        sy->disambiguator = disambiguator;
         return sy;
     }
+    else
+        sy->disambiguator = 0;
     unsigned long index = hash(k) % t->capacity;
     for (unsigned long i = index;;)
     {
@@ -473,4 +504,13 @@ void symbol_table_delete(symbol_table_t* t, bool free_contents)
     free(t->key);
     free(t->value);
     free(t);
+}
+
+init_address_t* init_address_copy(init_address_t* addr)
+{
+    if (!addr) return NULL;
+    init_address_t* n = calloc(1, sizeof *n);
+    n->data_location = addr->data_location;
+    n->sy = addr->sy;
+    return n;
 }

@@ -40,10 +40,27 @@
 #define UNSIGNED_SHORT_INT_WIDTH 2
 #define UNSIGNED_INT_WIDTH 4
 #define UNSIGNED_LONG_LONG_INT_WIDTH 8
+#define POINTER_WIDTH 8
 
 #define FLOAT_WIDTH 4
 #define DOUBLE_WIDTH 8
 #define LONG_DOUBLE_WIDTH 12
+
+#define BOOL_MIN (unsigned char) 0x0
+#define CHAR_MIN (signed char) 0x80
+#define SIGNED_CHAR_MIN (signed char) 0x80
+#define UNSIGNED_CHAR_MIN (unsigned char) 0x0
+#define SHORT_INT_MIN (short) 0x8000
+#define UNSIGNED_SHORT_INT_MIN (unsigned short) 0x0
+#define INT_MIN (unsigned short) 0x80000000
+#define UNSIGNED_INT_MIN 0x0U
+#define LONG_INT_MIN (long) 0x8000000000000000L
+#define UNSIGNED_LONG_INT_MIN 0x0UL
+#define LONG_LONG_INT_MIN (long long) 0x8000000000000000LL
+#define UNSIGNED_LONG_LONG_INT_MIN 0x0ULL
+#define FLOAT_MIN 1.17549435082228750796873653722224568e-38F
+#define DOUBLE_MIN (double) 2.22507385850720138309023271733240406e-308L
+#define LONG_DOUBLE_MIN 3.36210314311209350626267781732175260e-4932L
 
 #define BOOL_MAX (unsigned char) 0xff
 #define CHAR_MAX (signed char) 0x7f
@@ -57,6 +74,9 @@
 #define UNSIGNED_LONG_INT_MAX 0xffffffffffffffffUL
 #define LONG_LONG_INT_MAX 0x7fffffffffffffffLL
 #define UNSIGNED_LONG_LONG_INT_MAX 0xffffffffffffffffULL
+#define FLOAT_MAX 3.40282346638528859811704183484516925e+38F
+#define DOUBLE_MAX (double) 1.79769313486231570814527423731704357e+308L
+#define LONG_DOUBLE_MAX 1.18973149535723176502126385303097021e+4932L
 
 #define C_TYPE_SIZE_T CTC_UNSIGNED_LONG_INT
 #define C_TYPE_PTRSIZE_T CTC_LONG_INT
@@ -312,6 +332,18 @@ typedef struct program_options
     char* oflag;
 } program_options_t;
 
+typedef struct init_address
+{
+    symbol_t* sy;
+    uint64_t data_location;
+} init_address_t;
+
+typedef struct x86_asm_init_address
+{
+    char* label;
+    uint64_t data_location;
+} x86_asm_init_address_t;
+
 typedef struct preprocessing_token
 {
     preprocessor_token_type_t type;
@@ -449,14 +481,6 @@ typedef struct vector_t
     unsigned capacity;
     unsigned size;
 } vector_t;
-
-typedef enum constexpr_old_type
-{
-    CEOLD_ANY,
-    CEOLD_INTEGER,
-    CEOLD_ARITHMETIC,
-    CEOLD_ADDRESS
-} constexpr_old_type_t;
 
 typedef struct c_type c_type_t;
 
@@ -681,6 +705,7 @@ typedef struct air_data {
     bool readonly;
     symbol_t* sy;
     unsigned char* data;
+    vector_t* addresses;
 } air_data_t;
 
 typedef struct air_routine {
@@ -863,6 +888,7 @@ typedef struct x86_asm_data
     char* label;
     bool readonly;
     unsigned char* data;
+    vector_t* addresses;
     size_t length;
 } x86_asm_data_t;
 
@@ -1537,25 +1563,6 @@ tag of struct, union, or enum: declared by a SC_TYPE_SPECIFIER
 
 */
 
-typedef struct constexpr_old
-{
-    constexpr_old_type_t type;
-    c_type_t* ct;
-    union
-    {
-        unsigned long long ivalue;
-        long double fvalue;
-        syntax_component_t* addrexpr;
-    };
-} constexpr_old_t;
-
-typedef struct designation
-{
-    constexpr_old_t* index;
-    symbol_t* member;
-    designation_t* next;
-} designation_t;
-
 typedef enum constexpr_type
 {
     CE_INTEGER,
@@ -1585,9 +1592,12 @@ typedef struct symbol_t
     syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
     c_type_t* type;
     c_namespace_t* ns;
+    uint64_t disambiguator; // disambiguating number for symbols in a symbol table which can share the same identifier but not on the assembly level
     long long stack_offset;
     char* name; // explicit name, if needed
     storage_duration_t sd; // explicit storage duration, if needed
+    uint8_t* data; // initializing content for this symbol, if needed
+    vector_t* addresses; // symbol and location information about addresses in the initializing content, if needed
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
 } symbol_t;
 
@@ -1782,6 +1792,7 @@ linkage_t symbol_get_linkage(symbol_t* sy);
 void symbol_print(symbol_t* sy, int (*printer)(const char*, ...));
 void symbol_delete(symbol_t* sy);
 char* symbol_get_name(symbol_t* sy);
+char* symbol_get_disambiguated_name(symbol_t* sy);
 symbol_table_t* symbol_table_init(void);
 symbol_t* symbol_table_add(symbol_table_t* t, char* k, symbol_t* sy);
 symbol_t* symbol_table_get_all(symbol_table_t* t, char* k);
@@ -1792,6 +1803,7 @@ symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id);
 void symbol_table_print(symbol_table_t* t, int (*printer)(const char*, ...));
 void symbol_table_delete(symbol_table_t* t, bool free_contents);
 symbol_t* symbol_table_get_by_classes(symbol_table_t* t, char* k, c_type_class_t ctc, c_namespace_class_t nsc);
+init_address_t* init_address_copy(init_address_t* addr);
 
 /* syntax.c */
 bool syntax_is_declarator_type(syntax_component_type_t type);
