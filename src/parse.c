@@ -893,6 +893,7 @@ syntax_component_t* parse_abstract_declarator(token_t** tokens, parse_request_co
     if (!syn->abdeclr_pointers->size) // no pointers
     {
         syntax_component_t* direct = syn->abdeclr_direct;
+        link_to_specific_parent(direct, parent);
         syn->abdeclr_direct = NULL;
         free_syntax(syn, tlu);
         update_status(FOUND);

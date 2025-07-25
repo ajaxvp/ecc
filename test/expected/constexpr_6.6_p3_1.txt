@@ -1,0 +1,7 @@
+ecc: error: [6:9] in static initialization: assignment operators are disallowed within constant expressions
+ecc: error: [9:9] in static initialization: assignment operators are disallowed within constant expressions
+ecc: error: [10:10] in static initialization: increment operators are disallowed within constant expressions
+ecc: error: [13:9] in static initialization: assignment operators are disallowed within constant expressions
+ecc: error: [14:10] in static initialization: decrement operators are disallowed within constant expressions
+ecc: error: [20:11] in static initialization: function calls are disallowed within constant expressions
+ecc: error: [23:10] in static initialization: the comma operator is disallowed within constant expressions

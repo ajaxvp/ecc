@@ -80,3 +80,8 @@ std
 
 # NFS files
 .nfs*
+
+# Test output files/folders
+test/actual
+test/asm
+test/diff

@@ -1,0 +1,3 @@
+ecc: error: [3:23] in static initialization: addition in constant expression does not fit within its size
+ecc: error: [5:31] in static initialization: subtraction in constant expression does not fit within its size
+ecc: error: [7:23] in static initialization: multiplication in constant expression does not fit within its size

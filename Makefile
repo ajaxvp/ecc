@@ -6,8 +6,8 @@ OBJECTS := $(addprefix build/,$(addsuffix .o,$(basename $(SOURCES))))
 
 default: $(OUT) libecc/libecc.a libc/libc.a
 
-test: $(OUT) libecc/libecc.a libc/libc.a
-	cd test && $(MAKE) && ./test
+test: default
+	cd test && $(MAKE)
 
 clean:
 	cd test && $(MAKE) clean

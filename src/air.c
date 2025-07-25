@@ -426,6 +426,9 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_VA_END:
             TYPE OP(0) EQUALS printer("va_end"); LPAREN OP(1) RPAREN SEMICOLON
             break;
+        case AIR_MEMSET:
+            printer("memset"); LPAREN OP(0) COMMA OP(1) RPAREN SEMICOLON
+            break;
         case AIR_SEQUENCE_POINT:
             printer("<sequence point>");
             break;
@@ -660,6 +663,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_LABEL:
         case AIR_PUSH:
         case AIR_SEQUENCE_POINT:
+        case AIR_MEMSET:
             return false;
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
@@ -722,6 +726,7 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_LABEL:
         case AIR_PUSH:
         case AIR_SEQUENCE_POINT:
+        case AIR_MEMSET:
             return false;
         case AIR_ASSIGN:
         case AIR_DIRECT_ADD:
@@ -1441,6 +1446,23 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
         sy = symbol_table_get_syn_id(SYMBOL_TABLE, enclosing);
     if (!sy) report_return;
 
+    bool is_scalar = type_is_scalar(sy->type);
+    bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
+
+    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
+    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
+    type_delete(wct);
+
+    // singly-nested braces special case is handled during init declarator linearization
+    if (is_scalar || is_char_array || is_wchar_array)
+    {
+        syntax_component_t* init = vector_get(syn->inlist_initializers, 0);
+        SETUP_LINEARIZE;
+        COPY_CODE(init);
+        FINALIZE_LINEARIZE;
+        return;
+    }
+
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
     if (sd == SD_STATIC)
@@ -1454,6 +1476,12 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     loadaddr->ops[0] = air_insn_register_operand_init(la_result);
     loadaddr->ops[1] = air_insn_symbol_operand_init(sy);
     ADD_CODE(loadaddr);
+
+    air_insn_t* ms = air_insn_init(AIR_MEMSET, 2);
+    ms->ct = make_reference_type(sy->type);
+    ms->ops[0] = air_insn_register_operand_init(la_result);
+    ms->ops[1] = air_insn_integer_constant_operand_init(type_size(sy->type));
+    ADD_CODE(ms);
 
     initialize(trav, syn, la_result, 0, &code);
 
@@ -1868,7 +1896,7 @@ static void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_co
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd == SD_STATIC)
         linearize_static_compound_literal_after(trav, syn, sy);
-    else if (sd == SD_AUTOMATIC)
+    else
         linearize_automatic_compound_literal_after(trav, syn, sy);
 }
 
@@ -2830,6 +2858,8 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_TYPE_QUALIFIER] = linearize_no_action_after;
     trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
+    trav->after[SC_ABSTRACT_ARRAY_DECLARATOR] = linearize_no_action_after;
+    trav->after[SC_ABSTRACT_FUNCTION_DECLARATOR] = linearize_no_action_after;
     trav->after[SC_ENUMERATOR] = linearize_no_action_after;
     trav->after[SC_ENUMERATION_CONSTANT] = linearize_no_action_after;
     trav->after[SC_ENUM_SPECIFIER] = linearize_no_action_after;

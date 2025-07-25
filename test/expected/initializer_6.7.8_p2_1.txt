@@ -1,0 +1,3 @@
+ecc: error: [3:18] this initializer and any after it would write outside the object being initialized
+ecc: error: [7:22] this initializer and any after it would write outside the object being initialized
+ecc: error: [9:18] this initializer and any after it would write outside the object being initialized

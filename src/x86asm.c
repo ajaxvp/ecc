@@ -22,8 +22,18 @@ bool x86_64_is_sse_register(regid_t reg)
 bool x86_symbol_requires_disambiguation(symbol_t* sy)
 {
     storage_duration_t sd = symbol_get_storage_duration(sy);
+    if (sd != SD_STATIC)
+        return false;
     syntax_component_t* scope = symbol_get_scope(sy);
-    return sd == SD_STATIC && scope_is_block(scope);
+    if (!scope_is_block(scope))
+        return false;
+    if (!sy->declarer)
+        return true;
+    if (sy->declarer->type == SC_STRING_LITERAL)
+        return false;
+    if (sy->declarer->type == SC_COMPOUND_LITERAL)
+        return false;
+    return true;
 }
 
 void x86_asm_init_address_delete(x86_asm_init_address_t* ia)
@@ -282,6 +292,7 @@ bool x86_insn_uses_suffix(x86_insn_t* insn)
         case X86I_MOVZX:
         case X86I_MOVSX:
         case X86I_STC:
+        case X86I_REP_STOSB:
             return false;
     }
     return true;
@@ -319,6 +330,7 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_TEST:
         case X86I_PTEST:
         case X86I_STC:
+        case X86I_REP_STOSB:
             return 0;
         case X86I_POP:
         case X86I_SETE:
@@ -614,6 +626,10 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_TEST: USUAL_2OP("test")
         case X86I_PTEST: USUAL_2OP("ptest")
+
+        case X86I_REP_STOSB:
+            fprintf(file, INDENT "rep stosb");
+            break;
 
         case X86I_SHL:
             USUAL_START("shl");
@@ -1991,6 +2007,13 @@ x86_insn_t* x86_generate_unsigned2sse(air_insn_t* ainsn, x86_asm_routine_t* rout
     return start;
 }
 
+x86_insn_t* x86_generate_memset(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_REP_STOSB);
+
+    return insn;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -2082,6 +2105,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         case AIR_UI2S: // unsigned integer -> float
         case AIR_UI2D: // unsigned integer -> double
             return x86_generate_unsigned2sse(ainsn, routine, file);
+        
+        case AIR_MEMSET:
+            return x86_generate_memset(ainsn, routine, file);
 
         case AIR_DIRECT_DIVIDE:
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);

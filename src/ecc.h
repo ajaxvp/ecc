@@ -683,7 +683,8 @@ typedef enum air_insn_type {
     AIR_VA_ARG,
     AIR_VA_START,
     AIR_VA_END,
-    AIR_SEQUENCE_POINT
+    AIR_SEQUENCE_POINT,
+    AIR_MEMSET
 } air_insn_type_t;
 
 typedef struct air_insn air_insn_t;
@@ -868,6 +869,8 @@ typedef enum x86_insn_type
     X86I_STC,
 
     X86I_ROR,
+
+    X86I_REP_STOSB,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
@@ -1575,6 +1578,8 @@ typedef struct constexpr
     constexpr_type_t type;
     c_type_t* ct;
     char* error;
+    uint32_t err_row;
+    uint32_t err_col;
     union
     {
         uint8_t* data;

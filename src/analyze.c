@@ -775,7 +775,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
         {
             // ISO: 6.7.8 (2)
             init->initializer_offset = -1;
-            ADD_WARNING(init, "this initializer and any after it would write outside the object being initialized");
+            ADD_ERROR(init, "this initializer and any after it would write outside the object being initialized");
             break;
         }
 
@@ -851,10 +851,29 @@ static int64_t get_initializer_largest_offset(syntax_traverser_t* trav, syntax_c
 // largest offset / size of array element + 1
 static void update_array_declarator_length_expr(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
-    syntax_component_t* adeclr = syn->ideclr_declarator;
-    if (adeclr->adeclr_length_expression)
+    syntax_component_t* adeclr = NULL;
+    syntax_component_t* init = NULL;
+    if (syn->type == SC_INIT_DECLARATOR)
+    {
+        adeclr = syn->ideclr_declarator;
+        init = syn->ideclr_initializer;
+    }
+    else if (syn->type == SC_COMPOUND_LITERAL)
+    {
+        adeclr = syn->cl_type_name->tn_declarator;
+        init = syn->cl_inlist;
+    }
+    else
+        report_return;
+    syntax_component_t** lexpr = NULL;
+    if (adeclr->type == SC_ARRAY_DECLARATOR)
+        lexpr = &adeclr->adeclr_length_expression;
+    else if (adeclr->type == SC_ABSTRACT_ARRAY_DECLARATOR)
+        lexpr = &adeclr->abadeclr_length_expression;
+    else
+        report_return;
+    if (*lexpr)
         return;
-    syntax_component_t* init = syn->ideclr_initializer;
     int64_t length = 0;
     if (init->type == SC_STRING_LITERAL)
         length = init->strl_length->intc;
@@ -870,7 +889,8 @@ static void update_array_declarator_length_expr(syntax_traverser_t* trav, syntax
     intc->intc = length;
     intc->ctype = make_basic_type(C_TYPE_SIZE_T);
     intc->parent = adeclr;
-    adeclr->adeclr_length_expression = sy->type->array.length_expression = intc;
+    *lexpr = intc;
+    sy->type->array.length_expression = intc;
 }
 
 void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, int64_t base)
@@ -914,16 +934,18 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
         }
         else
         {
-            if (get_program_options()->iflag)
-                printf("%s\n", ce->error);
-            constexpr_delete(ce);
             // ISO: 6.7.8 (4)
-            ADD_ERROR(syn, "initializer for object with static storage duration must be constant");
+            ADD_ERROR(syn, "in static initialization: %s", ce->error);
+            constexpr_delete(ce);
         }
         return;
     }
     VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
+    {
+        if (init->initializer_offset == -1)
+            continue;
         analyze_static_initializer_after(trav, init, sy, base + init->initializer_offset);
+    }
 }
 
 void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
@@ -962,7 +984,7 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
         sy->data = calloc(type_size(ct), sizeof(uint8_t));
         analyze_static_initializer_after(trav, syn->cl_inlist, sy, 0);
     }
-    else
+    else if (sd == SD_AUTOMATIC)
         analyze_automatic_initializer_after(trav, syn->cl_inlist, sy);
 
     if (pass)

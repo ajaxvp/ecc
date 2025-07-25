@@ -4,7 +4,7 @@
 #include "ecc.h"
 
 #define SYMBOL_TABLE (syntax_get_translation_unit(expr)->tlu_st)
-#define SET_ERROR(syn, fmt, ...) (ce->error = malloc(MAX_ERROR_LENGTH), snerrorf(ce->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt, syn->row, syn->col, ## __VA_ARGS__))
+#define SET_ERROR(syn, fmt, ...) (free(ce->error), ce->error = NULL, ce->error = malloc(MAX_ERROR_LENGTH), ce->err_row = (syn)->row, ce->err_col = (syn)->col, snprintf(ce->error, MAX_ERROR_LENGTH, fmt, ## __VA_ARGS__))
 
 void constexpr_delete(constexpr_t* ce)
 {
@@ -29,7 +29,11 @@ constexpr_t* constexpr_copy(constexpr_t* ce)
     n->type = ce->type;
     n->ct = type_copy(ce->ct);
     if (ce->error)
+    {
         n->error = strdup(ce->error);
+        n->err_row = ce->err_row;
+        n->err_col = ce->err_col;
+    }
     switch (n->type)
     {
         case CE_INTEGER:
@@ -300,6 +304,7 @@ void constexpr_convert(constexpr_t* ce, c_type_t* to)
     convert(unsigned long long, unsigned char, CTC_UNSIGNED_LONG_LONG_INT, CTC_UNSIGNED_CHAR);
 
     // unsigned long -> smaller integer or same
+    convert(unsigned long, long long, CTC_UNSIGNED_LONG_INT, CTC_LONG_LONG_INT);
     convert(unsigned long, long, CTC_UNSIGNED_LONG_INT, CTC_LONG_INT);
     convert(unsigned long, int, CTC_UNSIGNED_LONG_INT, CTC_INT);
     convert(unsigned long, short, CTC_UNSIGNED_LONG_INT, CTC_SHORT_INT);
@@ -1818,6 +1823,39 @@ static void evaluate(syntax_component_t* expr, constexpr_t* ce)
         case SC_FLOATING_CONSTANT: evaluate_floating_constant(expr, ce); break;
         case SC_STRING_LITERAL: evaluate_string_literal(expr, ce); break;
         case SC_COMPOUND_LITERAL: evaluate_compound_literal(expr, ce); break;
+        
+        case SC_ASSIGNMENT_EXPRESSION:
+        case SC_MULTIPLICATION_ASSIGNMENT_EXPRESSION:
+        case SC_DIVISION_ASSIGNMENT_EXPRESSION:
+        case SC_MODULAR_ASSIGNMENT_EXPRESSION:
+        case SC_ADDITION_ASSIGNMENT_EXPRESSION:
+        case SC_SUBTRACTION_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_LEFT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_RIGHT_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
+        case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
+            SET_ERROR(expr, "assignment operators are disallowed within constant expressions");
+            break;
+        
+        case SC_PREFIX_INCREMENT_EXPRESSION:
+        case SC_POSTFIX_INCREMENT_EXPRESSION:
+            SET_ERROR(expr, "increment operators are disallowed within constant expressions");
+            break;
+    
+        case SC_PREFIX_DECREMENT_EXPRESSION:
+        case SC_POSTFIX_DECREMENT_EXPRESSION:
+            SET_ERROR(expr, "decrement operators are disallowed within constant expressions");
+            break;
+        
+        case SC_FUNCTION_CALL_EXPRESSION:
+            SET_ERROR(expr, "function calls are disallowed within constant expressions");
+            break;
+
+        case SC_EXPRESSION:
+            SET_ERROR(expr, "the comma operator is disallowed within constant expressions");
+            break;
+
         default: break;
     }
 }
