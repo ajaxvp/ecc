@@ -187,7 +187,7 @@ x86_asm_file_t* compile_object(char* filename)
 
     if (opts.iflag)
     {
-        printf("<<typed syntax tree>>\n");
+        printf("<<semantically-analyzed syntax tree>>\n");
         print_syntax(tlu, printf);
 
         printf("<<symbol table>>\n");
@@ -396,6 +396,9 @@ char* linker(char** object_files, size_t object_count, char* target)
         errorf("failed to execute linker\n");
         return NULL;
     }
+
+    for (size_t i = 0; i < object_count; ++i)
+        remove(object_files[i]);
     return exec_filepath;
 }
 

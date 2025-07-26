@@ -77,8 +77,276 @@ void dump_errors(analysis_error_t* errors)
 #define ADD_ERROR(syn, fmt, ...) ADD_ERROR_TO_TRAVERSER(ANALYSIS_TRAVERSER, syn, fmt, ## __VA_ARGS__ )
 #define ADD_WARNING(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
 
-// you should assign this to a variable if you plan on using it a lot.
 #define SYMBOL_TABLE (trav->tlu->tlu_st)
+
+static long long get_aggregate_type_element_count(c_type_t* ct)
+{
+    if (!ct) return -1;
+    if (ct->class == CTC_UNION) return 1;
+    if (ct->class == CTC_STRUCTURE)
+        return ct->struct_union.member_types->size;
+    if (ct->class == CTC_ARRAY)
+        return type_get_array_length(ct);
+    return 0;
+}
+
+// adds semantics to initializers in an initializer list for how and where to initialize its elements
+static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_component_t* syn, c_type_t* ct)
+{
+    if (syn->inlist_has_semantics)
+        return;
+    syn->inlist_has_semantics = true;
+
+    vector_t* cot_stack = vector_init();
+    vector_t* coei_stack = vector_init();
+
+    vector_add(cot_stack, ct);
+    vector_add(coei_stack, (void*) 0);
+
+    int64_t offset = 0;
+
+    for (unsigned i = 0; i < syn->inlist_initializers->size; ++i)
+    {
+        syntax_component_t* desig = vector_get(syn->inlist_designations, i);
+        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
+
+        if (desig)
+        {
+            offset = 0;
+            vector_delete(cot_stack);
+            vector_delete(coei_stack);
+            cot_stack = vector_init();
+            coei_stack = vector_init();
+            c_type_t* nav = ct;
+            VECTOR_FOR(syntax_component_t*, desigr, desig->desig_designators)
+            {
+                vector_add(cot_stack, nav);
+                if (desigr->type == SC_IDENTIFIER)
+                {
+                    if (nav->class != CTC_STRUCTURE && nav->class != CTC_UNION)
+                    {
+                        // ISO: 6.7.8 (7)
+                        ADD_ERROR(desigr, "struct initialization designators may not be used to initialize non-struct and non-union types");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    long long midx = -1;
+                    type_get_struct_union_member_info(nav, desigr->id, &midx, &offset);
+                    if (midx == -1)
+                    {
+                        // ISO: 6.7.8 (7)
+                        ADD_ERROR(desigr, "struct initialization designators must specify a valid member of the struct or union it is initializing");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    vector_add(coei_stack, (void*) midx);
+                    nav = vector_get(nav->struct_union.member_types, midx);
+                }
+                else
+                {
+                    if (nav->class != CTC_ARRAY)
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators may not be used to initialize non-array types");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    constexpr_t* ce = constexpr_evaluate_integer(desigr);
+                    if (!constexpr_evaluation_succeeded(ce))
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators must have a constant expression for its index");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        constexpr_delete(ce);
+                        return;
+                    }
+                    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+                    int64_t value = constexpr_as_i64(ce);
+                    if (value < 0)
+                    {
+                        // ISO: 6.7.8 (6)
+                        ADD_ERROR(desigr, "array initialization designators must have a non-negative index");
+                        vector_delete(cot_stack);
+                        vector_delete(coei_stack);
+                        return;
+                    }
+                    vector_add(coei_stack, (void*) value);
+                    offset += type_size(nav->derived_from) * value;
+                    constexpr_delete(ce);
+                    nav = nav->derived_from;
+                }
+            }
+        }
+
+        c_type_t* cot = vector_peek(cot_stack);
+
+        if (!cot)
+        {
+            // ISO: 6.7.8 (2)
+            init->initializer_offset = -1;
+            ADD_ERROR(init, "this initializer and any after it would write outside the object being initialized");
+            break;
+        }
+
+        // current element index
+        size_t ei = (size_t) vector_peek(coei_stack);
+        // current element type
+        c_type_t* et = cot->class == CTC_ARRAY ? cot->derived_from : vector_get(cot->struct_union.member_types, ei);
+
+        bool is_scalar = type_is_scalar(et);
+        bool is_char_array = et->class == CTC_ARRAY && type_is_character(et->derived_from);
+
+        c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
+        bool is_wchar_array = et->class == CTC_ARRAY && type_is_compatible(et, wct);
+        type_delete(wct);
+
+        long long alignment = type_alignment(et);
+        offset += (alignment - (offset % alignment)) % alignment;
+
+        init->initializer_offset = offset;
+
+        // scalar initializers can be enclosed in braces
+        if (init->type == SC_INITIALIZER_LIST && is_scalar)
+            init = vector_get(init->inlist_initializers, 0);
+
+        // character array initializers can be enclosed in braces if it is a string literal
+        if (init->type == SC_INITIALIZER_LIST && is_char_array)
+        {
+            syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
+            if (init->inlist_initializers->size == 1 && inner->type == SC_STRING_LITERAL && inner->strl_reg)
+                init = inner;
+        }
+
+        // wide character array initializers can be enclosed in braces if it is a wide string literal
+        if (init->type == SC_INITIALIZER_LIST && is_wchar_array)
+        {
+            syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
+            if (init->inlist_initializers->size == 1 && inner->type == SC_STRING_LITERAL && inner->strl_wide)
+                init = inner;
+        }
+
+        init->initializer_offset = offset;
+
+        // like: { { ... } }
+        if (init->type == SC_INITIALIZER_LIST)
+            add_initializer_list_semantics(trav, init, et);
+
+        // like: { ... }
+        else
+        {
+            while (et->class == CTC_STRUCTURE || et->class == CTC_UNION || et->class == CTC_ARRAY)
+            {
+                // can start initializing an array of character type with a string literal
+                if (et->class == CTC_ARRAY &&
+                    type_is_character(et->derived_from) &&
+                    init->type == SC_STRING_LITERAL &&
+                    init->strl_reg)
+                    break;
+                
+                // can start initializing an array with compatible element type of wchar_t with a wide string literal
+                c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
+                if (et->class == CTC_ARRAY &&
+                    type_is_compatible(et->derived_from, wct) &&
+                    init->type == SC_STRING_LITERAL &&
+                    init->strl_wide)
+                {
+                    type_delete(wct);
+                    break;
+                }
+                type_delete(wct);
+
+                vector_add(cot_stack, et);
+                vector_add(coei_stack, (void*) ei);
+                ei = 0;
+                cot = et;
+                et = et->class == CTC_ARRAY ? et->derived_from : vector_get(et->struct_union.member_types, ei);
+            }
+            init->initializer_ctype = type_copy(et);
+        }
+
+        offset += type_size(et);
+
+        for (;;)
+        {
+            ++ei;
+            vector_pop(coei_stack);
+            vector_add(coei_stack, (void*) ei);
+            long long count = get_aggregate_type_element_count(cot);
+            // incomplete array type prob, let it keep going till the initializer list is ova
+            if (count == -1)
+                break;
+            if (ei >= count)
+            {
+                vector_pop(cot_stack);
+                vector_pop(coei_stack);
+                cot = vector_peek(cot_stack);
+                ei = (size_t) vector_peek(coei_stack);
+            }
+            else 
+                break;
+        }
+    }
+
+    vector_delete(cot_stack);
+    vector_delete(coei_stack);
+}
+
+static bool string_literal_initializes_array(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!syn) return false;
+    if (syn->type != SC_STRING_LITERAL) return false;
+    if (syn->parent->type != SC_INIT_DECLARATOR && (syn->parent->type != SC_INITIALIZER_LIST || syn->parent->parent->type != SC_INIT_DECLARATOR))
+        return false;
+    syntax_component_t* ideclr = syn->parent;
+    unsigned inits = 1;
+    if (ideclr->type == SC_INITIALIZER_LIST)
+    {
+        inits = ideclr->inlist_initializers->size;
+        ideclr = ideclr->parent;
+    }
+
+    syntax_component_t* id = syntax_get_declarator_identifier(ideclr);
+    if (!id) report_return_value(NULL);
+    symbol_t* isy = symbol_table_get_syn_id(syntax_get_translation_unit(syn)->tlu_st, id);
+    if (!isy) report_return_value(NULL);
+
+    if (isy->type->class == CTC_ARRAY && inits == 1 && type_is_scalar(isy->type->derived_from))
+        return true;
+    
+    if (ideclr->ideclr_initializer->type != SC_INITIALIZER_LIST)
+        report_return_value(false);
+
+    add_initializer_list_semantics(trav, ideclr->ideclr_initializer, isy->type);
+
+    if (!syn->initializer_ctype)
+        report_return_value(false);
+
+    return syn->initializer_ctype->class == CTC_ARRAY && type_is_scalar(syn->initializer_ctype->derived_from);
+}
+
+static c_type_t* expression_type_copy(c_type_t* ct, syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!syn || !syn->parent) return type_copy(ct);
+    if (!ct) return NULL;
+    bool array_unconverted = syn->parent->type == SC_SIZEOF_EXPRESSION || syn->parent->type == SC_SIZEOF_TYPE_EXPRESSION ||
+        syn->parent->type == SC_REFERENCE_EXPRESSION || string_literal_initializes_array(trav, syn);
+    bool function_unconverted = syn->parent->type == SC_SIZEOF_EXPRESSION || syn->parent->type == SC_SIZEOF_TYPE_EXPRESSION ||
+        syn->parent->type == SC_REFERENCE_EXPRESSION;
+    if (ct->class == CTC_ARRAY && !array_unconverted)
+        return make_reference_type(ct);
+    else if (ct->class == CTC_FUNCTION && !function_unconverted)
+    {
+        c_type_t* ptr = make_basic_type(CTC_POINTER);
+        ptr->derived_from = type_copy(ct);
+        return ptr;
+    }
+    else
+        return type_copy(ct);
+}
 
 static bool syntax_is_null_ptr_constant(syntax_component_t* expr, c_type_class_t* class)
 {
@@ -336,7 +604,7 @@ void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_compone
 
     if (pass)
         // ISO: 6.5.2.1 (1)
-        syn->ctype = type_copy(array->ctype->derived_from);
+        syn->ctype = expression_type_copy(array->ctype->derived_from, trav, syn);
     else
         syn->ctype = make_basic_type(CTC_ERROR);
 }
@@ -589,7 +857,7 @@ void analyze_dereference_member_expression_after(syntax_traverser_t* trav, synta
     if (pass)
     {
         // ISO: 6.5.2.3 (4)
-        c_type_t* rt = type_copy(vector_get(tlhs->derived_from->struct_union.member_types, mem_idx));
+        c_type_t* rt = expression_type_copy(vector_get(tlhs->derived_from->struct_union.member_types, mem_idx), trav, syn);
         rt->qualifiers = rt->qualifiers | tlhs->derived_from->qualifiers;
         syn->ctype = rt;
     }
@@ -619,7 +887,7 @@ void analyze_member_expression_after(syntax_traverser_t* trav, syntax_component_
     if (pass)
     {
         // ISO: 6.5.2.3 (3)
-        c_type_t* rt = type_copy(vector_get(tlhs->struct_union.member_types, mem_idx));
+        c_type_t* rt = expression_type_copy(vector_get(tlhs->struct_union.member_types, mem_idx), trav, syn);
         rt->qualifiers = rt->qualifiers | tlhs->qualifiers;
         syn->ctype = rt;
     }
@@ -636,7 +904,7 @@ void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax
     symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
-    syn->ctype = type_copy(sy->type);
+    syn->ctype = expression_type_copy(sy->type, trav, syn);
     free(name);
 }
 
@@ -650,259 +918,40 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     sy->type = type_copy(syn->ctype);
     type_delete(syn->ctype);
-    bool unconverted = syn->parent->type == SC_SIZEOF_EXPRESSION || syn->parent->type == SC_SIZEOF_TYPE_EXPRESSION ||
-        syn->parent->type == SC_REFERENCE_EXPRESSION;
-    if (syn->parent->type == SC_INIT_DECLARATOR || (syn->parent->type == SC_INITIALIZER_LIST && syn->parent->parent->type == SC_INIT_DECLARATOR))
-    {
-        syntax_component_t* ideclr = syn->parent;
-        if (ideclr->type == SC_INITIALIZER_LIST)
-            ideclr = ideclr->parent;
-        syntax_component_t* id = syntax_get_declarator_identifier(ideclr);
-        if (!id) report_return;
-        symbol_t* isy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-        if (!isy) report_return;
-        unconverted = isy->type->class == CTC_ARRAY;
-    }
-    if (unconverted)
-        syn->ctype = type_copy(sy->type);
-    else
-        syn->ctype = make_reference_type(sy->type);
+    syn->ctype = expression_type_copy(sy->type, trav, syn);
     free(name);
 }
 
-static long long get_aggregate_type_element_count(c_type_t* ct)
-{
-    if (!ct) return -1;
-    if (ct->class == CTC_UNION) return 1;
-    if (ct->class == CTC_STRUCTURE)
-        return ct->struct_union.member_types->size;
-    if (ct->class == CTC_ARRAY)
-        return type_get_array_length(ct);
-    return 0;
-}
-
-// adds semantics to initializers in an initializer list for how and where to initialize its elements
-static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_component_t* syn, c_type_t* ct)
-{
-    vector_t* cot_stack = vector_init();
-    vector_t* coei_stack = vector_init();
-
-    vector_add(cot_stack, ct);
-    vector_add(coei_stack, (void*) 0);
-
-    int64_t offset = 0;
-
-    for (unsigned i = 0; i < syn->inlist_initializers->size; ++i)
-    {
-        syntax_component_t* desig = vector_get(syn->inlist_designations, i);
-        syntax_component_t* init = vector_get(syn->inlist_initializers, i);
-
-        if (desig)
-        {
-            offset = 0;
-            vector_delete(cot_stack);
-            vector_delete(coei_stack);
-            cot_stack = vector_init();
-            coei_stack = vector_init();
-            c_type_t* nav = ct;
-            VECTOR_FOR(syntax_component_t*, desigr, desig->desig_designators)
-            {
-                vector_add(cot_stack, nav);
-                if (desigr->type == SC_IDENTIFIER)
-                {
-                    if (nav->class != CTC_STRUCTURE && nav->class != CTC_UNION)
-                    {
-                        // ISO: 6.7.8 (7)
-                        ADD_ERROR(desigr, "struct initialization designators may not be used to initialize non-struct and non-union types");
-                        vector_delete(cot_stack);
-                        vector_delete(coei_stack);
-                        return;
-                    }
-                    long long midx = -1;
-                    type_get_struct_union_member_info(nav, desigr->id, &midx, &offset);
-                    if (midx == -1)
-                    {
-                        // ISO: 6.7.8 (7)
-                        ADD_ERROR(desigr, "struct initialization designators must specify a valid member of the struct or union it is initializing");
-                        vector_delete(cot_stack);
-                        vector_delete(coei_stack);
-                        return;
-                    }
-                    vector_add(coei_stack, (void*) midx);
-                    nav = vector_get(nav->struct_union.member_types, midx);
-                }
-                else
-                {
-                    if (nav->class != CTC_ARRAY)
-                    {
-                        // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators may not be used to initialize non-array types");
-                        vector_delete(cot_stack);
-                        vector_delete(coei_stack);
-                        return;
-                    }
-                    constexpr_t* ce = constexpr_evaluate_integer(desigr);
-                    if (!constexpr_evaluation_succeeded(ce))
-                    {
-                        // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators must have a constant expression for its index");
-                        vector_delete(cot_stack);
-                        vector_delete(coei_stack);
-                        constexpr_delete(ce);
-                        return;
-                    }
-                    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
-                    int64_t value = constexpr_as_i64(ce);
-                    if (value < 0)
-                    {
-                        // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators must have a non-negative index");
-                        vector_delete(cot_stack);
-                        vector_delete(coei_stack);
-                        return;
-                    }
-                    vector_add(coei_stack, (void*) value);
-                    offset += type_size(nav->derived_from) * value;
-                    constexpr_delete(ce);
-                    nav = nav->derived_from;
-                }
-            }
-        }
-
-        c_type_t* cot = vector_peek(cot_stack);
-
-        if (!cot)
-        {
-            // ISO: 6.7.8 (2)
-            init->initializer_offset = -1;
-            ADD_ERROR(init, "this initializer and any after it would write outside the object being initialized");
-            break;
-        }
-
-        // current element index
-        size_t ei = (size_t) vector_peek(coei_stack);
-        // current element type
-        c_type_t* et = cot->class == CTC_ARRAY ? cot->derived_from : vector_get(cot->struct_union.member_types, ei);
-
-        long long alignment = type_alignment(et);
-        offset += (alignment - (offset % alignment)) % alignment;
-
-        init->initializer_offset = offset;
-
-        // like: { { ... } }
-        if (init->type == SC_INITIALIZER_LIST)
-            add_initializer_list_semantics(trav, init, et);
-
-        // like: { ... }
-        else
-        {
-            while (et->class == CTC_STRUCTURE || et->class == CTC_UNION || et->class == CTC_ARRAY)
-            {
-                vector_add(cot_stack, et);
-                vector_add(coei_stack, (void*) ei);
-                ei = 0;
-                cot = et;
-                et = et->class == CTC_ARRAY ? et->derived_from : vector_get(et->struct_union.member_types, ei);
-            }
-            init->initializer_ctype = type_copy(et);
-        }
-
-        offset += type_size(et);
-
-        for (;;)
-        {
-            ++ei;
-            vector_pop(coei_stack);
-            vector_add(coei_stack, (void*) ei);
-            long long count = get_aggregate_type_element_count(cot);
-            // incomplete array type prob, let it keep going till the initializer list is ova
-            if (count == -1)
-                break;
-            if (ei >= count)
-            {
-                vector_pop(cot_stack);
-                vector_pop(coei_stack);
-                cot = vector_peek(cot_stack);
-                ei = (size_t) vector_peek(coei_stack);
-            }
-            else 
-                break;
-        }
-    }
-
-    vector_delete(cot_stack);
-    vector_delete(coei_stack);
-}
-
-static int64_t get_initializer_largest_offset(syntax_traverser_t* trav, syntax_component_t* syn, int64_t base)
+static int64_t get_initializer_largest_offset(syntax_component_t* syn, int64_t base)
 {
     if (syntax_is_expression_type(syn->type))
         return base;
     int64_t largest = base;
     VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
     {
-        int64_t sublargest = get_initializer_largest_offset(trav, init, base + init->initializer_offset);
+        int64_t sublargest = get_initializer_largest_offset(init, base + init->initializer_offset);
         if (sublargest > largest)
             largest = sublargest;
     }
     return largest;
 }
 
-// largest offset / size of array element + 1
-static void update_array_declarator_length_expr(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+static int64_t get_array_length_from_initializer(syntax_component_t* syn, symbol_t* sy)
 {
-    syntax_component_t* adeclr = NULL;
-    syntax_component_t* init = NULL;
-    if (syn->type == SC_INIT_DECLARATOR)
-    {
-        adeclr = syn->ideclr_declarator;
-        init = syn->ideclr_initializer;
-    }
-    else if (syn->type == SC_COMPOUND_LITERAL)
-    {
-        adeclr = syn->cl_type_name->tn_declarator;
-        init = syn->cl_inlist;
-    }
-    else
-        report_return;
-    syntax_component_t** lexpr = NULL;
-    if (adeclr->type == SC_ARRAY_DECLARATOR)
-        lexpr = &adeclr->adeclr_length_expression;
-    else if (adeclr->type == SC_ABSTRACT_ARRAY_DECLARATOR)
-        lexpr = &adeclr->abadeclr_length_expression;
-    else
-        report_return;
-    if (*lexpr)
-        return;
-    int64_t length = 0;
-    if (init->type == SC_STRING_LITERAL)
-        length = init->strl_length->intc;
-    else
-    {
-        int64_t offset = get_initializer_largest_offset(trav, init, 0);
-        length = offset / type_size(sy->type->derived_from) + 1;
-    }
-    syntax_component_t* intc = calloc(1, sizeof *intc);
-    intc->type = SC_INTEGER_CONSTANT;
-    intc->row = adeclr->row;
-    intc->col = adeclr->col;
-    intc->intc = length;
-    intc->ctype = make_basic_type(C_TYPE_SIZE_T);
-    intc->parent = adeclr;
-    *lexpr = intc;
-    sy->type->array.length_expression = intc;
+    int64_t offset = get_initializer_largest_offset(syn, 0);
+    return offset / type_size(sy->type->derived_from) + 1;
 }
 
 void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, int64_t base)
 {
-    if (syn->type == SC_STRING_LITERAL && sy->type->class == CTC_ARRAY)
+    if (string_literal_initializes_array(trav, syn))
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
         if (!strsy) report_return;
         if (syn->strl_reg)
-            memcpy(sy->data, syn->strl_reg, type_size(strsy->type));
+            memcpy(sy->data + base, syn->strl_reg, type_size(strsy->type));
         else if (syn->strl_wide)
-            memcpy(sy->data, syn->strl_wide, type_size(strsy->type));
+            memcpy(sy->data + base, syn->strl_wide, type_size(strsy->type));
         return;
     }
     if (syn->type != SC_INITIALIZER_LIST)
@@ -969,7 +1018,7 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
 
 void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
-    if (syn->type == SC_STRING_LITERAL && sy->type->class == CTC_ARRAY && !sy->type->array.length_expression)
+    if (string_literal_initializes_array(trav, syn) && !sy->type->array.length_expression)
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
         if (!strsy) report_return;
@@ -980,21 +1029,20 @@ void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_compon
 void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     bool pass = true;
-    c_type_t* ct = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
+    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
+    if (!sy) report_return;
+    c_type_t* ct = sy->type;
     if (!type_is_object_type(ct) && (ct->class != CTC_ARRAY || ct->array.length_expression || type_is_vla(ct)))
     {
         // ISO: 6.5.2.5 (1)
         ADD_ERROR(syn, "compound literals may not have a variable-length array type");
         pass = false;
     }
-    
-    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
 
     if (syn->cl_inlist->type == SC_INITIALIZER_LIST)
         add_initializer_list_semantics(trav, syn->cl_inlist, sy->type);
-    if (ct->class == CTC_ARRAY)
-        update_array_declarator_length_expr(trav, syn, sy);
+    if (ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
+        ct->array.length = get_array_length_from_initializer(syn->cl_inlist, sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
@@ -1006,12 +1054,10 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
     else if (sd == SD_AUTOMATIC)
         analyze_automatic_initializer_after(trav, syn->cl_inlist, sy);
 
-    if (pass)
-        syn->ctype = ct;
-    else
+    if (!pass)
     {
+        type_delete(syn->ctype);
         syn->ctype = make_basic_type(CTC_ERROR);
-        type_delete(ct);
     }
 }
 
@@ -1030,7 +1076,7 @@ void analyze_inc_dec_expression_after(syntax_traverser_t* trav, syntax_component
     }
     if (pass)
         // ISO: 6.5.2.4 (2), 6.5.3.1 (2)
-        syn->ctype = type_copy(otype);
+        syn->ctype = expression_type_copy(otype, trav, syn);
     else
     {
         ADD_ERROR(syn, "invalid operand to increment/decrement operator");
@@ -1050,7 +1096,7 @@ void analyze_dereference_expression_after(syntax_traverser_t* trav, syntax_compo
     }
     if (pass)
         // ISO: 6.5.3.2 (4)
-        syn->ctype = type_copy(otype->derived_from);
+        syn->ctype = expression_type_copy(otype->derived_from, trav, syn);
     else
         syn->ctype = make_basic_type(CTC_ERROR);
 }
@@ -1849,28 +1895,7 @@ void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_compo
 {
     if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
         syn->type = SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT;
-    syn->ctype = type_copy(sy->type);
-    if (sy->type->class == CTC_ARRAY && syn->parent &&
-        syn->parent->type != SC_REFERENCE_EXPRESSION &&
-        syn->parent->type != SC_SIZEOF_EXPRESSION &&
-        syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
-    {
-        // ISO: 6.3.2 (3)
-        type_delete(syn->ctype);
-        c_type_t* ptr_type = make_basic_type(CTC_POINTER);
-        ptr_type->derived_from = type_copy(sy->type->derived_from);
-        syn->ctype = ptr_type;
-    }
-    if (sy->type->class == CTC_FUNCTION && syn->parent &&
-        syn->parent->type != SC_REFERENCE_EXPRESSION &&
-        syn->parent->type != SC_SIZEOF_EXPRESSION &&
-        syn->parent->type != SC_SIZEOF_TYPE_EXPRESSION)
-    {
-        // ISO: 6.3.2 (4)
-        c_type_t* ptr_type = make_basic_type(CTC_POINTER);
-        ptr_type->derived_from = syn->ctype;
-        syn->ctype = ptr_type;
-    }
+    syn->ctype = expression_type_copy(sy->type, trav, syn);
 }
 
 void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2288,7 +2313,6 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
 
 void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    syntax_component_t* declr = syn->ideclr_declarator;
     syntax_component_t* init = syn->ideclr_initializer;
     if (!init) return;
     syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
@@ -2330,8 +2354,9 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     if (init->type == SC_INITIALIZER_LIST)
         add_initializer_list_semantics(trav, init, sy->type);
     
-    if (declr->type == SC_ARRAY_DECLARATOR)
-        update_array_declarator_length_expr(trav, syn, sy);
+    c_type_t* ct = sy->type;
+    if (ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
+        ct->array.length = get_array_length_from_initializer(init, sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd == SD_STATIC)

@@ -52,4 +52,5 @@ done
 
 ratio=$(echo "scale=2; $passed / $count * 100" | bc)
 
-printf "passed %d/%d test(s) (%.1f%%)\n" "$passed" "$count" "$ratio"
+[[ $count -eq 1 ]] && c="" || c="s"
+printf "passed %d/%d test%s (%.1f%%)\n" "$passed" "$count" "$c" "$ratio"

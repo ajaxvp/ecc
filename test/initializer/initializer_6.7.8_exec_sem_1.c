@@ -1,4 +1,4 @@
-/* ISO: 6.7.8; semantics tests */
+/* ISO: 6.7.8; automatic semantics tests */
 
 #include "../test.h"
 

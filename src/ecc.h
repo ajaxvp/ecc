@@ -1410,6 +1410,7 @@ typedef struct syntax_component_t
         {
             vector_t* inlist_designations; // <syntax_component_t> (SC_DESIGNATION)
             vector_t* inlist_initializers; // <syntax_component_t> (SC_INITIALIZER)
+            bool inlist_has_semantics;
         };
 
         // SC_DESIGNATION - desig

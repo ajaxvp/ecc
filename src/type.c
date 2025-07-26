@@ -372,7 +372,7 @@ int get_integer_conversion_rank(c_type_t* ct)
 bool type_is_complete(c_type_t* ct)
 {
     if (!ct) return false;
-    if (ct->class == CTC_ARRAY && !ct->array.length_expression)
+    if (ct->class == CTC_ARRAY && type_get_array_length(ct) == -1)
         return false;
     if (ct->class == CTC_VOID)
         return false;
