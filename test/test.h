@@ -7,4 +7,6 @@
 
 #define ASSERT_EQUALS(x, y) if ((x) != (y)) { puts("'" #x "' should equal '" #y "'\n"); }
 
+#define ASSERT_NOT_EQUALS(x, y) if ((x) == (y)) { puts("'" #x "' should not equal '" #y "'\n"); }
+
 #endif

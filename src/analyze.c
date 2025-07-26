@@ -1018,11 +1018,11 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
 
 void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
-    if (string_literal_initializes_array(trav, syn) && !sy->type->array.length_expression)
+    if (string_literal_initializes_array(trav, syn) && type_get_array_length(sy->type) == -1)
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
         if (!strsy) report_return;
-        sy->type->array.length_expression = strsy->type->array.length_expression;
+        sy->type->array.length = type_get_array_length(strsy->type);
     }
 }
 
@@ -2355,7 +2355,7 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
         add_initializer_list_semantics(trav, init, sy->type);
     
     c_type_t* ct = sy->type;
-    if (ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
+    if (init->type == SC_INITIALIZER_LIST && ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
         ct->array.length = get_array_length_from_initializer(init, sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);

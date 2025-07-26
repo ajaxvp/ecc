@@ -1505,6 +1505,30 @@ void localize_x86_64_memset(air_insn_t* insn, air_routine_t* routine, air_t* air
     insn->ops[1] = air_insn_register_operand_init(X86R_RCX);
 }
 
+void localize_x86_64_assign_imm64_to_m64(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    air_insn_operand_t* op2 = insn->ops[1];
+
+    if (op2->type != AOP_INTEGER_CONSTANT) return;
+    if (type_size(insn->ct) != UNSIGNED_LONG_LONG_INT_WIDTH) return;
+
+    regid_t reg = NEXT_VIRTUAL_REGISTER;
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(reg);
+    ld->ops[1] = air_insn_operand_copy(op2);
+    air_insn_insert_before(ld, insn);
+
+    air_insn_operand_delete(op2);
+    insn->ops[1] = air_insn_register_operand_init(reg);
+}
+
+void localize_x86_64_assign(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    localize_x86_64_assign_imm64_to_m64(insn, routine, air);
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1561,6 +1585,9 @@ void localize_x86_64(air_t* air)
                     break;
                 case AIR_MEMSET:
                     localize_x86_64_memset(insn, routine, air);
+                    break;
+                case AIR_ASSIGN:
+                    localize_x86_64_assign(insn, routine, air);
                     break;
                 default:
                     break;
