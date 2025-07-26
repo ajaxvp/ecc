@@ -91,7 +91,10 @@ void air_data_print(air_data_t* ad, air_t* air, int (*printer)(const char* fmt, 
                 ++j;
                 if (i % 16 != 0)
                     printer("\n");
-                printer("&%s + %lld", symbol_get_name(ia->sy), *((int64_t*) (ad->data + ia->data_location)));
+                if (ia->sy)
+                    printer("&%s + %lld", symbol_get_name(ia->sy), *((int64_t*) (ad->data + ia->data_location)));
+                else
+                    printer("0x%llX", *((int64_t*) (ad->data + ia->data_location)));
                 if (i % 16 != 0)
                     printer("\n");
                 i += POINTER_WIDTH;
@@ -429,6 +432,9 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_MEMSET:
             printer("memset"); LPAREN OP(0) COMMA OP(1) RPAREN SEMICOLON
             break;
+        case AIR_BLIP:
+            printer("blip "); OP(0) SEMICOLON
+            break;
         case AIR_SEQUENCE_POINT:
             printer("<sequence point>");
             break;
@@ -668,6 +674,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_LOAD:
         case AIR_LOAD_ADDR:
         case AIR_DECLARE_REGISTER:
+        case AIR_BLIP:
         case AIR_ADD:
         case AIR_SUBTRACT:
         case AIR_FUNC_CALL:
@@ -718,6 +725,7 @@ bool air_insn_assigns(air_insn_t* insn)
     {
         case AIR_DECLARE:
         case AIR_DECLARE_REGISTER:
+        case AIR_BLIP:
         case AIR_RETURN:
         case AIR_NOP:
         case AIR_JZ:
@@ -1310,7 +1318,7 @@ static void linearize_floating_constant_after(syntax_traverser_t* trav, syntax_c
             break;
         default: report_return;
     }
-    vector_add(air->data, data);
+    vector_add(air->rodata, data);
 
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
@@ -1731,7 +1739,7 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
     vector_add(air->rodata, data);
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD_ADDR, 2);
-    insn->ct = make_reference_type(syn->ctype);
+    insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
     insn->ops[1] = air_insn_symbol_operand_init(data->sy);
     ADD_CODE(insn);
@@ -1818,7 +1826,10 @@ static void linearize_member_expression_after(syntax_traverser_t* trav, syntax_c
     else
     {
         insn = air_insn_init(AIR_LOAD, 2);
-        insn->ct = type_copy(mt);
+        if (mt->class != CTC_ARRAY)
+            insn->ct = type_copy(mt);
+        else
+            insn->ct = make_reference_type(mt);
         insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
         insn->ops[1] = air_insn_indirect_register_operand_init(syn->bexpr_lhs->expr_reg, offset, INVALID_VREGID, 1);
     }
@@ -2129,7 +2140,9 @@ static void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_c
     regid_t lreg = syn->bexpr_lhs->expr_reg;
     regid_t rreg = syn->bexpr_rhs->expr_reg;
     c_type_t* opt = NULL;
-    if (syntax_is_relational_expression_type(syn->type) || syntax_is_equality_expression_type(syn->type))
+    if ((syntax_is_relational_expression_type(syn->type) || syntax_is_equality_expression_type(syn->type)) &&
+        type_is_arithmetic(syn->bexpr_lhs->ctype) &&
+        type_is_arithmetic(syn->bexpr_rhs->ctype))
         opt = usual_arithmetic_conversions_result_type(syn->bexpr_lhs->ctype, syn->bexpr_rhs->ctype);
     else
         opt = type_copy(syn->ctype);

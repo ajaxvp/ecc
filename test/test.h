@@ -5,4 +5,6 @@
 
 #define ASSERT(x, msg) if (!(x)) { puts(msg "\n"); }
 
+#define ASSERT_EQUALS(x, y) if ((x) != (y)) { puts("'" #x "' should equal '" #y "'\n"); }
+
 #endif

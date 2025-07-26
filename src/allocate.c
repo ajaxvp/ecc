@@ -121,7 +121,8 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
         }
         
         uint64_t end_mark = i;
-        find_liveness_end(reg, insn, air, &end_mark);
+        if (insn->type != AIR_BLIP)
+            find_liveness_end(reg, insn, air, &end_mark);
 
         uint64_t start_mark = i + 1;
 
@@ -132,7 +133,7 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
         //     continue;
         // }
 
-        vector_add(info->live_starts, (void*) (start_mark));
+        vector_add(info->live_starts, (void*) start_mark);
         vector_add(info->live_ends, (void*) end_mark);
     }
 }
@@ -258,7 +259,12 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
             // go to the definition of the temporary
             air_insn_t* def = air_insn_find_temporary_definition_from_insn(reg, insn);
             if (!def)
+            {
+                printf("no definition found for the following register: ");
+                regid_print(reg, printf);
+                printf("\n");
                 report_return_value(INVALID_VREGID);
+            }
             // and examine its type
 
             // if it's an integer/pointer type, take next integer register available (skipping ones that were part of the allocation process)
@@ -279,7 +285,12 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
                 return INVALID_VREGID;
             // TODO: complex numbas and maybe other?
             else
+            {
+                printf("for the following assertion: unexpected type: ");
+                type_humanized_print(def->ct, printf);
+                printf("\n");
                 report_return_value(INVALID_VREGID);
+            }
         }
         // if there is
         else

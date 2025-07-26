@@ -18,15 +18,18 @@ do
     touch $expectedfile
 
     ../ecc -S -o $asmfile $filepath &> $actualfile
+    content=$(cat $actualfile)
 
     if [[ "$base" == *"_exec_"* ]]; then
-        objfile=/tmp/$base.o
-        as -o $objfile $asmfile
-        execfile=/tmp/$base
-        ld -o $execfile $objfile ../libc/libc.a ../libecc/libecc.a
-        $($execfile &> $actualfile)
-        rm -rf $execfile
-        rm -rf $objfile
+        if [[ -a "$asmfile" ]]; then 
+            objfile=/tmp/$base.o
+            as -o $objfile $asmfile
+            execfile=/tmp/$base
+            ld -o $execfile $objfile ../libc/libc.a ../libecc/libecc.a
+            $($execfile &> $actualfile)
+            rm -rf $execfile
+            rm -rf $objfile
+        fi
     fi
 
     diff=$(diff $actualfile $expectedfile)
@@ -35,7 +38,11 @@ do
         printf " - %s: pass\n" $filename
         passed=$(($passed + 1))
     else
-        printf " - %s: FAIL\n" $filename
+        if [[ "$content" != "" ]]; then
+            printf " - %s: FAIL, compilation error:\n%s\n" $filename "$content"
+        else
+            printf " - %s: FAIL\n" $filename
+        fi
     fi
     count=$(($count + 1))
 

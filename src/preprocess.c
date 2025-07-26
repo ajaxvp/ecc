@@ -461,7 +461,8 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
                 --plevel;
             }
         }
-        if (!(token = expand(token, state, NULL)))
+
+        if (!(token = expand(token, state, token == start ? &start : NULL)))
             return false;
     }
     *tokens = token;
@@ -490,6 +491,11 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
             continue;
         }
         if (param_name && !streq(seq->identifier, param_name))
+        {
+            seq = seq->next;
+            continue;
+        }
+        if (seq->argument_content)
         {
             seq = seq->next;
             continue;
@@ -536,6 +542,7 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
                 offset += pp_token_normal_snprint(buffer + offset, 4096 - offset, arg, snprintf);
             }
             str->string_literal.value = strdup(buffer);
+            str->argument_content = true;
             free(buffer);
             insert_token_after(str, seq);
             remove_token(seq);
@@ -551,6 +558,7 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
         {
             preprocessing_token_t* token = calloc(1, sizeof *token);
             token->type = PPT_PLACEHOLDER;
+            token->argument_content = true;
             token->row = seq->row;
             token->col = seq->col;
             inserting = insert_token_after(token, inserting);
@@ -558,6 +566,7 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
         else for (preprocessing_token_t* arg = start; arg && arg != end; arg = arg->next)
         {
             preprocessing_token_t* cp = pp_token_copy(arg);
+            cp->argument_content = true;
             cp->row = seq->row;
             cp->col = seq->col;
             inserting = insert_token_after(cp, inserting);
@@ -571,6 +580,7 @@ static bool gather_and_replace(preprocessing_state_t* state, preprocessing_token
             preprocessing_token_t* rhs = prev;
             advance_token_impl(&rhs);
             preprocessing_token_t* merged = merge_tokens(lhs, rhs);
+            merged->argument_content = true;
             advance_token_impl(&merged);
             remove_token(merged);
         }

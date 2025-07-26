@@ -21,6 +21,8 @@ bool x86_64_is_sse_register(regid_t reg)
 
 bool x86_symbol_requires_disambiguation(symbol_t* sy)
 {
+    if (!sy)
+        return false;
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd != SD_STATIC)
         return false;
@@ -32,6 +34,8 @@ bool x86_symbol_requires_disambiguation(symbol_t* sy)
     if (sy->declarer->type == SC_STRING_LITERAL)
         return false;
     if (sy->declarer->type == SC_COMPOUND_LITERAL)
+        return false;
+    if (sy->declarer->type == SC_FLOATING_CONSTANT)
         return false;
     return true;
 }
@@ -694,10 +698,15 @@ void x86_write_data(x86_asm_data_t* data, FILE* out)
             {
                 ++j;
                 int64_t offset = *((int64_t*) (data->data + ia->data_location));
-                if (offset != 0)
-                    fprintf(out, "    .quad %s%c%lld\n", ia->label, offset < 0 ? '-' : '+', llabs(offset));
+                if (ia->label)
+                {
+                    if (offset != 0)
+                        fprintf(out, "    .quad %s%c%lld\n", ia->label, offset < 0 ? '-' : '+', llabs(offset));
+                    else
+                        fprintf(out, "    .quad %s\n", ia->label);
+                }
                 else
-                    fprintf(out, "    .quad %s\n", ia->label);
+                    fprintf(out, "    .quad 0x%lX\n", offset);
                 i += POINTER_WIDTH;
                 continue;
             }
@@ -2113,8 +2122,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
             warnf("no x86 code generator built for an AIR instruction: %d\n", ainsn->type);
             return NULL;
         
-        // this instruction is symbolic for earlier stages
+        // these instructions are symbolic for earlier stages
         case AIR_DECLARE_REGISTER:
+        case AIR_BLIP:
 
         // modulo operations get converted to division operations during x86 localization
         case AIR_MODULO:
@@ -2181,10 +2191,13 @@ x86_asm_data_t* x86_generate_data(air_data_t* adata, x86_asm_file_t* file)
         {
             x86_asm_init_address_t* aia = calloc(1, sizeof *aia);
             aia->data_location = ia->data_location;
-            if (x86_symbol_requires_disambiguation(ia->sy))
-                aia->label = symbol_get_disambiguated_name(ia->sy);
-            else
-                aia->label = strdup(symbol_get_name(ia->sy));
+            if (ia->sy)
+            {
+                if (x86_symbol_requires_disambiguation(ia->sy))
+                    aia->label = symbol_get_disambiguated_name(ia->sy);
+                else
+                    aia->label = strdup(symbol_get_name(ia->sy));
+            }
             vector_add(data->addresses, aia);
         }
     }

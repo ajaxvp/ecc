@@ -121,8 +121,8 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
         // SC_ENUMERATOR - enumr
         case SC_ENUMERATOR:
         {
-            traverse_syntax(trav, syn->enumr_constant);
             traverse_syntax(trav, syn->enumr_expression);
+            traverse_syntax(trav, syn->enumr_constant);
             break;
         }
 

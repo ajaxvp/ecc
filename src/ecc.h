@@ -319,6 +319,7 @@ typedef struct constexpr constexpr_t;
 
 typedef struct program_options
 {
+    bool hflag;
     bool iflag;
     bool ppflag;
     bool pflag;
@@ -351,6 +352,7 @@ typedef struct preprocessing_token
     preprocessing_token_t* prev;
     preprocessing_token_t* next;
     bool can_start_directive;
+    bool argument_content;
     union
     {
         // PPT_HEADER_NAME
@@ -684,7 +686,8 @@ typedef enum air_insn_type {
     AIR_VA_START,
     AIR_VA_END,
     AIR_SEQUENCE_POINT,
-    AIR_MEMSET
+    AIR_MEMSET,
+    AIR_BLIP
 } air_insn_type_t;
 
 typedef struct air_insn air_insn_t;

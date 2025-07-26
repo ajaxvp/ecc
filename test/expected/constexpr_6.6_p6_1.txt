@@ -1,0 +1,1 @@
+ecc: error: [6:13] enumeration constant value must be specified by an integer constant expression

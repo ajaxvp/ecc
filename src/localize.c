@@ -610,7 +610,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     // initialize the integer register return sequence
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
     size_t next_intretreg = 0;
-    // regid_t next_sseretreg = X86R_XMM0;
+    regid_t next_sseretreg = X86R_XMM0;
 
     // get the register where the result of the function call should end up in
     regid_t resreg = insn->ops[0]->content.reg;
@@ -633,17 +633,19 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 
     for (size_t i = 0; i < sizeof(volatile_integer_registers) / sizeof(volatile_integer_registers[0]); ++i)
     {
-        air_insn_t* decl = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        regid_t reg = volatile_integer_registers[i];
+        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
         decl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-        decl->ops[0] = air_insn_register_operand_init(volatile_integer_registers[i]);
+        decl->ops[0] = air_insn_register_operand_init(reg);
         pos = air_insn_insert_after(decl, pos);
     }
 
-        for (size_t i = 0; i < sizeof(volatile_sse_registers) / sizeof(volatile_sse_registers[0]); ++i)
+    for (size_t i = 0; i < sizeof(volatile_sse_registers) / sizeof(volatile_sse_registers[0]); ++i)
     {
-        air_insn_t* decl = air_insn_init(AIR_DECLARE_REGISTER, 1);
+        regid_t reg = volatile_sse_registers[i];
+        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
         decl->ct = make_basic_type(CTC_DOUBLE);
-        decl->ops[0] = air_insn_register_operand_init(volatile_sse_registers[i]);
+        decl->ops[0] = air_insn_register_operand_init(reg);
         pos = air_insn_insert_after(decl, pos);
     }
 
@@ -715,21 +717,23 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 
         arg_class_t class = classes[i];
 
-        // if the class is INTEGER
-        if (class == ARG_INTEGER)
+        // if the class is INTEGER or SSE
+        if (class == ARG_INTEGER || class == ARG_SSE)
         {
             // copy at most 8 bytes at a time
             long long to_be_copied = min(total_remaining, 8);
             for (long long copied = 0; copied < to_be_copied;)
             {
                 long long remaining = to_be_copied - copied;
+                regid_t reg = class == ARG_INTEGER ? integer_return_sequence[next_intretreg] : next_sseretreg;
 
                 // keep on loading!
                 air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-                assign->ct = make_basic_type(largest_type_class_for_eightbyte(remaining));
+                assign->ct = make_basic_type(class == ARG_INTEGER ? largest_type_class_for_eightbyte(remaining) :
+                    largest_sse_type_class_for_eightbyte(remaining));
                 long long csize = type_size(assign->ct);
                 assign->ops[0] = air_insn_indirect_register_operand_init(resreg, (i * 8) + copied, INVALID_VREGID, 1);
-                assign->ops[1] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                assign->ops[1] = air_insn_register_operand_init(reg);
                 pos = air_insn_insert_after(assign, pos);
 
                 copied += csize;
@@ -739,15 +743,18 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 
                 air_insn_t* shr = air_insn_init(AIR_DIRECT_SHIFT_RIGHT, 2);
                 shr->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-                shr->ops[0] = air_insn_register_operand_init(integer_return_sequence[next_intretreg]);
+                shr->ops[0] = air_insn_register_operand_init(reg);
                 shr->ops[1] = air_insn_integer_constant_operand_init(csize << 3);
                 pos = air_insn_insert_after(shr, pos);
             }
-            // move up the integer register
-            ++next_intretreg;
+            // move up the register
+            if (class == ARG_INTEGER)
+                ++next_intretreg;
+            else if (class == ARG_SSE)
+                ++next_sseretreg;
         }
         else
-            // TODO handle SSE, X87, etc.
+            // TODO: handle long doubles and complex numberss
             report_return;
     }
 }
@@ -1491,11 +1498,11 @@ void localize_x86_64_memset(air_insn_t* insn, air_routine_t* routine, air_t* air
     ldc->ops[1] = air_insn_operand_copy(op2);
     air_insn_insert_before(ldc, insn);
 
-    op1->type = X86OP_REGISTER;
-    op1->content.reg = X86R_RDI;
+    air_insn_operand_delete(op1);
+    air_insn_operand_delete(op2);
 
-    op2->type = X86OP_REGISTER;
-    op2->content.reg = X86R_RCX;
+    insn->ops[0] = air_insn_register_operand_init(X86R_RDI);
+    insn->ops[1] = air_insn_register_operand_init(X86R_RCX);
 }
 
 void localize_x86_64(air_t* air)

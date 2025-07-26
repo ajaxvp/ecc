@@ -382,7 +382,7 @@ char* linker(char** object_files, size_t object_count, char* target)
         {
             free(exec_filepath);
             free(argv);
-            return NULL;
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -407,7 +407,8 @@ bool get_options(int argc, char** argv)
         switch (c)
         {
             case 'h':
-                return usage();
+                opts.hflag = true;
+                break;
             case 'i':
                 opts.iflag = true;
                 break;
@@ -502,6 +503,9 @@ int main(int argc, char** argv)
 
     if (!get_options(argc, argv))
         return EXIT_FAILURE;
+    
+    if (opts.hflag)
+        return usage();
     
     if (opts.ssflag)
         return handle_ss_flag(argc, argv);

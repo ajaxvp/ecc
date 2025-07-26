@@ -96,6 +96,8 @@ bool scope_is_file(syntax_component_t* scope)
 
 storage_duration_t symbol_get_storage_duration(symbol_t* sy)
 {
+    if (!sy)
+        return SD_UNKNOWN;
     if (sy->sd != SD_UNKNOWN)
         return sy->sd;
     if (sy->declarer->type == SC_STRING_LITERAL ||
@@ -136,7 +138,7 @@ bool symbol_in_scope(symbol_t* sy, syntax_component_t* syn)
 int symbol_get_scope_distance(syntax_component_t* inner, syntax_component_t* outer)
 {
     int i = 0;
-    for (; inner && inner != outer; inner = inner->parent);
+    for (; inner && inner != outer; inner = inner->parent, ++i);
     return inner == outer ? i : -1;
 }
 

@@ -66,6 +66,7 @@ bool type_is_compatible(c_type_t* t1, c_type_t* t2)
     if (!t1 && !t2) return true;
     if (!t1) return false;
     if (!t2) return false;
+    if (t1 == t2) return true;
     if (t1->class != t2->class)
         return false;
     if (t1->qualifiers != t2->qualifiers)

@@ -1474,6 +1474,8 @@ void evaluate_subscript_expression(syntax_component_t* expr, constexpr_t* ce)
         ce->content.addr.offset += index * type_size(sarray->ctype->derived_from);
         return;
     }
+    // ISO: 6.6 (9)
+    SET_ERROR(expr, "the subscript operator may not be used to access the value of an object");
 }
 
 void evaluate_dereference_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1493,6 +1495,8 @@ void evaluate_dereference_expression(syntax_component_t* expr, constexpr_t* ce)
         constexpr_delete(operand);
         return;
     }
+    // ISO: 6.6 (9)
+    SET_ERROR(expr, "the dereference operator may not be used to access the value of an object");
 }
 
 void evaluate_reference_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1512,6 +1516,8 @@ void evaluate_reference_expression(syntax_component_t* expr, constexpr_t* ce)
         constexpr_delete(operand);
         return;
     }
+    // ISO: 6.6 (9)
+    SET_ERROR(expr, "the address-of operator may not be used to access the value of an object");
 }
 
 void evaluate_dereference_member_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1541,6 +1547,8 @@ void evaluate_dereference_member_expression(syntax_component_t* expr, constexpr_
         ce->content.addr.offset += offset;
         return;
     }
+    // ISO: 6.6 (9)
+    SET_ERROR(expr, "the pointer-to member access operator may not be used to access the value of an object");
 }
 
 void evaluate_member_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1570,6 +1578,8 @@ void evaluate_member_expression(syntax_component_t* expr, constexpr_t* ce)
         ce->content.addr.offset += offset;
         return;
     }
+    // ISO: 6.6 (9)
+    SET_ERROR(expr, "the member access operator may not be used to access the value of an object");
 }
 
 void evaluate_cast_expression(syntax_component_t* expr, constexpr_t* ce)

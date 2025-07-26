@@ -907,8 +907,14 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
     }
     if (syn->type != SC_INITIALIZER_LIST)
     {
-        constexpr_t* ce = constexpr_evaluate(syn);
-        if (constexpr_evaluation_succeeded(ce))
+        bool offset_lhs = (syn->type == SC_ADDITION_EXPRESSION || syn->type == SC_SUBTRACTION_EXPRESSION) && syn->bexpr_lhs->ctype->class == CTC_POINTER;
+        bool offset_rhs = (syn->type == SC_ADDITION_EXPRESSION && syn->bexpr_rhs->ctype->class == CTC_POINTER);
+        bool offset_included = offset_lhs || offset_rhs;
+        syntax_component_t* ptr_side = offset_lhs ? syn->bexpr_lhs : syn->bexpr_rhs;
+        syntax_component_t* offset_side = offset_lhs ? syn->bexpr_rhs : syn->bexpr_lhs;
+        constexpr_t* ce = constexpr_evaluate(offset_included ? ptr_side : syn);
+        constexpr_t* oce = offset_included ? constexpr_evaluate_integer(offset_side) : NULL;
+        if (constexpr_evaluation_succeeded(ce) && (!oce || constexpr_evaluation_succeeded(oce)))
         {
             if (get_program_options()->iflag)
             {
@@ -927,16 +933,29 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
                 ia->sy = ce->content.addr.sy;
                 vector_add(sy->addresses, ia);
                 int64_t offset = ce->content.addr.offset * (ce->content.addr.negative_offset ? -1 : 1);
+                if (offset_included)
+                {
+                    constexpr_convert_class(oce, CTC_LONG_LONG_INT);
+                    int64_t oce_value = constexpr_as_i64(oce);
+                    c_type_t* lhs_pointed_ct = ptr_side->ctype->derived_from;
+                    int64_t lpc_size = type_size(lhs_pointed_ct);
+                    syn->type == SC_ADDITION_EXPRESSION ? offset += (oce_value * lpc_size) : (offset -= (oce_value * lpc_size));
+                }
                 memcpy(sy->data + base, &offset, POINTER_WIDTH);
             }
 
             constexpr_delete(ce);
+            constexpr_delete(oce);
         }
         else
         {
             // ISO: 6.7.8 (4)
-            ADD_ERROR(syn, "in static initialization: %s", ce->error);
+            if (ce->error)
+                ADD_ERROR(syn, "in static initialization: %s", ce->error);
+            if (oce && oce->error)
+                ADD_ERROR(offset_side, "in address constant offset of static initialization: %s", oce->error);
             constexpr_delete(ce);
+            constexpr_delete(oce);
         }
         return;
     }
@@ -1331,7 +1350,7 @@ void analyze_subtraction_expression_after(syntax_traverser_t* trav, syntax_compo
         ct = usual_arithmetic_conversions_result_type(tlhs, trhs);
     else if (tlhs->class == CTC_POINTER && type_is_object_type(tlhs->derived_from) && type_is_integer(trhs))
         // ISO: 6.5.6 (3), 6.5.6 (8)
-        ct = type_copy(trhs);
+        ct = type_copy(tlhs);
     else if (tlhs->class == CTC_POINTER && trhs->class == CTC_POINTER &&
         type_is_object_type(tlhs->derived_from) && type_is_object_type(trhs->derived_from) &&
         type_is_compatible_ignore_qualifiers(tlhs->derived_from, trhs->derived_from))
