@@ -421,16 +421,14 @@ static bool syntax_is_null_ptr_constant(syntax_component_t* expr, c_type_class_t
 
 UNRESOLVED ISO SPECIFICATION REQUIREMENTS
 
-CONTRAINTS:
+CONSTRAINTS:
 
 EXPRESSIONS
-6.5.4 (3) - probably doesn't need to be checked *on* cast expressions?
-6.6 (3)
-6.6 (4)
+none
 
 STATEMENTS
-6.8.4.2 (2)
-6.8.6.1 (1)
+6.8.4.2 (2) - VLA/VMT
+6.8.6.1 (1) - VLA/VMT
 
 SEMANTICS:
 
@@ -473,6 +471,7 @@ EXPRESSIONS
 6.5.3.3 (1)
 6.5.3.4 (1)
 6.5.4 (2)
+6.5.4 (3)
 6.5.5 (2)
 6.5.6 (2)
 6.5.6 (3)
@@ -490,6 +489,8 @@ EXPRESSIONS
 6.5.16.1 (1)
 6.5.16.2 (1)
 6.5.16.2 (2)
+6.6 (3)
+6.6 (4)
 
 DECLARATIONS
 6.7 (2)
@@ -2429,6 +2430,11 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
         count += sdecl->sdecl_declarators->size;
         VECTOR_FOR(syntax_component_t*, sdeclr, sdecl->sdecl_declarators)
         {
+            if (sdeclr->sdeclr_bits_expression)
+            {
+                ADD_ERROR(sdeclr->sdeclr_bits_expression, "struct and union bitfields are not supported yet");
+                continue;
+            }
             if (!sdeclr) continue;
             syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
             if (!id) report_return;
