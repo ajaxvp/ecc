@@ -430,7 +430,7 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
             TYPE OP(0) EQUALS printer("va_end"); LPAREN OP(1) RPAREN SEMICOLON
             break;
         case AIR_MEMSET:
-            printer("memset"); LPAREN OP(0) COMMA OP(1) RPAREN SEMICOLON
+            printer("memset"); LPAREN OP(0) COMMA OP(1) COMMA OP(2) RPAREN SEMICOLON
             break;
         case AIR_BLIP:
             printer("blip "); OP(0) SEMICOLON
@@ -1411,21 +1411,80 @@ static void linearize_array_declarator_after(syntax_traverser_t* trav, syntax_co
     FINALIZE_LINEARIZE;
 }
 
-static void initialize(syntax_traverser_t* trav, syntax_component_t* initializer, regid_t addr, int64_t base_offset, air_insn_t** c)
+static void initialize_string_literal(syntax_component_t* strl, symbol_t* sy, int64_t base_offset, air_insn_t** c)
+{
+    air_insn_t* code = *c;
+    int64_t array_length = type_get_array_length(sy->type);
+    unsigned long long length = strl->strl_length->intc + 1;
+    if (array_length != -1)
+        length = min(length, array_length);
+    char* str = strl->strl_reg;
+    for (unsigned long long copied = 0; copied < length;)
+    {
+        unsigned long long remaining = length - copied;
+        c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
+        if (remaining < UNSIGNED_SHORT_INT_WIDTH)
+            class = CTC_UNSIGNED_CHAR;
+        else if (remaining < UNSIGNED_INT_WIDTH)
+            class = CTC_UNSIGNED_SHORT_INT;
+        else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
+            class = CTC_UNSIGNED_INT;
+        air_insn_t* loaddest = air_insn_init(AIR_ASSIGN, 2);
+        loaddest->ct = make_basic_type(class);
+        loaddest->ops[0] = air_insn_indirect_symbol_operand_init(sy, base_offset + copied);
+        unsigned long long value = 0;
+        switch (class)
+        {
+            case CTC_UNSIGNED_CHAR:
+                value = *((unsigned char*) (str + copied));
+                break;
+            case CTC_UNSIGNED_SHORT_INT:
+                value = *((unsigned short*) (str + copied));
+                break;
+            case CTC_UNSIGNED_INT:
+                value = *((unsigned*) (str + copied));
+                break;
+            case CTC_UNSIGNED_LONG_LONG_INT:
+                value = *((unsigned long long*) (str + copied));
+                break;
+            default:
+                report_return;
+        }
+        loaddest->ops[1] = air_insn_integer_constant_operand_init(value);
+        ADD_CODE(loaddest);
+        copied += type_size(loaddest->ct);
+    }
+    *c = code;
+}
+
+static void initialize(syntax_traverser_t* trav, syntax_component_t* initializer, symbol_t* sy, int64_t base_offset, air_insn_t** c)
 {
     if (initializer->type == SC_INITIALIZER_LIST)
     {
         VECTOR_FOR(syntax_component_t*, init, initializer->inlist_initializers)
-            initialize(trav, init, addr, base_offset + initializer->initializer_offset, c);
+            initialize(trav, init, sy, base_offset + initializer->initializer_offset, c);
         return;
     }
     air_insn_t* code = *c;
-    COPY_CODE(initializer);
-    air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
-    assign->ct = type_copy(initializer->initializer_ctype);
-    assign->ops[0] = air_insn_indirect_register_operand_init(addr, base_offset + initializer->initializer_offset, INVALID_VREGID, 1);
-    assign->ops[1] = air_insn_register_operand_init(initializer->expr_reg);
-    ADD_CODE(assign);
+
+    c_type_t* ct = initializer->initializer_ctype;
+
+    if (type_is_scalar(ct))
+    {
+        COPY_CODE(initializer);
+        regid_t reg = convert(trav, initializer->ctype, initializer->initializer_ctype, initializer->expr_reg, &code);
+        air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+        assign->ct = type_copy(ct);
+        assign->ops[0] = air_insn_indirect_symbol_operand_init(sy, base_offset + initializer->initializer_offset);
+        assign->ops[1] = air_insn_register_operand_init(reg);
+        ADD_CODE(assign);
+    }
+    else if (initializer->type == SC_STRING_LITERAL && initializer->strl_reg && ct->class == CTC_ARRAY && type_is_character(ct->derived_from))
+        initialize_string_literal(initializer, sy, base_offset + initializer->initializer_offset, &code);
+    else if (initializer->type == SC_STRING_LITERAL && initializer->strl_wide && ct->class == CTC_ARRAY && type_is_wchar_compatible(ct->derived_from))
+        // TODO
+        report_return;
+
     *c = code;
 }
 
@@ -1456,19 +1515,23 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
 
     bool is_scalar = type_is_scalar(sy->type);
     bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
+    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_wchar_compatible(sy->type);
 
-    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
-    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
-    type_delete(wct);
-
-    // singly-nested braces special case is handled during init declarator linearization
-    if (is_scalar || is_char_array || is_wchar_array)
+    if (syn->inlist_initializers->size == 1)
     {
-        syntax_component_t* init = vector_get(syn->inlist_initializers, 0);
-        SETUP_LINEARIZE;
-        COPY_CODE(init);
-        FINALIZE_LINEARIZE;
-        return;
+        syntax_component_t* inner = vector_get(syn->inlist_initializers, 0);
+        is_scalar = is_scalar && inner->type != SC_INITIALIZER_LIST && type_is_scalar(inner->ctype);
+        is_char_array = is_char_array && inner->type == SC_STRING_LITERAL && inner->strl_reg;
+        is_wchar_array = is_wchar_array && inner->type == SC_STRING_LITERAL && inner->strl_wide;
+        // singly-nested braces special case is handled during init declarator linearization
+        if (is_scalar || is_char_array || is_wchar_array)
+        {
+            syntax_component_t* init = vector_get(syn->inlist_initializers, 0);
+            SETUP_LINEARIZE;
+            COPY_CODE(init);
+            FINALIZE_LINEARIZE;
+            return;
+        }
     }
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
@@ -1478,20 +1541,14 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
 
     SETUP_LINEARIZE;
 
-    air_insn_t* loadaddr = air_insn_init(AIR_LOAD_ADDR, 2);
-    regid_t la_result = NEXT_VIRTUAL_REGISTER;
-    loadaddr->ct = make_reference_type(sy->type);
-    loadaddr->ops[0] = air_insn_register_operand_init(la_result);
-    loadaddr->ops[1] = air_insn_symbol_operand_init(sy);
-    ADD_CODE(loadaddr);
-
-    air_insn_t* ms = air_insn_init(AIR_MEMSET, 2);
+    air_insn_t* ms = air_insn_init(AIR_MEMSET, 3);
     ms->ct = make_reference_type(sy->type);
-    ms->ops[0] = air_insn_register_operand_init(la_result);
-    ms->ops[1] = air_insn_integer_constant_operand_init(type_size(sy->type));
+    ms->ops[0] = air_insn_integer_constant_operand_init(0);
+    ms->ops[1] = air_insn_symbol_operand_init(sy);
+    ms->ops[2] = air_insn_integer_constant_operand_init(type_size(sy->type));
     ADD_CODE(ms);
 
-    initialize(trav, syn, la_result, 0, &code);
+    initialize(trav, syn, sy, 0, &code);
 
     ADD_SEQUENCE_POINT;
 
@@ -1553,8 +1610,16 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
     type_delete(wct);
 
-    if (init->type == SC_INITIALIZER_LIST && (is_scalar || is_char_array || is_wchar_array))
-        init = vector_get(init->inlist_initializers, 0);
+    if (init->type == SC_INITIALIZER_LIST && init->inlist_initializers->size == 1)
+    {
+        syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
+        if (is_scalar && inner->type != SC_INITIALIZER_LIST && type_is_scalar(inner->ctype))
+            init = inner;
+        if (is_char_array && inner->type == SC_STRING_LITERAL && inner->strl_reg)
+            init = inner;
+        if (is_wchar_array && inner->type == SC_STRING_LITERAL && inner->strl_wide)
+            init = inner;
+    }
 
     if (init->type == SC_INITIALIZER_LIST)
     {
@@ -1575,49 +1640,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
 
     // ISO: 6.7.8 (14)
     else if (is_char_array)
-    {
-        if (init->type != SC_STRING_LITERAL) report_return;
-        // +1 fo the null byte
-        unsigned long long length = init->strl_length->intc + 1;
-        if (sy->type->array.length_expression)
-            length = min(length, type_get_array_length(sy->type));
-        char* str = init->strl_reg;
-        for (unsigned long long copied = 0; copied < length;)
-        {
-            unsigned long long remaining = length - copied;
-            c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
-            if (remaining < UNSIGNED_SHORT_INT_WIDTH)
-                class = CTC_UNSIGNED_CHAR;
-            else if (remaining < UNSIGNED_INT_WIDTH)
-                class = CTC_UNSIGNED_SHORT_INT;
-            else if (remaining < UNSIGNED_LONG_LONG_INT_WIDTH)
-                class = CTC_UNSIGNED_INT;
-            air_insn_t* loaddest = air_insn_init(AIR_ASSIGN, 2);
-            loaddest->ct = make_basic_type(class);
-            loaddest->ops[0] = air_insn_indirect_symbol_operand_init(sy, copied);
-            unsigned long long value = 0;
-            switch (class)
-            {
-                case CTC_UNSIGNED_CHAR:
-                    value = *((unsigned char*) (str + copied));
-                    break;
-                case CTC_UNSIGNED_SHORT_INT:
-                    value = *((unsigned short*) (str + copied));
-                    break;
-                case CTC_UNSIGNED_INT:
-                    value = *((unsigned*) (str + copied));
-                    break;
-                case CTC_UNSIGNED_LONG_LONG_INT:
-                    value = *((unsigned long long*) (str + copied));
-                    break;
-                default:
-                    report_return;
-            }
-            loaddest->ops[1] = air_insn_integer_constant_operand_init(value);
-            ADD_CODE(loaddest);
-            copied += type_size(loaddest->ct);
-        }
-    }
+        initialize_string_literal(init, sy, 0, &code);
 
     // ISO: 6.7.8 (15)
     else if (is_wchar_array)
@@ -1690,10 +1713,18 @@ static void linearize_subscript_expression_after(syntax_traverser_t* trav, synta
     sizeup->ops[2] = air_insn_integer_constant_operand_init(type_size(obj->ctype->derived_from));
     ADD_CODE(sizeup);
     air_insn_t* insn = NULL;
-    if (syntax_is_in_lvalue_context(syn))
+    c_type_t* mt = obj->ctype->derived_from;
+    if (syntax_is_in_lvalue_context(syn) ||
+        // obtaining an aggregate or union via subscript will yield its offset in the array 
+        type_is_sua(mt))
     {
         insn = air_insn_init(AIR_ADD, 3);
-        insn->ct = type_copy(obj->ctype);
+        if (mt->class == CTC_ARRAY)
+            insn->ct = type_copy(syn->ctype);
+        else if (mt->class == CTC_STRUCTURE || mt->class == CTC_UNION)
+            insn->ct = make_reference_type(syn->ctype);
+        else
+            insn->ct = type_copy(obj->ctype);
         insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
         insn->ops[1] = air_insn_register_operand_init(syn->bexpr_lhs->expr_reg);
         insn->ops[2] = air_insn_register_operand_init(sureg);
@@ -1701,7 +1732,7 @@ static void linearize_subscript_expression_after(syntax_traverser_t* trav, synta
     else
     {
         insn = air_insn_init(AIR_LOAD, 2);
-        insn->ct = type_copy(obj->ctype->derived_from);
+        insn->ct = type_copy(syn->ctype);
         insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
         insn->ops[1] = air_insn_indirect_register_operand_init(syn->bexpr_lhs->expr_reg, 0, sureg, 1);
     }
@@ -1814,11 +1845,15 @@ static void linearize_member_expression_after(syntax_traverser_t* trav, syntax_c
     type_get_struct_union_member_info(ct, syn->memexpr_id->id, &idx, &offset);
     c_type_t* mt = vector_get(ct->struct_union.member_types, idx);
     air_insn_t* insn = NULL;
-    if (syntax_is_in_lvalue_context(syn))
+    if (syntax_is_in_lvalue_context(syn) ||
+        // accessing an aggregate or union type will just get the offset of that object within the struct
+        type_is_sua(mt))
     {
         insn = air_insn_init(AIR_ADD, 3);
-        insn->ct = make_basic_type(CTC_POINTER);
-        insn->ct->derived_from = type_copy(mt);
+        if (mt->class == CTC_ARRAY)
+            insn->ct = type_copy(syn->ctype);
+        else
+            insn->ct = make_reference_type(mt);
         insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
         insn->ops[1] = air_insn_register_operand_init(syn->memexpr_expression->expr_reg);
         insn->ops[2] = air_insn_integer_constant_operand_init(offset);
@@ -1826,10 +1861,7 @@ static void linearize_member_expression_after(syntax_traverser_t* trav, syntax_c
     else
     {
         insn = air_insn_init(AIR_LOAD, 2);
-        if (mt->class != CTC_ARRAY)
-            insn->ct = type_copy(mt);
-        else
-            insn->ct = make_reference_type(mt);
+        insn->ct = type_copy(syn->ctype);
         insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
         insn->ops[1] = air_insn_indirect_register_operand_init(syn->bexpr_lhs->expr_reg, offset, INVALID_VREGID, 1);
     }
@@ -1955,7 +1987,18 @@ static void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_co
         type_delete(int_type);
     }
     if (syn->type == SC_DEREFERENCE_EXPRESSION)
-        insn->ops[1] = air_insn_indirect_register_operand_init(srcreg, 0, INVALID_VREGID, 1);
+    {
+        c_type_t* dt = syn->uexpr_operand->ctype->derived_from;
+        if (dt->class == CTC_STRUCTURE || dt->class == CTC_UNION)
+        {
+            type_delete(insn->ct);
+            insn->ct = make_reference_type(dt);
+        }
+        if (!type_is_sua(dt))
+            insn->ops[1] = air_insn_indirect_register_operand_init(srcreg, 0, INVALID_VREGID, 1);
+        else
+            insn->ops[1] = air_insn_register_operand_init(srcreg);
+    }
     else
         insn->ops[1] = air_insn_register_operand_init(srcreg);
     if (syn->type == SC_NOT_EXPRESSION)

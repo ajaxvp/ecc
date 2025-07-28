@@ -505,6 +505,15 @@ bool type_is_character(c_type_t* ct)
     return type_is_character_type(ct->class);
 }
 
+bool type_is_wchar_compatible(c_type_t* ct)
+{
+    if (!ct) return false;
+    c_type_t* wcharct = make_basic_type(C_TYPE_WCHAR_T);
+    bool c = type_is_compatible(ct, wcharct);
+    type_delete(wcharct);
+    return c;
+}
+
 bool type_is_vla(c_type_t* ct)
 {
     if (!ct) return false;

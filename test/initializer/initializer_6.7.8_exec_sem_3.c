@@ -4,12 +4,13 @@
 
 const char v1[][4] = {
     "abc",
-    "def",
+    {"def"},
     "ghi"
 };
 
 int main(void)
 {
+    ASSERT_EQUALS(sizeof(v1), 12);
     ASSERT_EQUALS(v1[0][0], 'a');
     ASSERT_EQUALS(v1[0][1], 'b');
     ASSERT_EQUALS(v1[0][2], 'c');

@@ -79,6 +79,8 @@ void dump_errors(analysis_error_t* errors)
 
 #define SYMBOL_TABLE (trav->tlu->tlu_st)
 
+static bool can_assign(c_type_t* tlhs, c_type_t* trhs, syntax_component_t* rhs);
+
 static long long get_aggregate_type_element_count(c_type_t* ct)
 {
     if (!ct) return -1;
@@ -209,16 +211,25 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
 
         init->initializer_offset = offset;
 
+        bool enclosed = false;
+
         // scalar initializers can be enclosed in braces
         if (init->type == SC_INITIALIZER_LIST && is_scalar)
+        {
             init = vector_get(init->inlist_initializers, 0);
+            if (init->inlist_initializers->size == 1)
+                enclosed = true;
+        }
 
         // character array initializers can be enclosed in braces if it is a string literal
         if (init->type == SC_INITIALIZER_LIST && is_char_array)
         {
             syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
             if (init->inlist_initializers->size == 1 && inner->type == SC_STRING_LITERAL && inner->strl_reg)
+            {
                 init = inner;
+                enclosed = true;
+            }
         }
 
         // wide character array initializers can be enclosed in braces if it is a wide string literal
@@ -226,13 +237,14 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
         {
             syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
             if (init->inlist_initializers->size == 1 && inner->type == SC_STRING_LITERAL && inner->strl_wide)
+            {
                 init = inner;
+                enclosed = true;
+            }
         }
 
-        init->initializer_offset = offset;
-
         // like: { { ... } }
-        if (init->type == SC_INITIALIZER_LIST)
+        if (init->type == SC_INITIALIZER_LIST && !enclosed)
             add_initializer_list_semantics(trav, init, et);
 
         // like: { ... }
@@ -299,31 +311,32 @@ static bool string_literal_initializes_array(syntax_traverser_t* trav, syntax_co
 {
     if (!syn) return false;
     if (syn->type != SC_STRING_LITERAL) return false;
-    if (syn->parent->type != SC_INIT_DECLARATOR && (syn->parent->type != SC_INITIALIZER_LIST || syn->parent->parent->type != SC_INIT_DECLARATOR))
-        return false;
-    syntax_component_t* ideclr = syn->parent;
-    unsigned inits = 1;
-    if (ideclr->type == SC_INITIALIZER_LIST)
-    {
-        inits = ideclr->inlist_initializers->size;
-        ideclr = ideclr->parent;
-    }
+
+    syntax_component_t* ideclr = syntax_get_enclosing(syn, SC_INIT_DECLARATOR);
+    if (!ideclr) return false;
 
     syntax_component_t* id = syntax_get_declarator_identifier(ideclr);
     if (!id) report_return_value(NULL);
     symbol_t* isy = symbol_table_get_syn_id(syntax_get_translation_unit(syn)->tlu_st, id);
     if (!isy) report_return_value(NULL);
 
-    if (isy->type->class == CTC_ARRAY && inits == 1 && type_is_scalar(isy->type->derived_from))
-        return true;
+    if (ideclr == syn->parent || (syn->parent->type == SC_INITIALIZER_LIST && ideclr == syn->parent->parent))
+    {
+        unsigned inits = 1;
+        if (syn->parent->type == SC_INITIALIZER_LIST)
+            inits = syn->parent->inlist_initializers->size;
+
+        if (isy->type->class == CTC_ARRAY && inits == 1 && type_is_scalar(isy->type->derived_from))
+            return true;
+    }
     
     if (ideclr->ideclr_initializer->type != SC_INITIALIZER_LIST)
-        report_return_value(false);
+        return false;
 
     add_initializer_list_semantics(trav, ideclr->ideclr_initializer, isy->type);
 
     if (!syn->initializer_ctype)
-        report_return_value(false);
+        return false;
 
     return syn->initializer_ctype->class == CTC_ARRAY && type_is_scalar(syn->initializer_ctype->derived_from);
 }
@@ -625,15 +638,16 @@ static bool can_assign(c_type_t* tlhs, c_type_t* trhs, syntax_component_t* rhs)
     // ISO: 6.5.16.1 (1)
     // condition 3
     else if (tlhs->class == CTC_POINTER && trhs->class == CTC_POINTER &&
-        type_is_compatible(tlhs->derived_from, trhs->derived_from))
+        type_is_compatible_ignore_qualifiers(tlhs->derived_from, trhs->derived_from) &&
+        (tlhs->derived_from->qualifiers & trhs->derived_from->qualifiers) == trhs->derived_from->qualifiers)
         pass = true;
     // ISO: 6.5.16.1 (1)
     // condition 4
     else if (tlhs->class == CTC_POINTER && (type_is_object_type(tlhs->derived_from) || !type_is_complete(tlhs->derived_from)) &&
-        trhs->class == CTC_POINTER && trhs->derived_from->class == CTC_VOID && tlhs->derived_from->qualifiers == trhs->derived_from->qualifiers)
+        trhs->class == CTC_POINTER && trhs->derived_from->class == CTC_VOID && (tlhs->derived_from->qualifiers & trhs->derived_from->qualifiers) == trhs->derived_from->qualifiers)
         pass = true;
     else if (trhs->class == CTC_POINTER && (type_is_object_type(trhs->derived_from) || !type_is_complete(trhs->derived_from)) &&
-        tlhs->class == CTC_POINTER && tlhs->derived_from->class == CTC_VOID && tlhs->derived_from->qualifiers == trhs->derived_from->qualifiers)
+        tlhs->class == CTC_POINTER && tlhs->derived_from->class == CTC_VOID && (tlhs->derived_from->qualifiers & trhs->derived_from->qualifiers) == trhs->derived_from->qualifiers)
         pass = true;
     // ISO: 6.5.16.1 (1)
     // condition 5
@@ -2311,6 +2325,36 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
+static void check_initializations(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->type == SC_INITIALIZER_LIST)
+    {
+        VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
+            check_initializations(trav, init);
+        return;
+    }
+
+    c_type_t* ct = syn->initializer_ctype;
+
+    bool is_scalar = type_is_scalar(ct);
+    // bool is_char_array = ct->class == CTC_ARRAY && type_is_character(ct->derived_from);
+    // bool is_wchar_array = ct->class == CTC_ARRAY && type_is_wchar_compatible(ct->derived_from);
+
+    if (is_scalar && !can_assign(ct, syn->ctype, syn))
+    {
+        if (get_program_options()->iflag)
+        {
+            printf("invalid initialization on line %u: ", syn->row);
+            type_humanized_print(ct, printf);
+            printf(" = ");
+            type_humanized_print(syn->ctype, printf);
+            printf("\n");
+        }
+        // ISO: 6.7.8 (11)
+        ADD_ERROR(syn, "invalid initialization");
+    }
+}
+
 void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* init = syn->ideclr_initializer;
@@ -2325,34 +2369,31 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
         ADD_ERROR(syn, "initialization target '%s' must be an object type or an array of unknown size that is not variable-length", symbol_get_name(sy));
         return;
     }
-
+    
     bool is_scalar = type_is_scalar(sy->type);
     bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
+    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_wchar_compatible(sy->type->derived_from);
 
-    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
-    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
-    type_delete(wct);
-
-    if (init->type == SC_INITIALIZER_LIST && (is_scalar || is_char_array || is_wchar_array))
-        // ISO: 6.7.8 (11)
-        init = vector_get(init->inlist_initializers, 0);
-
-    if (is_scalar && init->type != SC_INITIALIZER_LIST && !can_assign(sy->type, init->ctype, init))
+    if (init->type == SC_INITIALIZER_LIST && init->inlist_initializers->size == 1)
     {
-        if (get_program_options()->iflag)
-        {
-            printf("invalid initialization on line %u: ", init->row);
-            type_humanized_print(sy->type, printf);
-            printf(" = ");
-            type_humanized_print(init->ctype, printf);
-            printf("\n");
-        }
-        // ISO: 6.7.8 (11)
-        ADD_ERROR(syn, "invalid initialization");
+        syntax_component_t* inner = vector_get(init->inlist_initializers, 0);
+        if (is_scalar && inner->type != SC_INITIALIZER_LIST && type_is_scalar(inner->ctype))
+            init = inner;
+        if (is_char_array && inner->type == SC_STRING_LITERAL && inner->strl_reg)
+            init = inner;
+        if (is_wchar_array && inner->type == SC_STRING_LITERAL && inner->strl_wide)
+            init = inner;
     }
-    
+
     if (init->type == SC_INITIALIZER_LIST)
         add_initializer_list_semantics(trav, init, sy->type);
+    else
+    {
+        init->initializer_ctype = type_copy(sy->type);
+        init->initializer_offset = 0;
+    }
+
+    check_initializations(trav, init);
     
     c_type_t* ct = sy->type;
     if (init->type == SC_INITIALIZER_LIST && ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)

@@ -1485,24 +1485,34 @@ void localize_x86_64_memset(air_insn_t* insn, air_routine_t* routine, air_t* air
 {
     air_insn_operand_t* op1 = insn->ops[0];
     air_insn_operand_t* op2 = insn->ops[1];
+    air_insn_operand_t* op3 = insn->ops[2];
 
-    air_insn_t* ldptr = air_insn_init(AIR_LOAD, 2);
+    air_insn_t* ldv = air_insn_init(AIR_LOAD, 2);
+    ldv->ct = make_basic_type(CTC_UNSIGNED_CHAR);
+    ldv->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    ldv->ops[1] = air_insn_operand_copy(op1);
+    air_insn_insert_before(ldv, insn);
+
+    air_insn_t* ldptr = air_insn_init(AIR_LOAD_ADDR, 2);
     ldptr->ct = type_copy(insn->ct);
     ldptr->ops[0] = air_insn_register_operand_init(X86R_RDI);
-    ldptr->ops[1] = air_insn_operand_copy(op1);
+    ldptr->ops[1] = air_insn_operand_copy(op2);
     air_insn_insert_before(ldptr, insn);
 
     air_insn_t* ldc = air_insn_init(AIR_LOAD, 2);
     ldc->ct = make_basic_type(C_TYPE_SIZE_T);
     ldc->ops[0] = air_insn_register_operand_init(X86R_RCX);
-    ldc->ops[1] = air_insn_operand_copy(op2);
+    ldc->ops[1] = air_insn_operand_copy(op3);
     air_insn_insert_before(ldc, insn);
 
     air_insn_operand_delete(op1);
     air_insn_operand_delete(op2);
+    air_insn_operand_delete(op3);
 
-    insn->ops[0] = air_insn_register_operand_init(X86R_RDI);
-    insn->ops[1] = air_insn_register_operand_init(X86R_RCX);
+    insn->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    insn->ops[0]->ct = make_basic_type(CTC_UNSIGNED_CHAR);
+    insn->ops[1] = air_insn_register_operand_init(X86R_RDI);
+    insn->ops[2] = air_insn_register_operand_init(X86R_RCX);
 }
 
 void localize_x86_64_assign_imm64_to_m64(air_insn_t* insn, air_routine_t* routine, air_t* air)

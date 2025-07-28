@@ -1,16 +1,16 @@
-/* ISO: 6.7.8; static semantics tests */
+/* ISO: 6.7.8; automatic semantics tests */
 
 #include "../test.h"
 
-const char* v1[] = {
-    "abc",
-    "def",
-    "ghi"
-};
-
 int main(void)
 {
-    ASSERT_EQUALS(sizeof(v1), 24);
+    const char v1[][4] = {
+        "abc",
+        {"def"},
+        "ghi"
+    };
+
+    ASSERT_EQUALS(sizeof(v1), 12);
     ASSERT_EQUALS(v1[0][0], 'a');
     ASSERT_EQUALS(v1[0][1], 'b');
     ASSERT_EQUALS(v1[0][2], 'c');

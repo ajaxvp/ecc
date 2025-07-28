@@ -1899,6 +1899,7 @@ bool type_is_sua_type(c_type_class_t class);
 bool type_is_sua(c_type_t* ct);
 bool type_is_character_type(c_type_class_t class);
 bool type_is_character(c_type_t* ct);
+bool type_is_wchar_compatible(c_type_t* ct);
 bool type_is_vla(c_type_t* ct);
 int64_t type_get_array_length(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);

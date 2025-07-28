@@ -19,6 +19,7 @@ do
 
     ../ecc -S -o $asmfile $filepath &> $actualfile
     content=$(cat $actualfile)
+    declare -i exit_status=0
 
     if [[ "$base" == *"_exec_"* ]]; then
         if [[ -a "$asmfile" ]]; then 
@@ -27,6 +28,7 @@ do
             execfile=/tmp/$base
             ld -o $execfile $objfile ../libc/libc.a ../libecc/libecc.a
             $($execfile &> $actualfile)
+            exit_status=$?
             rm -rf $execfile
             rm -rf $objfile
         fi
@@ -34,12 +36,14 @@ do
 
     diff=$(diff $actualfile $expectedfile)
 
-    if [[ "$diff" == "" ]]; then
+    if [[ "$diff" == "" ]] && [[ $exit_status -lt 128 ]]; then
         printf " - %s: pass\n" $filename
         passed=$(($passed + 1))
     else
         if [[ "$content" != "" ]]; then
             printf " - %s: FAIL, compilation error:\n%s\n" $filename "$content"
+        elif [[ $exit_status -ge 128 ]]; then
+            printf " - %s: FAIL, output program interrupted by signal: %d\n" $filename $(($exit_status - 128))
         else
             printf " - %s: FAIL\n" $filename
         fi

@@ -12,7 +12,6 @@ int main(void)
 {
     // basic initializer for a scalar
     int i = 5;
-    ASSERT(i == 5, "'i' should be initialized to '5'");
     ASSERT_EQUALS(i, 5);
 
     // scalar initializer can be optionally enclosed in braces
@@ -58,7 +57,7 @@ int main(void)
     ASSERT_EQUALS(y[2][1], 5);
     ASSERT_EQUALS(y[2][2], 7);
 
-    // EXAMPLE 4 (ISO C) - unbracketed initializer for multidimensional array
+    // EXAMPLE 3 (ISO C) - unbracketed initializer for multidimensional array
     int v[4][3] = {
         1, 3, 5, 2, 4, 6, 3, 5, 7
     };
@@ -73,9 +72,43 @@ int main(void)
     ASSERT_EQUALS(v[2][1], 5);
     ASSERT_EQUALS(v[2][2], 7);
 
+    // EXAMPLE 4 (ISO C) - column initialization
+    int z[4][3] = {
+        { 1 }, { 2 }, { 3 }, { 4 }
+    };
+    ASSERT_EQUALS(sizeof(z), 48);
+    ASSERT_EQUALS(z[0][0], 1);
+    ASSERT_EQUALS(z[1][0], 2);
+    ASSERT_EQUALS(z[2][0], 3);
+    ASSERT_EQUALS(z[3][0], 4);
+
     // EXAMPLE 5 (ISO C) - struct initializer
     struct { int a[3], b; } w[] = { { 1 }, 2 };
     ASSERT_EQUALS(sizeof(w), 32);
     ASSERT_EQUALS(w[0].a[0], 1);
     ASSERT_EQUALS(w[1].a[0], 2);
+
+    // EXAMPLE 6 (ISO C) - incompletely but consistently bracketed initialization
+    short q[4][3][2] = {
+        { 1 },
+        { 2, 3 },
+        { 4, 5, 6 }
+    };
+    ASSERT_EQUALS(sizeof(q), 48);
+    ASSERT_EQUALS(q[0][0][0], 1);
+    ASSERT_EQUALS(q[1][0][0], 2);
+    ASSERT_EQUALS(q[1][0][1], 3);
+    ASSERT_EQUALS(q[2][0][0], 4);
+    ASSERT_EQUALS(q[2][0][1], 5);
+    ASSERT_EQUALS(q[2][1][0], 6);
+
+    typedef int A[];
+    A a = { 1, 2 }, b = { 3, 4, 5 };
+    ASSERT_EQUALS(sizeof(a), 8);
+    ASSERT_EQUALS(a[0], 1);
+    ASSERT_EQUALS(a[1], 2);
+    ASSERT_EQUALS(sizeof(b), 12);
+    ASSERT_EQUALS(b[0], 3);
+    ASSERT_EQUALS(b[1], 4);
+    ASSERT_EQUALS(b[2], 5);
 }
