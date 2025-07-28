@@ -1454,7 +1454,10 @@ syntax_component_t* parse_string_literal(token_t** tokens, parse_request_code_t 
     syn->ctype = make_basic_type(CTC_ARRAY);
     syn->ctype->array.length_expression = syn->strl_length;
     syn->ctype->array.unspecified_size = false;
-    syn->ctype->derived_from = make_basic_type(CTC_CHAR);
+    if (syn->strl_reg)
+        syn->ctype->derived_from = make_basic_type(CTC_CHAR);
+    else
+        syn->ctype->derived_from = make_basic_type(C_TYPE_WCHAR_T);
     advance_token;
     update_status(FOUND);
     return syn;

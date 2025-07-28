@@ -1414,14 +1414,14 @@ static void linearize_array_declarator_after(syntax_traverser_t* trav, syntax_co
 static void initialize_string_literal(syntax_component_t* strl, symbol_t* sy, int64_t base_offset, air_insn_t** c)
 {
     air_insn_t* code = *c;
-    int64_t array_length = type_get_array_length(sy->type);
-    unsigned long long length = strl->strl_length->intc + 1;
-    if (array_length != -1)
-        length = min(length, array_length);
-    char* str = strl->strl_reg;
-    for (unsigned long long copied = 0; copied < length;)
+    int64_t array_size = type_size(sy->type);
+    unsigned long long size = (strl->strl_length->intc + 1) * (strl->strl_reg ? UNSIGNED_CHAR_WIDTH : C_TYPE_WCHAR_T_WIDTH);
+    if (array_size != -1)
+        size = min(size, array_size);
+    char* str = strl->strl_reg ? strl->strl_reg : (char*) strl->strl_wide;
+    for (unsigned long long copied = 0; copied < size;)
     {
-        unsigned long long remaining = length - copied;
+        unsigned long long remaining = size - copied;
         c_type_class_t class = CTC_UNSIGNED_LONG_LONG_INT;
         if (remaining < UNSIGNED_SHORT_INT_WIDTH)
             class = CTC_UNSIGNED_CHAR;
@@ -1605,10 +1605,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
 
     bool is_scalar = type_is_scalar(sy->type);
     bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
-
-    c_type_t* wct = make_basic_type(C_TYPE_WCHAR_T);
-    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_compatible(sy->type, wct);
-    type_delete(wct);
+    bool is_wchar_array = sy->type->class == CTC_ARRAY && type_is_wchar_compatible(sy->type->derived_from);
 
     if (init->type == SC_INITIALIZER_LIST && init->inlist_initializers->size == 1)
     {
@@ -1638,15 +1635,9 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
         ADD_CODE(insn);
     }
 
-    // ISO: 6.7.8 (14)
-    else if (is_char_array)
+    // ISO: 6.7.8 (14), 6.7.8 (15)
+    else if (is_char_array || is_wchar_array)
         initialize_string_literal(init, sy, 0, &code);
-
-    // ISO: 6.7.8 (15)
-    else if (is_wchar_array)
-    {
-        // TODO
-    }
 
     // ISO: 6.7.8 (13)
     else
@@ -1750,7 +1741,8 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
         syntax_component_t* id = syntax_get_declarator_identifier(parent->ideclr_declarator);
         symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
         if (!sy) report_return;
-        if (sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from))
+        if (sy->type->class == CTC_ARRAY &&
+            (type_is_character(sy->type->derived_from) || type_is_wchar_compatible(sy->type->derived_from)))
             return;
     }
     air_t* air = AIRINIZING_TRAVERSER->air;

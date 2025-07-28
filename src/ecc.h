@@ -1673,10 +1673,12 @@ int snerrorf(char* buffer, size_t maxlen, char* fmt, ...);
 /* buffer.c */
 buffer_t* buffer_init(void);
 buffer_t* buffer_append(buffer_t* b, char c);
+buffer_t* buffer_append_wide(buffer_t* b, int c);
 buffer_t* buffer_append_str(buffer_t* b, char* str);
 buffer_t* buffer_pop(buffer_t* b);
 void buffer_delete(buffer_t* b);
 char* buffer_export(buffer_t* b);
+int* buffer_export_wide(buffer_t* b);
 
 /* vector.c */
 vector_t* vector_init(void);

@@ -15,8 +15,6 @@ do
     asmfile=asm/$base.s
     difffile=diff/$base.diff
 
-    touch $expectedfile
-
     ../ecc -S -o $asmfile $filepath &> $actualfile
     content=$(cat $actualfile)
     declare -i exit_status=0
@@ -34,7 +32,11 @@ do
         fi
     fi
 
-    diff=$(diff $actualfile $expectedfile)
+    if [[ -a "$expectedfile" ]]; then
+        diff=$(diff $actualfile $expectedfile)
+    else
+        diff=$(printf "" | diff $actualfile -)
+    fi
 
     if [[ "$diff" == "" ]] && [[ $exit_status -lt 128 ]]; then
         printf " - %s: pass\n" $filename

@@ -106,6 +106,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
     vector_add(coei_stack, (void*) 0);
 
     int64_t offset = 0;
+    uint64_t ml = 1;
 
     for (unsigned i = 0; i < syn->inlist_initializers->size; ++i)
     {
@@ -134,7 +135,8 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                         return;
                     }
                     long long midx = -1;
-                    type_get_struct_union_member_info(nav, desigr->id, &midx, &offset);
+                    int64_t soffset = -1;
+                    type_get_struct_union_member_info(nav, desigr->id, &midx, &soffset);
                     if (midx == -1)
                     {
                         // ISO: 6.7.8 (7)
@@ -144,6 +146,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                         return;
                     }
                     vector_add(coei_stack, (void*) midx);
+                    offset += soffset;
                     nav = vector_get(nav->struct_union.member_types, midx);
                 }
                 else
@@ -168,6 +171,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     }
                     constexpr_convert_class(ce, CTC_LONG_LONG_INT);
                     int64_t value = constexpr_as_i64(ce);
+                    constexpr_delete(ce);
                     if (value < 0)
                     {
                         // ISO: 6.7.8 (6)
@@ -178,7 +182,6 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     }
                     vector_add(coei_stack, (void*) value);
                     offset += type_size(nav->derived_from) * value;
-                    constexpr_delete(ce);
                     nav = nav->derived_from;
                 }
             }
@@ -290,7 +293,11 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
             long long count = get_aggregate_type_element_count(cot);
             // incomplete array type prob, let it keep going till the initializer list is ova
             if (count == -1)
+            {
+                if (cot == ct)
+                    ml = ei;
                 break;
+            }
             if (ei >= count)
             {
                 vector_pop(cot_stack);
@@ -299,12 +306,19 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                 ei = (size_t) vector_peek(coei_stack);
             }
             else 
+            {
+                if (i == syn->inlist_initializers->size - 1 && cot != ct)
+                    ++ml;
                 break;
+            }
         }
     }
 
     vector_delete(cot_stack);
     vector_delete(coei_stack);
+
+    if (ct->class == CTC_ARRAY && !ct->array.length_expression)
+        ct->array.length = ml;
 }
 
 static bool string_literal_initializes_array(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -936,26 +950,6 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
     free(name);
 }
 
-static int64_t get_initializer_largest_offset(syntax_component_t* syn, int64_t base)
-{
-    if (syntax_is_expression_type(syn->type))
-        return base;
-    int64_t largest = base;
-    VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
-    {
-        int64_t sublargest = get_initializer_largest_offset(init, base + init->initializer_offset);
-        if (sublargest > largest)
-            largest = sublargest;
-    }
-    return largest;
-}
-
-static int64_t get_array_length_from_initializer(syntax_component_t* syn, symbol_t* sy)
-{
-    int64_t offset = get_initializer_largest_offset(syn, 0);
-    return offset / type_size(sy->type->derived_from) + 1;
-}
-
 void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy, int64_t base)
 {
     if (string_literal_initializes_array(trav, syn))
@@ -1032,11 +1026,46 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
 
 void analyze_automatic_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
+
+}
+
+void analyze_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
+{
     if (string_literal_initializes_array(trav, syn) && type_get_array_length(sy->type) == -1)
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
         if (!strsy) report_return;
         sy->type->array.length = type_get_array_length(strsy->type);
+    }
+}
+
+static void check_initializations(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (syn->type == SC_INITIALIZER_LIST)
+    {
+        VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
+            check_initializations(trav, init);
+        return;
+    }
+
+    c_type_t* ct = syn->initializer_ctype;
+
+    bool is_scalar = type_is_scalar(ct);
+    // bool is_char_array = ct->class == CTC_ARRAY && type_is_character(ct->derived_from);
+    // bool is_wchar_array = ct->class == CTC_ARRAY && type_is_wchar_compatible(ct->derived_from);
+
+    if (is_scalar && !can_assign(ct, syn->ctype, syn))
+    {
+        if (get_program_options()->iflag)
+        {
+            printf("invalid initialization on line %u: ", syn->row);
+            type_humanized_print(ct, printf);
+            printf(" = ");
+            type_humanized_print(syn->ctype, printf);
+            printf("\n");
+        }
+        // ISO: 6.7.8 (11)
+        ADD_ERROR(syn, "invalid initialization");
     }
 }
 
@@ -1055,8 +1084,10 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
 
     if (syn->cl_inlist->type == SC_INITIALIZER_LIST)
         add_initializer_list_semantics(trav, syn->cl_inlist, sy->type);
-    if (ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
-        ct->array.length = get_array_length_from_initializer(syn->cl_inlist, sy);
+    
+    check_initializations(trav, syn->cl_inlist);
+
+    analyze_initializer_after(trav, syn, sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
@@ -2325,36 +2356,6 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
-static void check_initializations(syntax_traverser_t* trav, syntax_component_t* syn)
-{
-    if (syn->type == SC_INITIALIZER_LIST)
-    {
-        VECTOR_FOR(syntax_component_t*, init, syn->inlist_initializers)
-            check_initializations(trav, init);
-        return;
-    }
-
-    c_type_t* ct = syn->initializer_ctype;
-
-    bool is_scalar = type_is_scalar(ct);
-    // bool is_char_array = ct->class == CTC_ARRAY && type_is_character(ct->derived_from);
-    // bool is_wchar_array = ct->class == CTC_ARRAY && type_is_wchar_compatible(ct->derived_from);
-
-    if (is_scalar && !can_assign(ct, syn->ctype, syn))
-    {
-        if (get_program_options()->iflag)
-        {
-            printf("invalid initialization on line %u: ", syn->row);
-            type_humanized_print(ct, printf);
-            printf(" = ");
-            type_humanized_print(syn->ctype, printf);
-            printf("\n");
-        }
-        // ISO: 6.7.8 (11)
-        ADD_ERROR(syn, "invalid initialization");
-    }
-}
-
 void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* init = syn->ideclr_initializer;
@@ -2394,10 +2395,8 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     }
 
     check_initializations(trav, init);
-    
-    c_type_t* ct = sy->type;
-    if (init->type == SC_INITIALIZER_LIST && ct->class == CTC_ARRAY && ct->array.length == 0 && !ct->array.length_expression)
-        ct->array.length = get_array_length_from_initializer(init, sy);
+
+    analyze_initializer_after(trav, init, sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd == SD_STATIC)

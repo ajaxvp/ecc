@@ -176,7 +176,7 @@ token_t* tokenize_string_literal(preprocessing_token_t* pp_token, tokenizing_set
     init_token(T_STRING_LITERAL);
     if (pp_token->string_literal.wide)
     {
-        vector_t* v = vector_init();
+        buffer_t* buf = buffer_init();
         for (char* str = pp_token->string_literal.value; *str;)
         {
             unsigned long long value = 0;
@@ -186,11 +186,10 @@ token_t* tokenize_string_literal(preprocessing_token_t* pp_token, tokenizing_set
                 return NULL;
             if (length > C_TYPE_WCHAR_T_WIDTH * 8)
                 warnf("[%s:%d:%d] character in wide string literal out of representable range\n", get_file_name(settings->filepath, false), token->row, token->col);
-            vector_add(v, (void*) (value = (int) value));
+            buffer_append_wide(buf, (int) value);
         }
-        vector_add(v, (void*) '\0');
-        token->string_literal.value_wide = strdup_wide((int*) v->data);
-        vector_delete(v);
+        token->string_literal.value_wide = buffer_export_wide(buf);
+        buffer_delete(buf);
     }
     else
     {

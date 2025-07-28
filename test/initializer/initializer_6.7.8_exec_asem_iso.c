@@ -1,38 +1,9 @@
-/* ISO: 6.7.8; automatic semantics tests */
+/* ISO: 6.7.8; ISO C automatic storage duration semantics tests */
 
 #include "../test.h"
 
-struct data
-{
-    int x;
-    int y;
-};
-
 int main(void)
 {
-    // basic initializer for a scalar
-    int i = 5;
-    ASSERT_EQUALS(i, 5);
-
-    // scalar initializer can be optionally enclosed in braces
-    int j = {5};
-    ASSERT_EQUALS(j, 5);
-
-    // basic initializer list for a struct
-    struct data k = { 3, 5 };
-    ASSERT_EQUALS(k.x, 3);
-    ASSERT_EQUALS(k.y, 5);
-
-    // copy initializer for structs
-    struct data l = k;
-    ASSERT_EQUALS(l.x, 3);
-    ASSERT_EQUALS(l.y, 5);
-
-    // designated initializer list for a struct
-    struct data m = { .y = 5 };
-    ASSERT_EQUALS(m.x, 0);
-    ASSERT_EQUALS(m.y, 5);
-
     // EXAMPLE 2 (ISO C) - basic array initializer with implicit length of 3
     int x[] = { 1, 3, 5 };
     ASSERT_EQUALS(sizeof(x), 12);
@@ -102,6 +73,7 @@ int main(void)
     ASSERT_EQUALS(q[2][0][1], 5);
     ASSERT_EQUALS(q[2][1][0], 6);
 
+    // EXAMPLE 7 (ISO C) - using a typedef for the array
     typedef int A[];
     A a = { 1, 2 }, b = { 3, 4, 5 };
     ASSERT_EQUALS(sizeof(a), 8);
@@ -111,4 +83,23 @@ int main(void)
     ASSERT_EQUALS(b[0], 3);
     ASSERT_EQUALS(b[1], 4);
     ASSERT_EQUALS(b[2], 5);
+
+    // EXAMPLE 8 (ISO C) - equivalent string initializations
+    char s1[] = "abc", t1[3] = "abc";
+    char s2[] = { 'a', 'b', 'c', '\0' }, t2[] = { 'a', 'b', 'c' };
+    ASSERT_EQUALS(sizeof(s1), sizeof(s2));
+    ASSERT_EQUALS(s1[0], s2[0]);
+    ASSERT_EQUALS(s1[1], s2[1]);
+    ASSERT_EQUALS(s1[2], s2[2]);
+    ASSERT_EQUALS(s1[3], s2[3]);
+    ASSERT_EQUALS(sizeof(t1), sizeof(t2));
+    ASSERT_EQUALS(t1[0], t2[0]);
+    ASSERT_EQUALS(t1[1], t2[1]);
+    ASSERT_EQUALS(t1[2], t2[2]);
+
+    // EXAMPLE 11 (ISO C) - same initialization from EXAMPLE 5 but with designations
+    struct { int a[3], b; } w2[] = { [0].a = { 1 }, [1].a[0] = 2 };
+    ASSERT_EQUALS(sizeof(w2), 32);
+    ASSERT_EQUALS(w2[0].a[0], 1);
+    ASSERT_EQUALS(w2[1].a[0], 2);
 }
