@@ -1,0 +1,10 @@
+ecc: error: [6:13] struct and union bitfields are not supported yet
+ecc: error: [6:13] bitfield width must be an integer constant expression
+ecc: error: [9:13] struct and union bitfields are not supported yet
+ecc: error: [9:13] bitfield width must be nonnegative
+ecc: error: [12:13] struct and union bitfields are not supported yet
+ecc: error: [12:13] bitfield width must not exceed the typical width of its declaring type
+ecc: error: [15:13] struct and union bitfields are not supported yet
+ecc: error: [15:9] zero-width bitfields may not declare an identifier
+ecc: error: [18:15] struct and union bitfields are not supported yet
+ecc: error: [18:11] bitfield must have a type of bool, int, or unsigned int

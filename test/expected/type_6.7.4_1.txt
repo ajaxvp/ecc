@@ -1,0 +1,3 @@
+ecc: error: [10:16] an inline function may not declare a non-const identifier with static storage duration
+ecc: error: [13:5] an inline function may not contain a reference to an identifier declared with internal linkage
+ecc: error: [17:12] 'main' should not have the 'inline' function specifier

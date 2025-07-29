@@ -30,6 +30,7 @@ c_type_t* type_copy(c_type_t* ct)
     c_type_t* nct = calloc(1, sizeof *nct);
     nct->class = ct->class;
     nct->qualifiers = ct->qualifiers;
+    nct->function_specifiers = ct->function_specifiers;
     switch (nct->class)
     {
         case CTC_ARRAY:
@@ -523,6 +524,14 @@ bool type_is_vla(c_type_t* ct)
     return type_get_array_length(ct) == -1;
 }
 
+bool type_is_function_inline(c_type_t* ct)
+{
+    if (!ct) return false;
+    if (ct->function_specifiers & FS_B_INLINE)
+        return true;
+    return type_is_function_inline(ct->derived_from);
+}
+
 int64_t type_get_array_length(c_type_t* ct)
 {
     if (!ct) return -1;
@@ -756,6 +765,15 @@ void type_get_struct_union_member_info(c_type_t* ct, char* name, long long* inde
             *offset += size != -1 ? size : 0;
         }
     }
+}
+
+bool type_has_flexible_array_member(c_type_t* ct)
+{
+    if (!ct) return false;
+    if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) return false;
+    if (!ct->struct_union.member_types) return false;
+    c_type_t* mt = vector_get(ct->struct_union.member_types, ct->struct_union.member_types->size - 1);
+    return mt && mt->class == CTC_ARRAY && !mt->array.length_expression;
 }
 
 long long type_alignment(c_type_t* ct)
@@ -1160,6 +1178,7 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
                 break;
             }
             case SC_TYPE_QUALIFIER: ct->qualifiers |= (1 << s->tq); break;
+            case SC_FUNCTION_SPECIFIER: ct->function_specifiers |= (1 << s->fs); break;
             default:
                 break;
         }
@@ -1617,7 +1636,7 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
     return NULL;
 }
 
-c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* specifying, syntax_component_t* declr)
+static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* specifying, syntax_component_t* declr)
 {
     c_type_t* base = process_declspecs(errors, specifying);
 
@@ -1800,6 +1819,31 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
         }
     }
     return base;
+}
+
+c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* specifying, syntax_component_t* declr)
+{
+    c_type_t* ct = create_type_impl(errors, specifying, declr);
+    if (!ct) return make_basic_type(CTC_ERROR);
+    if (ct->class == CTC_ERROR) return ct;
+
+    if ((ct->class != CTC_POINTER || (!type_is_object_type(ct->derived_from) && type_is_complete(ct->derived_from))) && (ct->qualifiers & TQ_B_RESTRICT))
+    {
+        // ISO: 6.7.3 (2)
+        ADD_ERROR(specifying, "type must be a pointer to an object or incomplete type in order to be restrict-qualified");
+        type_delete(ct);
+        return make_basic_type(CTC_ERROR);
+    }
+
+    if (ct->class != CTC_FUNCTION && ct->function_specifiers)
+    {
+        // ISO: 6.7.4 (2)
+        ADD_ERROR(specifying, "function specifiers may only be used in function types");
+        type_delete(ct);
+        return make_basic_type(CTC_ERROR);
+    }
+
+    return ct;
 }
 
 c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr)

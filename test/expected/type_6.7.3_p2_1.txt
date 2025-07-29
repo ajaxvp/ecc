@@ -1,0 +1,1 @@
+ecc: error: [4:1] type must be a pointer to an object or incomplete type in order to be restrict-qualified

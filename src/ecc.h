@@ -490,6 +490,7 @@ typedef struct c_type
 {
     c_type_class_t class;
     unsigned char qualifiers;
+    unsigned char function_specifiers;
     c_type_t* derived_from;
     union
     {
@@ -1011,6 +1012,8 @@ typedef enum function_specifier
 {
     FS_INLINE = 0
 } function_specifier_t;
+
+#define FS_B_INLINE (1 << FS_INLINE)
 
 typedef enum struct_or_union
 {
@@ -1864,6 +1867,7 @@ c_type_t* default_argument_promotions(c_type_t* ct);
 void usual_arithmetic_conversions(c_type_t* t1, c_type_t* t2, c_type_t** conv_t1, c_type_t** conv_t2);
 c_type_t* usual_arithmetic_conversions_result_type(c_type_t* t1, c_type_t* t2);
 void type_get_struct_union_member_info(c_type_t* ct, char* name, long long* index, int64_t* offset);
+bool type_has_flexible_array_member(c_type_t* ct);
 long long type_alignment(c_type_t* ct);
 long long type_size(c_type_t* ct);
 void type_delete(c_type_t* ct);
@@ -1903,8 +1907,10 @@ bool type_is_character_type(c_type_class_t class);
 bool type_is_character(c_type_t* ct);
 bool type_is_wchar_compatible(c_type_t* ct);
 bool type_is_vla(c_type_t* ct);
+bool type_is_function_inline(c_type_t* ct);
 int64_t type_get_array_length(c_type_t* ct);
 analysis_error_t* type(syntax_component_t* tlu);
+c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* specifying, syntax_component_t* declr);
 c_type_t* create_type(syntax_component_t* specifying, syntax_component_t* declr);
 void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...));
 c_type_t* type_copy(c_type_t* ct);

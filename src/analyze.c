@@ -430,6 +430,23 @@ STATEMENTS
 6.8.4.2 (2) - VLA/VMT
 6.8.6.1 (1) - VLA/VMT
 
+DECLARATIONS
+6.7.2.3 (1)
+6.7.2.3 (2)
+6.7.5.2 (1)
+6.7.5.2 (2)
+6.7.5.3 (1)
+6.7.5.3 (2)
+6.7.5.3 (3)
+6.7.5.3 (4)
+6.7.7 (2) - VLA/VMT
+6.7.8 (2)
+6.7.8 (3)
+6.7.8 (4)
+6.7.8 (5)
+6.7.8 (6)
+6.7.8 (7)
+
 SEMANTICS:
 
 EXPRESSIONS
@@ -499,6 +516,14 @@ DECLARATIONS
 6.7.1 (2)
 6.7.2 (2)
 6.7.2 (3)
+6.7.2.1 (2)
+6.7.2.1 (3)
+6.7.2.1 (4)
+6.7.2.2 (2)
+6.7.3 (2)
+6.7.4 (2)
+6.7.4 (3)
+6.7.4 (4)
 
 STATEMENTS
 6.8.1 (2)
@@ -785,7 +810,9 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
-    syn->ctype = create_type(arg_type, arg_type->tn_declarator);
+    syn->ctype = create_type_with_errors(ANALYSIS_TRAVERSER->errors, arg_type, arg_type->tn_declarator);
+    if (syn->ctype->class == CTC_ERROR)
+        return;
     if (syn->ctype->class == CTC_STRUCTURE ||
         syn->ctype->class == CTC_UNION ||
         syn->ctype->class == CTC_LONG_DOUBLE ||
@@ -932,9 +959,14 @@ void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax
     syn->cl_id = strdup(name);
     symbol_t* sy = symbol_table_add(SYMBOL_TABLE, name, symbol_init(syn));
     sy->ns = make_basic_namespace(NSC_ORDINARY);
-    sy->type = create_type(syn->cl_type_name, syn->cl_type_name->tn_declarator);
-    syn->ctype = expression_type_copy(sy->type, trav, syn);
     free(name);
+    sy->type = create_type_with_errors(ANALYSIS_TRAVERSER->errors, syn->cl_type_name, syn->cl_type_name->tn_declarator);
+    if (sy->type->class == CTC_ERROR)
+    {
+        syn->ctype = type_copy(sy->type);
+        return;
+    }
+    syn->ctype = expression_type_copy(sy->type, trav, syn);
 }
 
 void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -1304,7 +1336,15 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
     bool pass = true;
     c_type_t* otype = syn->uexpr_operand->ctype;
     if (syn->type == SC_SIZEOF_TYPE_EXPRESSION)
-        otype = create_type(syn->uexpr_operand, syn->uexpr_operand->tn_declarator);
+    {
+        otype = create_type_with_errors(ANALYSIS_TRAVERSER->errors, syn->uexpr_operand, syn->uexpr_operand->tn_declarator);
+        if (otype->class == CTC_ERROR)
+        {
+            syn->ctype = otype;
+            return;
+        }
+    }
+    if (!otype) report_return;
     if (otype->class == CTC_FUNCTION)
     {
         // ISO: 6.5.3.4 (1)
@@ -1345,7 +1385,12 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
 void analyze_cast_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     bool pass = true;
-    c_type_t* ct = create_type(syn->caexpr_type_name, syn->caexpr_type_name->tn_declarator);
+    c_type_t* ct = create_type_with_errors(ANALYSIS_TRAVERSER->errors, syn->caexpr_type_name, syn->caexpr_type_name->tn_declarator);
+    if (ct->class == CTC_ERROR)
+    {
+        syn->ctype = ct;
+        return;
+    }
     if (ct->class != CTC_VOID && !type_is_scalar(ct))
     {
         // ISO: 6.5.4 (2)
@@ -1816,10 +1861,9 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
             constexpr_delete(ce);
             return;
         }
-        constexpr_convert_class(ce, CTC_INT);
-        int value = constexpr_as_i32(ce);
-        // TODO: check if representable
-        if (false)
+        constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+        int64_t value = constexpr_as_i64(ce);
+        if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
         {
             // ISO: 6.7.2.2 (2)
             ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
@@ -1862,9 +1906,8 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
         return;
     }
     constexpr_convert_class(ce, CTC_INT);
-    int value = constexpr_as_i32(ce) + (idx - last);
-    // TODO: check if representable
-    if (false)
+    int64_t value = constexpr_as_i64(ce) + (idx - last);
+    if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
     {
         // ISO: 6.7.2.2 (2)
         ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
@@ -1881,7 +1924,38 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         analyze_enumeration_constant_after(trav, syn, sy);
     
     linkage_t lk = symbol_get_linkage(sy);
+    storage_duration_t sd = symbol_get_storage_duration(sy);
     syntax_component_t* scope = symbol_get_scope(sy);
+
+    syntax_component_t* fdef = syntax_get_function_definition(syn);
+    if (fdef)
+    {
+        syntax_component_t* fid = syntax_get_declarator_identifier(fdef->fdef_declarator);
+        if (!fid) report_return;
+        symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fid);
+        if (!fsy) report_return;
+        
+        if (fsy != sy && !(sy->type->qualifiers & TQ_B_CONST) && sd == SD_STATIC && type_is_function_inline(fsy->type))
+        {
+            // ISO: 6.7.4 (3)
+            ADD_ERROR(syn, "an inline function may not declare a non-const identifier with static storage duration");
+        }
+    }
+
+    if (sy->type->class == CTC_FUNCTION && streq(symbol_get_name(sy), "main") && type_is_function_inline(sy->type))
+        // ISO: 6.7.4 (4)
+        ADD_ERROR(syn, "'main' should not have the 'inline' function specifier");
+
+    if (sy->type->class == CTC_ARRAY)
+    {
+        c_type_t* et = sy->type;
+        for (; et && et->class == CTC_ARRAY; et = et->derived_from);
+        if (et && type_has_flexible_array_member(et))
+        {
+            // ISO: 6.7.2.1 (2)
+            ADD_ERROR(syn, "an array may not have elements of a struct or union type that has a flexible array member");
+        }
+    }
 
     if (sy->type->class != CTC_STRUCTURE &&
         sy->type->class != CTC_UNION &&
@@ -1939,6 +2013,23 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
 
 void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
+    linkage_t lk = symbol_get_linkage(sy);
+
+    syntax_component_t* fdef = syntax_get_function_definition(syn);
+    if (fdef)
+    {
+        syntax_component_t* fid = syntax_get_declarator_identifier(fdef->fdef_declarator);
+        if (!fid) report_return;
+        symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fid);
+        if (!fsy) report_return;
+
+        if (lk == LK_INTERNAL && type_is_function_inline(fsy->type))
+        {
+            // ISO: 6.7.4 (3)
+            ADD_ERROR(syn, "an inline function may not contain a reference to an identifier declared with internal linkage");
+        }
+    }
+
     if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
         syn->type = SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT;
     syn->ctype = expression_type_copy(sy->type, trav, syn);
@@ -2421,7 +2512,7 @@ void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t
         ADD_ERROR(syn, "variable-length arrays are not supported yet");
 }
 
-void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* ssy)
 {
     unsigned count = 0;
     VECTOR_FOR(syntax_component_t*, sdecl, syn->sus_declarations)
@@ -2433,6 +2524,61 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
             if (sdeclr->sdeclr_bits_expression)
             {
                 ADD_ERROR(sdeclr->sdeclr_bits_expression, "struct and union bitfields are not supported yet");
+
+                c_type_t* mt = create_type_with_errors(ANALYSIS_TRAVERSER->errors, sdecl, sdeclr);
+                if (mt->class == CTC_ERROR)
+                {
+                    type_delete(mt);
+                    continue;
+                }
+                if (mt->class != CTC_BOOL && mt->class != CTC_INT && mt->class != CTC_UNSIGNED_INT)
+                {
+                    // ISO: 6.7.2.1 (4)
+                    ADD_ERROR(sdeclr, "bitfield must have a type of bool, int, or unsigned int");
+                    type_delete(mt);
+                    continue;
+                }
+
+                constexpr_t* ce = constexpr_evaluate_integer(sdeclr->sdeclr_bits_expression);
+                if (!constexpr_evaluation_succeeded(ce))
+                {
+                    // ISO: 6.7.2.1 (3)
+                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must be an integer constant expression");
+                    constexpr_delete(ce);
+                    type_delete(mt);
+                    continue;
+                }
+
+                constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+                int64_t width = constexpr_as_i64(ce);
+                constexpr_delete(ce);
+
+                if (width < 0)
+                {
+                    // ISO: 6.7.2.1 (3)
+                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must be nonnegative");
+                    type_delete(mt);
+                    continue;
+                }
+
+                if (width > type_size(mt) * 8)
+                {
+                    // ISO: 6.7.2.1 (3)
+                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must not exceed the typical width of its declaring type");
+                    type_delete(mt);
+                    continue;
+                }
+
+                type_delete(mt);
+
+                if (width == 0 && sdeclr->sdeclr_declarator)
+                {
+                    // ISO: 6.7.2.1 (3)
+                    ADD_ERROR(sdeclr->sdeclr_declarator, "zero-width bitfields may not declare an identifier");
+                    continue;
+                }
+
+                // TODO: remove after bitfields are implemented
                 continue;
             }
             if (!sdeclr) continue;
@@ -2440,7 +2586,20 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
             if (!id) report_return;
             symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
             if (!sy) report_return;
-            bool complete = type_is_complete(sy->type);
+            if (type_has_flexible_array_member(sy->type))
+            {
+                // ISO: 6.7.2.1 (2)
+                ADD_ERROR(sdeclr, "member with a struct or union type may not have a flexible array member");
+                continue;
+            }
+            if (sy->type->class == CTC_FUNCTION)
+            {
+                // ISO: 6.7.2.1 (2)
+                ADD_ERROR(sdeclr, "struct or union members may not have a function type");
+                continue;
+            }
+            // a manual check is necessary here to see if a member has the same type as the struct itself
+            bool complete = type_is_complete(sy->type) && (!ssy || ssy->type != sy->type);
             bool flexible = !complete && sy->type->class == CTC_ARRAY && j == syn->sus_declarations->size - 1 &&
                 i == sdecl->sdecl_declarators->size - 1;
             if (!complete && !flexible)
@@ -2463,8 +2622,11 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
 
 void analyze_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    symbol_t* ssy = NULL;
+    if (syn->sus_id)
+        ssy = symbol_table_get_syn_id(SYMBOL_TABLE, syn->sus_id);
     if (syn->sus_declarations)
-        analyze_complete_struct_union_specifier_after(trav, syn);
+        analyze_complete_struct_union_specifier_after(trav, syn, ssy);
 }
 
 void analyze_floating_constant_after(syntax_traverser_t* trav, syntax_component_t* syn)

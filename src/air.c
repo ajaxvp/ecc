@@ -2905,6 +2905,7 @@ air_t* airinize(syntax_component_t* tlu)
     trav->after[SC_DESIGNATION] = linearize_no_action_after;
     trav->after[SC_POINTER] = linearize_no_action_after;
     trav->after[SC_TYPE_QUALIFIER] = linearize_no_action_after;
+    trav->after[SC_FUNCTION_SPECIFIER] = linearize_no_action_after;
     trav->after[SC_ABSTRACT_DECLARATOR] = linearize_no_action_after;
     trav->after[SC_ABSTRACT_ARRAY_DECLARATOR] = linearize_no_action_after;
     trav->after[SC_ABSTRACT_FUNCTION_DECLARATOR] = linearize_no_action_after;

@@ -1,0 +1,1 @@
+ecc: error: [6:1] function specifiers may only be used in function types
