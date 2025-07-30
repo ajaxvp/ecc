@@ -852,6 +852,115 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     insn->type = AIR_DIVIDE;
 }
 
+/*
+
+_1 %= _2;
+
+becomes:
+
+%eax = _1;
+%edx = 0;
+%edx:%eax /= _2;
+_1 = %edx;
+
+_1 /= _2;
+
+becomes:
+
+%eax = _1;
+%edx = 0;
+%edx:%eax /= _2;
+_1 = %eax;
+
+*/
+void localize_x86_64_direct_divide_modulo(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    try_extract_integer_constant(insn, air, 1, insn->ct);
+    try_extract_integer_constant(insn, air, 0, insn->ct);
+
+    // further localization only applies to integer division
+    if (insn->type == AIR_DIRECT_DIVIDE && !type_is_integer(insn->ct))
+        return;
+    regid_t hresultreg = insn->type == AIR_DIRECT_DIVIDE ? X86R_RAX : X86R_RDX;
+    if (insn->ops[0]->type != AOP_REGISTER) report_return;
+    if (insn->ops[1]->type != AOP_REGISTER) report_return;
+    air_insn_t* assign_top = air_insn_init(AIR_LOAD, 2);
+    assign_top->ct = type_copy(insn->ct);
+    assign_top->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    assign_top->ops[1] = air_insn_register_operand_init(insn->ops[0]->content.reg);
+    air_insn_insert_before(assign_top, insn);
+    air_insn_t* zero_rdx = air_insn_init(AIR_LOAD, 2);
+    zero_rdx->ct = type_copy(insn->ct);
+    zero_rdx->ops[0] = air_insn_register_operand_init(X86R_RDX);
+    zero_rdx->ops[1] = air_insn_integer_constant_operand_init(0);
+    air_insn_insert_before(zero_rdx, insn);
+    regid_t resultreg = insn->ops[1]->content.reg;
+    insn->ops[0]->content.reg = INVALID_VREGID;
+    air_insn_t* load_result = air_insn_init(AIR_LOAD, 2);
+    load_result->ct = type_copy(insn->ct);
+    load_result->ops[0] = air_insn_register_operand_init(resultreg);
+    load_result->ops[1] = air_insn_register_operand_init(hresultreg);
+    air_insn_insert_after(load_result, insn);
+    insn->type = AIR_DIRECT_DIVIDE;
+}
+
+/*
+
+unsigned _3 = _1 * _2;
+
+becomes:
+
+unsigned %eax = _1;
+unsigned _3 = %eax * _2;
+
+*/
+void localize_x86_64_multiply(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    if (!type_is_unsigned_integer(insn->ct) && insn->ct->class != CTC_POINTER)
+        return;
+    
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = insn->ops[1]->ct ? type_copy(insn->ops[1]->ct) : type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    ld->ops[1] = air_insn_operand_copy(insn->ops[1]);
+    air_insn_insert_before(ld, insn);
+
+    air_insn_operand_delete(insn->ops[1]);
+    insn->ops[1] = air_insn_register_operand_init(X86R_RAX);
+}
+
+/*
+
+_2 *= _1;
+
+becomes:
+
+unsigned %eax = _2;
+%eax *= _1;
+_2 = %eax;
+
+*/
+void localize_x86_64_direct_multiply(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    if (!type_is_unsigned_integer(insn->ct) && insn->ct->class != CTC_POINTER)
+        return;
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = insn->ops[0]->ct ? type_copy(insn->ops[0]->ct) : type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    ld->ops[1] = air_insn_operand_copy(insn->ops[0]);
+    air_insn_insert_before(ld, insn);
+
+    air_insn_operand_delete(insn->ops[0]);
+    insn->ops[0] = air_insn_register_operand_init(X86R_RAX);
+
+    air_insn_t* assign = air_insn_init(AIR_ASSIGN, 2);
+    assign->ct = type_copy(insn->ct);
+    assign->ops[0] = air_insn_operand_copy(insn->ops[0]);
+    assign->ops[1] = air_insn_register_operand_init(X86R_RAX);
+    air_insn_insert_after(assign, insn);
+}
+
 void localize_x86_64_add_subtract(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     try_extract_integer_constant(insn, air, 1, insn->ct);
@@ -1558,9 +1667,19 @@ void localize_x86_64(air_t* air)
                 case AIR_MODULO:
                     localize_x86_64_divide_modulo(insn, routine, air);
                     break;
+                case AIR_DIRECT_DIVIDE:
+                case AIR_DIRECT_MODULO:
+                    localize_x86_64_direct_divide_modulo(insn, routine, air);
+                    break;
                 case AIR_ADD:
                 case AIR_SUBTRACT:
                     localize_x86_64_add_subtract(insn, routine, air);
+                    break;
+                case AIR_MULTIPLY:
+                    localize_x86_64_multiply(insn, routine, air);
+                    break;
+                case AIR_DIRECT_MULTIPLY:
+                    localize_x86_64_direct_multiply(insn, routine, air);
                     break;
                 case AIR_VA_START:
                     insn = localize_x86_64_va_start(insn, routine, air);

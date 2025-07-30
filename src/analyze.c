@@ -202,6 +202,13 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
         // current element type
         c_type_t* et = cot->class == CTC_ARRAY ? cot->derived_from : vector_get(cot->struct_union.member_types, ei);
 
+        if (!type_is_object_type(et) && (et->class != CTC_ARRAY || type_is_vla(et)))
+        {
+            // ISO: 6.7.8 (3)
+            ADD_ERROR(init, "initialization target must be an object type or an array of unknown size that is not variable-length");
+            return;
+        }
+
         bool is_scalar = type_is_scalar(et);
         bool is_char_array = et->class == CTC_ARRAY && type_is_character(et->derived_from);
 
@@ -434,18 +441,10 @@ DECLARATIONS
 6.7.2.3 (1)
 6.7.2.3 (2)
 6.7.5.2 (1)
-6.7.5.2 (2)
+6.7.5.2 (2) - VLA/VMT
 6.7.5.3 (1)
-6.7.5.3 (2)
-6.7.5.3 (3)
 6.7.5.3 (4)
 6.7.7 (2) - VLA/VMT
-6.7.8 (2)
-6.7.8 (3)
-6.7.8 (4)
-6.7.8 (5)
-6.7.8 (6)
-6.7.8 (7)
 
 SEMANTICS:
 
@@ -524,6 +523,14 @@ DECLARATIONS
 6.7.4 (2)
 6.7.4 (3)
 6.7.4 (4)
+6.7.5.3 (2)
+6.7.5.3 (3)
+6.7.8 (2)
+6.7.8 (3)
+6.7.8 (4)
+6.7.8 (5)
+6.7.8 (6)
+6.7.8 (7)
 
 STATEMENTS
 6.8.1 (2)
@@ -2456,10 +2463,18 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     if (!id) report_return;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     if (!sy) report_return;
+    linkage_t lk = symbol_get_linkage(sy);
+    syntax_component_t* scope = symbol_get_scope(sy);
     if (!type_is_object_type(sy->type) && (sy->type->class != CTC_ARRAY || type_is_vla(sy->type)))
     {
         // ISO: 6.7.8 (3)
         ADD_ERROR(syn, "initialization target '%s' must be an object type or an array of unknown size that is not variable-length", symbol_get_name(sy));
+        return;
+    }
+    if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && scope_is_block(scope) && init)
+    {
+        // ISO: 6.7.8 (4)
+        ADD_ERROR(syn, "identifiers with external or internal linkage may not be initialized at block scope");
         return;
     }
     
@@ -2500,16 +2515,36 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
         analyze_automatic_initializer_after(trav, init, sy);
 }
 
-void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+void analyze_array_declarator_length_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (syn->adeclr_length_expression && !type_is_integer(syn->adeclr_length_expression->ctype))
+    if (!syn->adeclr_length_expression) return;
+
+    if (!type_is_integer(syn->adeclr_length_expression->ctype))
     {
         // ISO: 6.7.5.2 (1)
         ADD_ERROR(syn, "array length expression must have an integer type");
         return;
     }
-    if (syntax_is_vla(syn))
+    constexpr_t* ce = constexpr_evaluate_integer(syn->adeclr_length_expression);
+    if (!constexpr_evaluation_succeeded(ce))
+    {
         ADD_ERROR(syn, "variable-length arrays are not supported yet");
+        constexpr_delete(ce);
+        return;
+    }
+    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+    int64_t value = constexpr_as_i64(ce);
+    constexpr_delete(ce);
+    if (value <= 0)
+    {
+        ADD_ERROR(syn, "constant array length must be greater than zero");
+        return;
+    }
+}
+
+void analyze_array_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    analyze_array_declarator_length_after(trav, syn);
 }
 
 void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* ssy)
@@ -2650,12 +2685,30 @@ void analyze_function_declarator_after(syntax_traverser_t* trav, syntax_componen
 {
     if (!syn->fdeclr_parameter_declarations)
         ADD_ERROR(syn, "functions without prototypes are not supported yet");
+    if (syn->parent->type != SC_FUNCTION_DEFINITION && syn->fdeclr_knr_identifiers && syn->fdeclr_knr_identifiers->size > 0)
+    {
+        // ISO: 6.7.5.3 (3)
+        ADD_ERROR(syn, "function declarations which are not definitions must have an empty identifier list");
+        return;
+    }
 }
 
 void analyze_storage_class_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (syn->scs == SCS_REGISTER)
         ADD_WARNING(syn, "the 'register' storage class will not prioritize an object to remain in a register");
+}
+
+static void analyze_parameter_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    VECTOR_FOR(syntax_component_t*, spec, syn->pdecl_declaration_specifiers)
+    {
+        if (spec->type == SC_STORAGE_CLASS_SPECIFIER && spec->scs != SCS_REGISTER)
+        {
+            // ISO: 6.7.5.3 (2)
+            ADD_ERROR(syn, "only the 'register' storage class specifier may appear in a parameter declaration");
+        }
+    }
 }
 
 /*
@@ -2757,6 +2810,7 @@ analysis_error_t* analyze(syntax_component_t* tlu)
     trav->after[SC_ARRAY_DECLARATOR] = analyze_array_declarator_after;
     trav->after[SC_STRUCT_UNION_SPECIFIER] = analyze_struct_union_specifier_after;
     trav->after[SC_FUNCTION_DECLARATOR] = analyze_function_declarator_after;
+    trav->after[SC_PARAMETER_DECLARATION] = analyze_parameter_declaration_after;
 
     traverse(trav);
     analysis_error_t* errors = ANALYSIS_TRAVERSER->errors;
