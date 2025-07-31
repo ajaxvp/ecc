@@ -3,6 +3,13 @@
 #include "../include/string.h"
 #include "../include/stdlib.h"
 
+#define O_RDONLY 00
+#define O_WRONLY 01
+#define O_RDWR 02
+
+#define O_CREAT 0100
+#define O_TRUNC	01000
+
 static FILE files[FOPEN_MAX];
 
 static uint8_t istack[] = {
@@ -22,12 +29,12 @@ FILE* fopen(const char* filename, const char* mode)
     if (len == 1)
     {
         if (mode[0] == 'r')
-            flags = 0;
+            flags = O_RDONLY;
         else if (mode[0] == 'w')
-            flags = 1;
+            flags = O_WRONLY | O_CREAT | O_TRUNC;
     }
 
-    int fd = __ecc_lsys_open(filename, flags, 0);
+    int fd = __ecc_lsys_open(filename, flags, 0644);
     if (fd == -1)
         return NULL;
 
@@ -56,4 +63,14 @@ int fgetc(FILE* stream)
     if (__ecc_lsys_read(stream->__fd, &c, 1) == 0)
         return EOF;
     return (int) (unsigned char) c;
+}
+
+int fputc(int ch, FILE* stream)
+{
+    if (!stream)
+        return EOF;
+    unsigned char c = (unsigned char) ch;
+    if (__ecc_lsys_write(stream->__fd, (char*) &c, 1) == -1)
+        return EOF;
+    return ch;
 }

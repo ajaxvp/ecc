@@ -971,6 +971,23 @@ static void analyze_lsys_read_intrinsic_call_expression_after(syntax_traverser_t
     syn->ctype = make_basic_type(CTC_LONG_INT);
 }
 
+static void analyze_lsys_write_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!check_intrinsic_arg(trav, syn, 0, make_basic_type(CTC_INT)))
+        return;
+
+    c_type_t* arg_content_ct = make_basic_type(CTC_POINTER);
+    arg_content_ct->derived_from = make_basic_type(CTC_CHAR);
+    arg_content_ct->derived_from->qualifiers |= TQ_B_CONST;
+    if (!check_intrinsic_arg(trav, syn, 1, arg_content_ct))
+        return;
+    
+    if (!check_intrinsic_arg(trav, syn, 2, make_basic_type(C_TYPE_SIZE_T)))
+        return;
+
+    syn->ctype = make_basic_type(CTC_LONG_INT);
+}
+
 void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (streq(syn->icallexpr_name, "__ecc_va_arg"))
@@ -985,6 +1002,8 @@ void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_co
         analyze_lsys_close_intrinsic_call_expression_after(trav, syn);
     else if (streq(syn->icallexpr_name, "__ecc_lsys_read"))
         analyze_lsys_read_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_write"))
+        analyze_lsys_write_intrinsic_call_expression_after(trav, syn);
     else
     {
         ADD_ERROR(syn, "unsupported intrinsic function '%s' invoked", syn->icallexpr_name);

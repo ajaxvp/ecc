@@ -2796,6 +2796,8 @@ static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, 
         linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 3);
     else if (streq(syn->icallexpr_name, "__ecc_lsys_read"))
         linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 0);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_write"))
+        linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 1);
     else
         report_return;
 }

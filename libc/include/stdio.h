@@ -18,6 +18,8 @@ int fclose(FILE* stream);
 
 int fgetc(FILE* stream);
 
+int fputc(int ch, FILE* stream);
+
 int putchar(int c);
 
 int puts(const char* str);
