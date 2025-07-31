@@ -649,12 +649,15 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     if (insn->metadata.fcall_sret)
         ct = ct->derived_from;
 
+    air_insn_t* pos = blip_volatiles_after(insn);
+
+    if (ct->class == CTC_VOID)
+        return;
+
     // get the ABI classes of the return type
     size_t ccount = 0;
     arg_class_t* classes = find_classes(ct, &ccount);
     if (!classes) report_return;
-
-    air_insn_t* pos = blip_volatiles_after(insn);
 
     // if there is a single class and it's INTEGER,
     // then the return value is in %rax, so pull it into the result register
