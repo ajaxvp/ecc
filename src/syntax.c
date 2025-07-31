@@ -228,6 +228,18 @@ syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr)
     return declr;
 }
 
+syntax_component_t* syntax_get_function_declarator(syntax_component_t* declr)
+{
+    syntax_component_t* full = syntax_get_full_declarator(declr);
+    if (!full)
+        return NULL;
+    if (full->type == SC_DECLARATOR)
+        full = full->declr_direct;
+    if (full->type != SC_FUNCTION_DECLARATOR)
+        return NULL;
+    return full;
+}
+
 syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn)
 {
     for (; syn && syn->type != SC_TRANSLATION_UNIT; syn = syn->parent);

@@ -438,6 +438,21 @@ void air_insn_print(air_insn_t* insn, air_t* air, int (*printer)(const char* fmt
         case AIR_SEQUENCE_POINT:
             printer("<sequence point>");
             break;
+        case AIR_LSYSCALL:
+            if (air->locale == LOC_X86_64 && insn->ops[0]->type == AOP_REGISTER && insn->ops[0]->content.reg == INVALID_VREGID)
+            {
+                printer("lsyscall"); SEMICOLON
+                break;
+            }
+            TYPE OP(0) EQUALS printer("lsyscall");
+            LPAREN
+            for (size_t i = 1; i < insn->noops; ++i)
+            {
+                if (i != 1) COMMA
+                OP(i)
+            }
+            RPAREN SEMICOLON
+            break;
     }
     #undef SPACE
     #undef EQUALS
@@ -460,7 +475,8 @@ void air_routine_print(air_routine_t* routine, air_t* air, int (*printer)(const 
     }
     type_humanized_print(routine->sy->type->derived_from, printer);
     printer(" %s(", symbol_get_name(routine->sy));
-    syntax_component_t* declr = syntax_get_full_declarator(routine->sy->declarer);
+    syntax_component_t* declr = syntax_get_function_declarator(routine->sy->declarer);
+    if (!declr) report_return;
     VECTOR_FOR(c_type_t*, pt, routine->sy->type->function.param_types)
     {
         if (i) printer(", ");
@@ -713,6 +729,7 @@ bool air_insn_creates_temporary(air_insn_t* insn)
         case AIR_VA_ARG:
         case AIR_VA_END:
         case AIR_VA_START:
+        case AIR_LSYSCALL:
             return true;
     }
     return false;
@@ -788,6 +805,7 @@ bool air_insn_assigns(air_insn_t* insn)
         case AIR_VA_ARG:
         case AIR_VA_END:
         case AIR_VA_START:
+        case AIR_LSYSCALL:
             return true;
     }
     return false;
@@ -885,6 +903,7 @@ bool air_insn_produces_side_effect(air_insn_t* insn)
         case AIR_VA_ARG:
         case AIR_VA_END:
         case AIR_VA_START:
+        case AIR_LSYSCALL:
         default:
             break;
     }
@@ -1581,8 +1600,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
 {
     SETUP_LINEARIZE;
     syntax_component_t* init = syn->ideclr_initializer;
-    COPY_CODE(syn->ideclr_declarator);
-    COPY_CODE(init);
+
     syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
     if (!id) report_return;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
@@ -1590,12 +1608,16 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
+    COPY_CODE(syn->ideclr_declarator);
+
     if (sd == SD_STATIC)
     {
         linearize_static_init_declarator_after(trav, syn, sy, &code);
         FINALIZE_LINEARIZE;
         return;
     }
+
+    COPY_CODE(init);
 
     if (!init)
     {
@@ -1974,7 +1996,10 @@ static void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_co
     if (syn->type == SC_NOT_EXPRESSION)
     {
         c_type_t* int_type = make_basic_type(CTC_INT);
-        ut = usual_arithmetic_conversions_result_type(syn->uexpr_operand->ctype, int_type);
+        if (type_is_arithmetic(syn->uexpr_operand->ctype))
+            ut = usual_arithmetic_conversions_result_type(syn->uexpr_operand->ctype, int_type);
+        else
+            ut = type_copy(syn->uexpr_operand->ctype);
         srcreg = convert(trav, syn->uexpr_operand->ctype, ut, srcreg, &code);
         type_delete(int_type);
     }
@@ -2739,6 +2764,24 @@ static void linearize_va_intrinsic_call_expression_after(syntax_traverser_t* tra
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_lsyscall_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn, int id)
+{
+    SETUP_LINEARIZE;
+
+    air_insn_t* insn = air_insn_init(AIR_LSYSCALL, 2 + syn->icallexpr_args->size);
+    insn->ct = type_copy(syn->ctype);
+    insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
+    insn->ops[1] = air_insn_integer_constant_operand_init(id);
+    VECTOR_FOR(syntax_component_t*, arg, syn->icallexpr_args)
+    {
+        COPY_CODE(arg);
+        insn->ops[i + 2] = air_insn_register_operand_init(arg->expr_reg);
+    }
+    ADD_CODE(insn);
+
+    FINALIZE_LINEARIZE;
+}
+
 static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (streq(syn->icallexpr_name, "__ecc_va_arg"))
@@ -2747,6 +2790,12 @@ static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, 
         linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_START);
     else if (streq(syn->icallexpr_name, "__ecc_va_end"))
         linearize_va_intrinsic_call_expression_after(trav, syn, AIR_VA_END);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_open"))
+        linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 2);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_close"))
+        linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 3);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_read"))
+        linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 0);
     else
         report_return;
 }

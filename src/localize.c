@@ -579,7 +579,7 @@ INTEGER:
 
 */
 
-void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
+static air_insn_t* blip_volatiles_after(air_insn_t* insn)
 {
     static const regid_t volatile_integer_registers[] = {
         X86R_RAX,
@@ -605,6 +605,31 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
         X86R_XMM7
     };
 
+    air_insn_t* pos = insn;
+
+    for (size_t i = 0; i < sizeof(volatile_integer_registers) / sizeof(volatile_integer_registers[0]); ++i)
+    {
+        regid_t reg = volatile_integer_registers[i];
+        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
+        decl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+        decl->ops[0] = air_insn_register_operand_init(reg);
+        pos = air_insn_insert_after(decl, pos);
+    }
+
+    for (size_t i = 0; i < sizeof(volatile_sse_registers) / sizeof(volatile_sse_registers[0]); ++i)
+    {
+        regid_t reg = volatile_sse_registers[i];
+        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
+        decl->ct = make_basic_type(CTC_DOUBLE);
+        decl->ops[0] = air_insn_register_operand_init(reg);
+        pos = air_insn_insert_after(decl, pos);
+    }
+
+    return pos;
+}
+
+void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
     if (insn->ops[0]->type != AOP_REGISTER) report_return;
 
     // initialize the integer register return sequence
@@ -629,25 +654,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     arg_class_t* classes = find_classes(ct, &ccount);
     if (!classes) report_return;
 
-    air_insn_t* pos = insn;
-
-    for (size_t i = 0; i < sizeof(volatile_integer_registers) / sizeof(volatile_integer_registers[0]); ++i)
-    {
-        regid_t reg = volatile_integer_registers[i];
-        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
-        decl->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
-        decl->ops[0] = air_insn_register_operand_init(reg);
-        pos = air_insn_insert_after(decl, pos);
-    }
-
-    for (size_t i = 0; i < sizeof(volatile_sse_registers) / sizeof(volatile_sse_registers[0]); ++i)
-    {
-        regid_t reg = volatile_sse_registers[i];
-        air_insn_t* decl = air_insn_init(AIR_BLIP, 1);
-        decl->ct = make_basic_type(CTC_DOUBLE);
-        decl->ops[0] = air_insn_register_operand_init(reg);
-        pos = air_insn_insert_after(decl, pos);
-    }
+    air_insn_t* pos = blip_volatiles_after(insn);
 
     // if there is a single class and it's INTEGER,
     // then the return value is in %rax, so pull it into the result register
@@ -912,12 +919,15 @@ becomes:
 
 unsigned %eax = _1;
 unsigned _3 = %eax * _2;
+blip %rdx;
 
 */
 void localize_x86_64_multiply(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     if (!type_is_unsigned_integer(insn->ct) && insn->ct->class != CTC_POINTER)
         return;
+
+    try_extract_integer_constant(insn, air, 2, insn->ct);
     
     air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
     ld->ct = insn->ops[1]->ct ? type_copy(insn->ops[1]->ct) : type_copy(insn->ct);
@@ -927,6 +937,11 @@ void localize_x86_64_multiply(air_insn_t* insn, air_routine_t* routine, air_t* a
 
     air_insn_operand_delete(insn->ops[1]);
     insn->ops[1] = air_insn_register_operand_init(X86R_RAX);
+
+    air_insn_t* blip = air_insn_init(AIR_BLIP, 1);
+    blip->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    blip->ops[0] = air_insn_register_operand_init(X86R_RDX);
+    air_insn_insert_after(blip, insn);
 }
 
 /*
@@ -938,6 +953,7 @@ becomes:
 unsigned %eax = _2;
 %eax *= _1;
 _2 = %eax;
+blip %rdx;
 
 */
 void localize_x86_64_direct_multiply(air_insn_t* insn, air_routine_t* routine, air_t* air)
@@ -959,6 +975,11 @@ void localize_x86_64_direct_multiply(air_insn_t* insn, air_routine_t* routine, a
     assign->ops[0] = air_insn_operand_copy(insn->ops[0]);
     assign->ops[1] = air_insn_register_operand_init(X86R_RAX);
     air_insn_insert_after(assign, insn);
+
+    air_insn_t* blip = air_insn_init(AIR_BLIP, 1);
+    blip->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    blip->ops[0] = air_insn_register_operand_init(X86R_RDX);
+    air_insn_insert_after(blip, insn);
 }
 
 void localize_x86_64_add_subtract(air_insn_t* insn, air_routine_t* routine, air_t* air)
@@ -1202,13 +1223,18 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
         routine->retptr = sy;
     }
 
-    syntax_component_t* fdeclr = syntax_get_full_declarator(routine->sy->declarer);
+    syntax_component_t* fdeclr = syntax_get_function_declarator(routine->sy->declarer);
 
     if (!fdeclr) report_return;
 
     if (!fdeclr->fdeclr_parameter_declarations)
+    {
+        syntax_component_t* id = syntax_get_declarator_identifier(fdeclr);
+        if (id)
+            printf("no parameter declarations found for function: %s\n", id->id);
         // TODO: need to handle K&R functions (maybe?)
         report_return;
+    }
 
     // loop thru all parameters of the function
     VECTOR_FOR(syntax_component_t*, pdecl, fdeclr->fdeclr_parameter_declarations)
@@ -1307,7 +1333,7 @@ _2 += 64;
 air_insn_t* localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
     symbol_t* fsy = routine->sy;
-    syntax_component_t* fdeclr = syntax_get_full_declarator(fsy->declarer);
+    syntax_component_t* fdeclr = syntax_get_function_declarator(fsy->declarer);
     if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) report_return_value(NULL);
     vector_t* pdecls = fdeclr->fdeclr_parameter_declarations;
     if (!pdecls) report_return_value(NULL);
@@ -1648,6 +1674,81 @@ void localize_x86_64_assign(air_insn_t* insn, air_routine_t* routine, air_t* air
     localize_x86_64_assign_imm64_to_m64(insn, routine, air);
 }
 
+/*
+
+lsyscall(id, _1, _2, _3, _4, _5, _6);
+
+becomes:
+
+int %rax = id;
+type %rdi = _1; 
+type %rsi = _2; 
+type %rdx = _3;
+type %r10 = _4;
+type %r8 = _5;
+type %r9 = _6;
+lsyscall;
+blip volatiles;
+
+*/
+
+void localize_x86_64_lsyscall(air_insn_t* insn, air_routine_t* routine, air_t* air)
+{
+    static regid_t sequence[] = {
+        X86R_RDI,
+        X86R_RSI,
+        X86R_RDX,
+        X86R_R10,
+        X86R_R8,
+        X86R_R9
+    };
+    size_t nextreg = 0;
+    for (size_t i = 2; i < insn->noops; ++i)
+    {
+        air_insn_operand_t* op = insn->ops[i];
+        if (!op || op->type != AOP_REGISTER) report_return;
+
+        air_insn_t* def = air_insn_find_temporary_definition_from_insn(op->content.reg, insn);
+        if (!def) report_return;
+
+        air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+        ld->ct = type_copy(def->ct);
+        ld->ops[0] = air_insn_register_operand_init(sequence[nextreg++]);
+        ld->ops[1] = air_insn_operand_copy(op);
+        air_insn_insert_before(ld, insn);
+
+        op->content.reg = INVALID_VREGID;
+    }
+
+    air_insn_operand_t* id_op = insn->ops[1];
+
+    if (!id_op || id_op->type != AOP_INTEGER_CONSTANT) report_return;
+
+    air_insn_t* id_load = air_insn_init(AIR_LOAD, 2);
+    id_load->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
+    id_load->ops[0] = air_insn_register_operand_init(X86R_RAX);
+    id_load->ops[1] = air_insn_integer_constant_operand_init(id_op->content.ic);
+    air_insn_insert_before(id_load, insn);
+    id_op->type = AOP_REGISTER;
+    id_op->content.reg = INVALID_VREGID;
+
+    air_insn_t* pos = blip_volatiles_after(insn);
+
+    air_insn_operand_t* rop = insn->ops[0];
+
+    if (!rop || rop->type != AOP_REGISTER) report_return;
+
+    regid_t rreg = rop->content.reg;
+
+    air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
+    ld->ct = type_copy(insn->ct);
+    ld->ops[0] = air_insn_register_operand_init(rreg);
+    ld->ops[1] = air_insn_register_operand_init(X86R_RAX);
+    pos = air_insn_insert_after(ld, pos);
+
+    rop->content.reg = INVALID_VREGID;
+}
+
 void localize_x86_64(air_t* air)
 {
     VECTOR_FOR(air_routine_t*, routine, air->routines)
@@ -1717,6 +1818,9 @@ void localize_x86_64(air_t* air)
                     break;
                 case AIR_ASSIGN:
                     localize_x86_64_assign(insn, routine, air);
+                    break;
+                case AIR_LSYSCALL:
+                    localize_x86_64_lsyscall(insn, routine, air);
                     break;
                 default:
                     break;

@@ -300,6 +300,11 @@ typedef enum intrinsic_function
     IF_VA_COPY,
     IF_VA_END,
     IF_VA_START,
+    IF_LSYS_READ,
+    IF_LSYS_WRITE,
+    IF_LSYS_OPEN,
+    IF_LSYS_CLOSE,
+    IF_LSYS_MMAP,
 
     IF_NO_ELEMENTS
 } intrinsic_function_t;
@@ -688,7 +693,8 @@ typedef enum air_insn_type {
     AIR_VA_END,
     AIR_SEQUENCE_POINT,
     AIR_MEMSET,
-    AIR_BLIP
+    AIR_BLIP,
+    AIR_LSYSCALL
 } air_insn_type_t;
 
 typedef struct air_insn air_insn_t;
@@ -875,6 +881,8 @@ typedef enum x86_insn_type
     X86I_ROR,
 
     X86I_REP_STOSB,
+
+    X86I_SYSCALL,
 
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
@@ -1842,6 +1850,7 @@ syntax_component_t* syntax_get_declarator_identifier(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_function_definition(syntax_component_t* declr);
 syntax_component_t* syntax_get_declarator_declaration(syntax_component_t* declr);
 syntax_component_t* syntax_get_full_declarator(syntax_component_t* declr);
+syntax_component_t* syntax_get_function_declarator(syntax_component_t* declr);
 syntax_component_t* syntax_get_translation_unit(syntax_component_t* syn);
 symbol_table_t* syntax_get_symbol_table(syntax_component_t* syn);
 syntax_component_t* syntax_get_function_definition(syntax_component_t* syn);

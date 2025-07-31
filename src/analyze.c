@@ -663,8 +663,13 @@ void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_compone
     }
 
     if (pass)
+    {
         // ISO: 6.5.2.1 (1)
         syn->ctype = expression_type_copy(array->ctype->derived_from, trav, syn);
+        // lvalues lose their qualifiers if not used in an lvalue context
+        if (!syntax_is_in_lvalue_context(syn))
+            syn->ctype->qualifiers = 0;
+    }
     else
         syn->ctype = make_basic_type(CTC_ERROR);
 }
@@ -751,10 +756,19 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
                 c_type_t* tlhs = vector_get(called_type->derived_from->function.param_types, i);
                 if (!tlhs) // variadic arguments aren't going to have a type attached to them
                     break;
-                c_type_t* unqualified_tlhs = strip_qualifiers(tlhs);
+                c_type_t* unqualified_tlhs = type_copy(tlhs);
+                unqualified_tlhs->qualifiers = 0;
                 if (!can_assign(unqualified_tlhs, rhs->ctype, rhs))
                 {
                     // ISO: 6.5.2.2 (2)
+                    if (get_program_options()->iflag)
+                    {
+                        printf("function parameter expected this assignment to be possible: ");
+                        type_humanized_print(unqualified_tlhs, printf);
+                        printf(" = ");
+                        type_humanized_print(rhs->ctype, printf);
+                        printf("\n");
+                    }
                     ADD_ERROR(rhs, "invalid type for argument %d of this function call", i + 1);
                     pass = false;
                 }
@@ -882,6 +896,81 @@ void analyze_va_end_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
     syn->ctype = make_basic_type(CTC_VOID);
 }
 
+// deletes ct
+static bool check_intrinsic_arg(syntax_traverser_t* trav, syntax_component_t* syn, unsigned index, c_type_t* ct)
+{
+    vector_t* args = syn->icallexpr_args;
+
+    if (!args)
+    {
+        syn->ctype = make_basic_type(CTC_ERROR);
+        type_delete(ct);
+        report_return_value(false);
+    }
+
+    if (index >= args->size)
+    {
+        ADD_ERROR(syn, "invocation requires only %u argument%s", args->size, args->size != 1 ? "s" : "");
+        syn->ctype = make_basic_type(CTC_ERROR);
+        type_delete(ct);
+        return false;
+    }
+
+    syntax_component_t* arg = vector_get(args, index);
+
+    if (!can_assign(ct, arg->ctype, arg))
+    {
+        ADD_ERROR(arg, "argument %u of invocation has an incompatible type with parameter %u", index + 1, index + 1);
+        syn->ctype = make_basic_type(CTC_ERROR);
+        type_delete(ct);
+        return false;
+    }
+
+    type_delete(ct);
+    return true;
+}
+
+static void analyze_lsys_open_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    c_type_t* arg_fn_ct = make_basic_type(CTC_POINTER);
+    arg_fn_ct->derived_from = make_basic_type(CTC_CHAR);
+    arg_fn_ct->derived_from->qualifiers |= TQ_B_CONST;
+    if (!check_intrinsic_arg(trav, syn, 0, arg_fn_ct))
+        return;
+
+    if (!check_intrinsic_arg(trav, syn, 1, make_basic_type(CTC_INT)))
+        return;
+
+    if (!check_intrinsic_arg(trav, syn, 2, make_basic_type(CTC_UNSIGNED_INT)))
+        return;
+
+    syn->ctype = make_basic_type(CTC_INT);
+}
+
+static void analyze_lsys_close_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!check_intrinsic_arg(trav, syn, 0, make_basic_type(CTC_INT)))
+        return;
+
+    syn->ctype = make_basic_type(CTC_INT);
+}
+
+static void analyze_lsys_read_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
+{
+    if (!check_intrinsic_arg(trav, syn, 0, make_basic_type(CTC_INT)))
+        return;
+
+    c_type_t* arg_buf_ct = make_basic_type(CTC_POINTER);
+    arg_buf_ct->derived_from = make_basic_type(CTC_CHAR);
+    if (!check_intrinsic_arg(trav, syn, 1, arg_buf_ct))
+        return;
+    
+    if (!check_intrinsic_arg(trav, syn, 2, make_basic_type(C_TYPE_SIZE_T)))
+        return;
+
+    syn->ctype = make_basic_type(CTC_LONG_INT);
+}
+
 void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (streq(syn->icallexpr_name, "__ecc_va_arg"))
@@ -890,6 +979,12 @@ void analyze_intrinsic_call_expression_after(syntax_traverser_t* trav, syntax_co
         analyze_va_start_intrinsic_call_expression_after(trav, syn);
     else if (streq(syn->icallexpr_name, "__ecc_va_end"))
         analyze_va_end_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_open"))
+        analyze_lsys_open_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_close"))
+        analyze_lsys_close_intrinsic_call_expression_after(trav, syn);
+    else if (streq(syn->icallexpr_name, "__ecc_lsys_read"))
+        analyze_lsys_read_intrinsic_call_expression_after(trav, syn);
     else
     {
         ADD_ERROR(syn, "unsupported intrinsic function '%s' invoked", syn->icallexpr_name);
@@ -923,6 +1018,9 @@ void analyze_dereference_member_expression_after(syntax_traverser_t* trav, synta
         c_type_t* rt = expression_type_copy(vector_get(tlhs->derived_from->struct_union.member_types, mem_idx), trav, syn);
         rt->qualifiers = rt->qualifiers | tlhs->derived_from->qualifiers;
         syn->ctype = rt;
+        // lvalues lose their qualifiers if not used in an lvalue context
+        if (!syntax_is_in_lvalue_context(syn))
+            syn->ctype->qualifiers = 0;
     }
     else
         syn->ctype = make_basic_type(CTC_ERROR);
@@ -953,6 +1051,9 @@ void analyze_member_expression_after(syntax_traverser_t* trav, syntax_component_
         c_type_t* rt = expression_type_copy(vector_get(tlhs->struct_union.member_types, mem_idx), trav, syn);
         rt->qualifiers = rt->qualifiers | tlhs->qualifiers;
         syn->ctype = rt;
+        // lvalues lose their qualifiers if not used in an lvalue context
+        if (!syntax_is_in_lvalue_context(syn))
+            syn->ctype->qualifiers = 0;
     }
     else
         syn->ctype = make_basic_type(CTC_ERROR);
@@ -974,6 +1075,9 @@ void analyze_compound_literal_expression_before(syntax_traverser_t* trav, syntax
         return;
     }
     syn->ctype = expression_type_copy(sy->type, trav, syn);
+    // lvalues loses their qualifiers if not used in an lvalue context
+    if (!syntax_is_in_lvalue_context(syn))
+        syn->ctype->qualifiers = 0;
 }
 
 void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -987,6 +1091,9 @@ void analyze_string_literal_after(syntax_traverser_t* trav, syntax_component_t* 
     sy->type = type_copy(syn->ctype);
     type_delete(syn->ctype);
     syn->ctype = expression_type_copy(sy->type, trav, syn);
+    // lvalues lose their qualifiers if not used in an lvalue context
+    if (!syntax_is_in_lvalue_context(syn))
+        syn->ctype->qualifiers = 0;
     free(name);
 }
 
@@ -1180,8 +1287,13 @@ void analyze_dereference_expression_after(syntax_traverser_t* trav, syntax_compo
         pass = false;
     }
     if (pass)
+    {
         // ISO: 6.5.3.2 (4)
         syn->ctype = expression_type_copy(otype->derived_from, trav, syn);
+        // lvalues lose their qualifiers if not used in an lvalue context
+        if (!syntax_is_in_lvalue_context(syn))
+            syn->ctype->qualifiers = 0;
+    }
     else
         syn->ctype = make_basic_type(CTC_ERROR);
 }
@@ -2040,6 +2152,9 @@ void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_compo
     if (sy && sy->declarer->parent && sy->declarer->parent->type == SC_ENUMERATOR)
         syn->type = SC_PRIMARY_EXPRESSION_ENUMERATION_CONSTANT;
     syn->ctype = expression_type_copy(sy->type, trav, syn);
+    // lvalues lose their qualifiers if not used in an lvalue context
+    if (!syntax_is_in_lvalue_context(syn))
+        syn->ctype->qualifiers = 0;
 }
 
 void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)

@@ -575,7 +575,6 @@ c_type_t* default_argument_promotions(c_type_t* ct)
 c_type_t* strip_qualifiers(c_type_t* ct)
 {
     if (!ct) return NULL;
-    ct = type_copy(ct);
     ct->qualifiers = 0;
     for (c_type_t* d = ct->derived_from; d; d = d->derived_from)
         d->qualifiers = 0;

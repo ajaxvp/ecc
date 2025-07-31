@@ -585,5 +585,10 @@ const char* INTRINSIC_FUNCTION_NAMES[] = {
     "__ecc_va_arg",
     "__ecc_va_copy",
     "__ecc_va_end",
-    "__ecc_va_start"
+    "__ecc_va_start",
+    "__ecc_lsys_read",
+    "__ecc_lsys_write",
+    "__ecc_lsys_open",
+    "__ecc_lsys_close",
+    "__ecc_lsys_mmap"
 };

@@ -297,6 +297,7 @@ bool x86_insn_uses_suffix(x86_insn_t* insn)
         case X86I_MOVSX:
         case X86I_STC:
         case X86I_REP_STOSB:
+        case X86I_SYSCALL:
             return false;
     }
     return true;
@@ -335,6 +336,7 @@ uint8_t x86_insn_writes(x86_insn_t* insn)
         case X86I_PTEST:
         case X86I_STC:
         case X86I_REP_STOSB:
+        case X86I_SYSCALL:
             return 0;
         case X86I_POP:
         case X86I_SETE:
@@ -495,6 +497,10 @@ void x86_write_insn(x86_insn_t* insn, FILE* file)
 
         case X86I_NOP:
             fprintf(file, INDENT "nop");
+            break;
+
+        case X86I_SYSCALL:
+            fprintf(file, INDENT "syscall");
             break;
         
         case X86I_CALL:
@@ -1262,10 +1268,10 @@ x86_insn_t* x86_generate_not(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_
     c_type_t* opt = ainsn->ops[1]->ct;
 
     x86_insn_t* cmp = NULL;
-    if (type_is_integer(opt))
+    if (type_is_integer(opt) || opt->class == CTC_POINTER)
     {
         cmp = make_basic_x86_insn(X86I_CMP);
-        cmp->size = c_type_to_x86_operand_size(ainsn->ct);
+        cmp->size = c_type_to_x86_operand_size(ainsn->ops[1]->ct);
         cmp->op1 = make_operand_immediate(0);
         cmp->op2 = air_operand_to_x86_operand(ainsn->ops[1], routine);
     }
@@ -2091,6 +2097,13 @@ x86_insn_t* x86_generate_memset(air_insn_t* ainsn, x86_asm_routine_t* routine, x
     return insn;
 }
 
+x86_insn_t* x86_generate_lsyscall(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
+{
+    x86_insn_t* insn = make_basic_x86_insn(X86I_SYSCALL);
+
+    return insn;
+}
+
 x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
 {
     if (!ainsn) return NULL;
@@ -2192,6 +2205,9 @@ x86_insn_t* x86_generate_insn(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
         
         case AIR_MEMSET:
             return x86_generate_memset(ainsn, routine, file);
+
+        case AIR_LSYSCALL:
+            return x86_generate_lsyscall(ainsn, routine, file);
         
         // these instructions are symbolic for earlier stages
         case AIR_DECLARE_REGISTER:
