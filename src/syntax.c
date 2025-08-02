@@ -476,6 +476,7 @@ bool syntax_is_lvalue(syntax_component_t* syn)
 {
     if (!syn) return false;
     if (!syn->ctype) return false;
+    if (syn->lost_lvalue) return false;
     // ISO: 6.3.2.1 (1)
     return syntax_is_expression_type(syn->type) &&
         (type_is_object_type(syn->ctype) ||

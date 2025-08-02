@@ -1156,6 +1156,7 @@ typedef struct syntax_component_t
 
     // additional information
     c_type_t* ctype;
+    bool lost_lvalue;
     air_insn_t* code;
 
     // type-specific additional info for linear IR transformation

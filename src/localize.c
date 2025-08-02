@@ -892,12 +892,12 @@ void localize_x86_64_direct_divide_modulo(air_insn_t* insn, air_routine_t* routi
     if (insn->type == AIR_DIRECT_DIVIDE && !type_is_integer(insn->ct))
         return;
     regid_t hresultreg = insn->type == AIR_DIRECT_DIVIDE ? X86R_RAX : X86R_RDX;
-    if (insn->ops[0]->type != AOP_REGISTER) assert_fail;
+    if (insn->ops[0]->type != AOP_REGISTER && insn->ops[0]->type != AOP_INDIRECT_REGISTER) assert_fail;
     if (insn->ops[1]->type != AOP_REGISTER) assert_fail;
     air_insn_t* assign_top = air_insn_init(AIR_LOAD, 2);
     assign_top->ct = type_copy(insn->ct);
     assign_top->ops[0] = air_insn_register_operand_init(X86R_RAX);
-    assign_top->ops[1] = air_insn_register_operand_init(insn->ops[0]->content.reg);
+    assign_top->ops[1] = air_insn_operand_copy(insn->ops[0]);
     air_insn_insert_before(assign_top, insn);
     air_insn_t* zero_rdx = air_insn_init(AIR_LOAD, 2);
     zero_rdx->ct = type_copy(insn->ct);

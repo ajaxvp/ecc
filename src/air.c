@@ -1780,7 +1780,13 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
     vector_add(air->rodata, data);
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD_ADDR, 2);
-    insn->ct = type_copy(syn->ctype);
+    if (syn->parent->type == SC_REFERENCE_EXPRESSION)
+    {
+        insn->ct = make_basic_type(CTC_POINTER);
+        insn->ct->derived_from = type_copy(syn->ctype);
+    }
+    else
+        insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
     insn->ops[1] = air_insn_symbol_operand_init(data->sy);
     ADD_CODE(insn);

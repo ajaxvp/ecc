@@ -371,7 +371,10 @@ static c_type_t* expression_type_copy(c_type_t* ct, syntax_traverser_t* trav, sy
     bool function_unconverted = syn->parent->type == SC_SIZEOF_EXPRESSION || syn->parent->type == SC_SIZEOF_TYPE_EXPRESSION ||
         syn->parent->type == SC_REFERENCE_EXPRESSION;
     if (ct->class == CTC_ARRAY && !array_unconverted)
+    {
+        syn->lost_lvalue = true;
         return make_reference_type(ct);
+    }
     else if (ct->class == CTC_FUNCTION && !function_unconverted)
     {
         c_type_t* ptr = make_basic_type(CTC_POINTER);
