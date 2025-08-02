@@ -102,7 +102,7 @@ static void find_all_conflicts(air_routine_t* routine, allocator_t* a, air_t* ai
         if (!air_insn_creates_temporary(insn))
             continue;
 
-        if (insn->noops < 1 || insn->ops[0]->type != AOP_REGISTER) report_return;
+        assert(insn->noops >= 1 && insn->ops[0]->type == AOP_REGISTER);
 
         regid_t reg = insn->ops[0]->content.reg;
 
@@ -211,7 +211,7 @@ static void coalesce(air_routine_t* routine, allocator_t* a, air_t* air)
             
             air_insn_t* odef = air_insn_find_temporary_definition(ok, routine);
             air_insn_t* def = air_insn_find_temporary_definition(k, routine);
-            if (!odef || !def) report_return;
+            assert(odef && def);
             c_type_t* oct = odef->ct;
             c_type_t* ct = def->ct;
             if (air->locale == LOC_X86_64 && !x86_64_c_type_registers_compatible(oct, ct))
@@ -263,7 +263,7 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
                 printf("no definition found for the following register: ");
                 regid_print(reg, printf);
                 printf("\n");
-                report_return_value(INVALID_VREGID);
+                assert_fail;
             }
             // and examine its type
 
@@ -271,14 +271,14 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
             if (type_is_integer(def->ct) || def->ct->class == CTC_POINTER)
             {
                 for (; (*nextintreg <= X86R_R15 && map_contains_key(a->map, (void*) (*nextintreg))) || *nextintreg == X86R_RBP; ++(*nextintreg));
-                if (*nextintreg > X86R_R15) report_return_value(INVALID_VREGID);
+                assert(*nextintreg <= X86R_R15);
                 map_add(a->replacements, (void*) reg, (void*) (repl = (*nextintreg)++));
             }
             // if it's a floating type, take next SSE register available (skipping in the same manner as above)
             else if (type_is_real_floating(def->ct))
             {
                 for (; *nextssereg <= X86R_XMM7 && map_contains_key(a->map, (void*) (*nextssereg)); ++(*nextssereg));
-                if (*nextssereg > X86R_XMM7) report_return_value(INVALID_VREGID);
+                assert(*nextssereg <= X86R_XMM7);
                 map_add(a->replacements, (void*) reg, (void*) (repl = (*nextssereg)++));
             }
             else if (def->ct->class == CTC_VOID)
@@ -289,7 +289,7 @@ static regid_t find_replacement_x86_64(regid_t reg, air_insn_t* insn, allocator_
                 printf("for the following assertion: unexpected type: ");
                 type_humanized_print(def->ct, printf);
                 printf("\n");
-                report_return_value(INVALID_VREGID);
+                assert_fail;
             }
         }
         // if there is
@@ -347,7 +347,7 @@ static void replace_registers(air_routine_t* routine, allocator_t* a, air_t* air
     switch (air->locale)
     {
         case LOC_X86_64: replace_registers_x86_64(routine, a, air); break;
-        default: report_return;
+        default: assert_fail;
     }
 }
 

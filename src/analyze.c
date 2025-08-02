@@ -337,9 +337,9 @@ static bool string_literal_initializes_array(syntax_traverser_t* trav, syntax_co
     if (!ideclr) return false;
 
     syntax_component_t* id = syntax_get_declarator_identifier(ideclr);
-    if (!id) report_return_value(NULL);
+    assert(id);
     symbol_t* isy = symbol_table_get_syn_id(syntax_get_translation_unit(syn)->tlu_st, id);
-    if (!isy) report_return_value(NULL);
+    assert(isy);
 
     if (ideclr == syn->parent || (syn->parent->type == SC_INITIALIZER_LIST && ideclr == syn->parent->parent))
     {
@@ -599,11 +599,11 @@ static void enforce_6_9_para_2(syntax_traverser_t* trav, syntax_component_t* syn
     {
         case SC_FUNCTION_DEFINITION: declspecs = syn->fdef_declaration_specifiers; break;
         case SC_DECLARATION: declspecs = syn->decl_declaration_specifiers; break;
-        default: report_return;
+        default: assert_fail;
     }
     VECTOR_FOR(syntax_component_t*, declspec, declspecs)
     {
-        if (!declspec) report_continue;
+        assert(declspec);
         if (declspec->type == SC_STORAGE_CLASS_SPECIFIER &&
             (declspec->scs == SCS_AUTO || declspec->scs == SCS_REGISTER))
             // ISO: 6.9 (2)
@@ -905,7 +905,7 @@ static bool check_intrinsic_arg(syntax_traverser_t* trav, syntax_component_t* sy
     {
         syn->ctype = make_basic_type(CTC_ERROR);
         type_delete(ct);
-        report_return_value(false);
+        assert_fail;
     }
 
     if (index >= args->size)
@@ -1121,7 +1121,7 @@ void analyze_static_initializer_after(syntax_traverser_t* trav, syntax_component
     if (string_literal_initializes_array(trav, syn))
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-        if (!strsy) report_return;
+        assert(strsy);
         if (syn->strl_reg)
             memcpy(sy->data + base, syn->strl_reg, type_size(strsy->type));
         else if (syn->strl_wide)
@@ -1200,7 +1200,7 @@ void analyze_initializer_after(syntax_traverser_t* trav, syntax_component_t* syn
     if (string_literal_initializes_array(trav, syn) && type_get_array_length(sy->type) == -1)
     {
         symbol_t* strsy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-        if (!strsy) report_return;
+        assert(strsy);
         sy->type->array.length = type_get_array_length(strsy->type);
     }
 }
@@ -1239,7 +1239,7 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
 {
     bool pass = true;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
+    assert(sy);
     c_type_t* ct = sy->type;
     if (!type_is_object_type(ct) && (ct->class != CTC_ARRAY || ct->array.length_expression || type_is_vla(ct)))
     {
@@ -1326,12 +1326,12 @@ typedef struct roa_traverser
 void roa_primary_expression_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     c_namespace_t* ns = syntax_get_namespace(syn);
-    if (!ns) report_return;
+    if (!ns) assert_fail;
     symbol_t* sy = symbol_table_lookup(syntax_get_translation_unit(syn)->tlu_st, syn, ns);
     namespace_delete(ns);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     syntax_component_t* decl = syntax_get_declarator_declaration(sy->declarer);
-    if (!decl) report_return;
+    if (!decl) assert_fail;
     if (!syntax_has_specifier(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_REGISTER))
         return;
     roa_traverser_t* roat = (roa_traverser_t*) trav;
@@ -1374,9 +1374,9 @@ void analyze_reference_expression_after(syntax_traverser_t* trav, syntax_compone
             c_namespace_t* ns = syntax_get_namespace(syn->uexpr_operand->memexpr_id);
             symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn->uexpr_operand->memexpr_id, ns);
             namespace_delete(ns);
-            if (!sy) report_return;
+            if (!sy) assert_fail;
             syntax_component_t* sdeclr = syntax_get_full_declarator(sy->declarer);
-            if (sdeclr->type != SC_STRUCT_DECLARATOR) report_return;
+            if (sdeclr->type != SC_STRUCT_DECLARATOR) assert_fail;
             if (!sdeclr->sdeclr_bits_expression)
                 pass = true;
             else
@@ -1482,7 +1482,7 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
             return;
         }
     }
-    if (!otype) report_return;
+    if (!otype) assert_fail;
     if (otype->class == CTC_FUNCTION)
     {
         // ISO: 6.5.3.4 (1)
@@ -1503,9 +1503,9 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
         c_namespace_t* ns = syntax_get_namespace(syn->uexpr_operand->memexpr_id);
         symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn->uexpr_operand->memexpr_id, ns);
         namespace_delete(ns);
-        if (!sy) report_return;
+        if (!sy) assert_fail;
         syntax_component_t* sdeclr = syntax_get_full_declarator(sy->declarer);
-        if (sdeclr->type != SC_STRUCT_DECLARATOR) report_return;
+        if (sdeclr->type != SC_STRUCT_DECLARATOR) assert_fail;
         if (sdeclr->sdeclr_bits_expression)
         {
             // ISO: 6.5.3.4 (1)
@@ -1789,7 +1789,7 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
     if (type_is_arithmetic(op2_type) && type_is_arithmetic(op3_type))
     {
         c_type_t* result_type = usual_arithmetic_conversions_result_type(op2_type, op3_type);
-        if (!result_type) report_return;
+        if (!result_type) assert_fail;
         // ISO: 6.5.15 (5)
         if (!ft) ft = result_type;
     }
@@ -1934,7 +1934,7 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
                 pass = true;
             break;
         }
-        default: report_return;
+        default: assert_fail;
     }
     if (!pass)
     {
@@ -1948,7 +1948,7 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
 void analyze_assignment_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     c_type_t* ft = NULL;
-    if (!syn->bexpr_lhs || !syn->bexpr_rhs) report_return;
+    if (!syn->bexpr_lhs || !syn->bexpr_rhs) assert_fail;
     if (!syntax_is_modifiable_lvalue(syn->bexpr_lhs))
     {
         // ISO: 6.5.16 (2)
@@ -1970,9 +1970,9 @@ void analyze_assignment_expression_after(syntax_traverser_t* trav, syntax_compon
 
 void analyze_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    if (!syn->expr_expressions) report_return;
+    if (!syn->expr_expressions) assert_fail;
     syntax_component_t* last_expr = vector_get(syn->expr_expressions, syn->expr_expressions->size - 1);
-    if (!last_expr) report_return;
+    if (!last_expr) assert_fail;
     // ISO: 6.5.17 (2)
     syn->ctype = type_copy(last_expr->ctype);
 }
@@ -1987,7 +1987,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
 {
     syntax_component_t* enumr = sy->declarer->parent;
     if (!enumr)
-        report_return;
+        assert_fail;
     // if enumerator has a constant value associated with it, use that value
     if (enumr->enumr_expression)
     {
@@ -2015,7 +2015,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     // otherwise...
     syntax_component_t* enums = enumr->parent;
     if (!enums)
-        report_return;
+        assert_fail;
     // find the last enumerator that does have one before the current enum constant
     int last = -1;
     int idx = 0;
@@ -2069,9 +2069,9 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
     if (fdef)
     {
         syntax_component_t* fid = syntax_get_declarator_identifier(fdef->fdef_declarator);
-        if (!fid) report_return;
+        if (!fid) assert_fail;
         symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fid);
-        if (!fsy) report_return;
+        if (!fsy) assert_fail;
         
         if (fsy != sy && !(sy->type->qualifiers & TQ_B_CONST) && sd == SD_STATIC && type_is_function_inline(fsy->type))
         {
@@ -2129,10 +2129,10 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
 
     if (sy->type->class == CTC_LABEL && !first && symbols->size > 1)
     {
-        if (!scope) report_return;
-        if (scope->type != SC_FUNCTION_DEFINITION) report_return;
+        if (!scope) assert_fail;
+        if (scope->type != SC_FUNCTION_DEFINITION) assert_fail;
         syntax_component_t* func_id = syntax_get_declarator_identifier(scope->fdef_declarator);
-        if (!func_id) report_return;
+        if (!func_id) assert_fail;
         // ISO: 6.8.1 (3)
         ADD_ERROR(syn, "duplicate label name '%s' in function '%s'", syn->id, func_id->id);
     }
@@ -2157,9 +2157,9 @@ void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_compo
     if (fdef)
     {
         syntax_component_t* fid = syntax_get_declarator_identifier(fdef->fdef_declarator);
-        if (!fid) report_return;
+        if (!fid) assert_fail;
         symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fid);
-        if (!fsy) report_return;
+        if (!fsy) assert_fail;
 
         if (lk == LK_INTERNAL && type_is_function_inline(fsy->type))
         {
@@ -2219,9 +2219,9 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* id = syntax_get_declarator_identifier(syn->fdef_declarator);
-    if (!id) report_return;
+    if (!id) assert_fail;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     if (sy->type->class == CTC_FUNCTION)
         return;
     // ISO: 6.9.1 (2)
@@ -2231,9 +2231,9 @@ static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* s
 static void enforce_6_9_1_para_3(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* id = syntax_get_declarator_identifier(syn->fdef_declarator);
-    if (!id) report_return;
+    if (!id) assert_fail;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     if (sy->type->class != CTC_FUNCTION)
         return; // this is handled in enforce_6_9_1_para_2
     c_type_t* ct = sy->type;
@@ -2259,7 +2259,7 @@ static void enforce_6_9_1_para_4(syntax_traverser_t* trav, syntax_component_t* s
 static void enforce_6_9_1_para_5(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* declr = syn->fdef_declarator;
-    if (!declr) report_return;
+    if (!declr) assert_fail;
     if (declr->type != SC_FUNCTION_DECLARATOR)
         return; // this is handled in enforce_6_9_1_para_2
     if (!declr->fdeclr_parameter_declarations)
@@ -2291,7 +2291,7 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
 {
     syntax_component_t* declr = syn->fdef_declarator;
     vector_t* knr_decls = syn->fdef_knr_declarations;
-    if (!declr) report_return;
+    if (!declr) assert_fail;
     if (declr->type != SC_FUNCTION_DECLARATOR)
         return; // this is handled in enforce_6_9_1_para_2
     if (!declr->fdeclr_knr_identifiers)
@@ -2317,7 +2317,7 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
                 // ISO: 6.9.1 (6)
                 ADD_ERROR(ideclr->ideclr_initializer, "declarations in the function declaration list cannot have initializers");
             syntax_component_t* id = syntax_get_declarator_identifier(ideclr->ideclr_declarator);
-            if (!id) report_return;
+            if (!id) assert_fail;
             if (vector_contains(declr->fdeclr_knr_identifiers, id, (int (*)(void*, void*)) strcmp) == -1)
                 // ISO: 6.9.1 (6)
                 ADD_ERROR(syn, "declaration of '%s' does not have a corresponding identifier in the identifier list", id->id);
@@ -2339,11 +2339,11 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
 static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* id = syntax_get_declarator_identifier(syn->fdef_declarator);
-    if (!id) report_return;
+    if (!id) assert_fail;
     if (strcmp(id->id, "main"))
         return;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     if (sy->type->class != CTC_FUNCTION)
         return; // this is handled in enforce_6_9_1_para_2
     c_type_t* ct = sy->type;
@@ -2543,7 +2543,7 @@ void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_componen
             }
             break;
         default:
-            report_return;
+            assert_fail;
     }
     if (controlling && !type_is_scalar(controlling->ctype))
         // ISO: 6.8.5 (2)
@@ -2575,12 +2575,12 @@ void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t*
 void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* fdef = syntax_get_function_definition(syn);
-    if (!fdef) report_return;
+    if (!fdef) assert_fail;
     syntax_component_t* id = syntax_get_declarator_identifier(fdef->fdef_declarator);
-    if (!id) report_return;
+    if (!id) assert_fail;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
-    if (!sy->type) report_return;
+    if (!sy) assert_fail;
+    if (!sy->type) assert_fail;
     if (sy->type->derived_from->class == CTC_VOID && syn->retstmt_expression)
         // ISO: 6.8.6.4 (1)
         ADD_ERROR(syn, "return values are not allowed for return statements if their function has a void return type");
@@ -2594,9 +2594,9 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     syntax_component_t* init = syn->ideclr_initializer;
     if (!init) return;
     syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
-    if (!id) report_return;
+    if (!id) assert_fail;
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     linkage_t lk = symbol_get_linkage(sy);
     syntax_component_t* scope = symbol_get_scope(sy);
     if (!type_is_object_type(sy->type) && (sy->type->class != CTC_ARRAY || type_is_vla(sy->type)))
@@ -2752,9 +2752,9 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
             }
             if (!sdeclr) continue;
             syntax_component_t* id = syntax_get_declarator_identifier(sdeclr);
-            if (!id) report_return;
+            if (!id) assert_fail;
             symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-            if (!sy) report_return;
+            if (!sy) assert_fail;
             if (type_has_flexible_array_member(sy->type))
             {
                 // ISO: 6.7.2.1 (2)

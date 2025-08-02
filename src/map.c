@@ -62,7 +62,7 @@ void map_resize(map_t* m)
 
             i = (i + 1) % new_capacity;
             if (i == h)
-                report_return;
+                assert_fail;
         }
     }
     free(m->key);
@@ -119,7 +119,7 @@ void* map_add(map_t* m, void* key, void* value)
 
         i = (i + 1) % m->capacity;
         if (i == h)
-            report_return_value(NULL);
+            assert_fail;
     }
 
     return NULL;

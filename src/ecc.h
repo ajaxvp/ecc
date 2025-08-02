@@ -8,11 +8,8 @@
 
 #define debug in_debug()
 
-// these macros are used in circumstances where an error was produced by something that wasn't expected to error.
-// for instance, if there was a mistake with an earlier stage like parsing, this might get thrown.
-#define report_return { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); return; }
-#define report_continue { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); continue; }
-#define report_return_value(x) { printf("assertion failed (%s:%d)\n", __FILE__, __LINE__); return (x); }
+#define assert(x) ((x) ? 0 : (errorf("assertion failed (%s:%d)\n", __FILE__, __LINE__), exit(1)))
+#define assert_fail assert(0)
 
 #define VECTOR_FOR(type, var, vec) type var = (type) vector_get((vec), 0); for (unsigned i = 0; i < (vec)->size; ++i, var = (type) vector_get((vec), i))
 #define deep_free_syntax_vector(vec, var) if (vec) { VECTOR_FOR(syntax_component_t*, var, (vec)) free_syntax(var, tlu); vector_delete((vec)); }

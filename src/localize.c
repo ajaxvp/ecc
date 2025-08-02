@@ -37,7 +37,7 @@ static c_type_class_t largest_sse_type_class_for_eightbyte(long long remaining)
         return CTC_FLOAT;
     if (remaining == DOUBLE_WIDTH)
         return CTC_DOUBLE;
-    report_return_value(CTC_ERROR);
+    assert_fail;
 }
 
 static arg_class_t* arg_class_singleton(arg_class_t class)
@@ -110,7 +110,7 @@ static arg_class_t* find_aggregate_union_classes(c_type_t* ct, size_t* count)
     // because the function doesn't support it but eh, it's
     // not like arrays can even be passed as params in C
     if (!ct) return NULL;
-    if (ct->class != CTC_ARRAY && ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) report_return_value(NULL);
+    if (ct->class != CTC_ARRAY && ct->class != CTC_STRUCTURE && ct->class != CTC_UNION) assert_fail;
 
     // get the size of the aggregate/union
     long long size = type_size(ct);
@@ -475,11 +475,11 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
     {
         air_insn_operand_t* op = insn->ops[i];
         // report any funky operands (not a register)
-        if (op->type != AOP_REGISTER && op->type != AOP_INDIRECT_REGISTER) report_return;
+        if (op->type != AOP_REGISTER && op->type != AOP_INDIRECT_REGISTER) assert_fail;
 
         // find the definition for the temporary used here as an argument
         air_insn_t* tempdef = air_insn_find_temporary_definition_above(op->type == AOP_REGISTER ? op->content.reg : op->content.inreg.id, insn);
-        if (!tempdef) report_return;
+        if (!tempdef) assert_fail;
 
         // so that we can get its type
         c_type_t* at = tempdef->ct;
@@ -489,7 +489,7 @@ void localize_x86_64_func_call_args(air_insn_t* insn, air_routine_t* routine, ai
         // get the ABI classes for this argument
         size_t ccount = 0;
         arg_class_t* classes = find_classes(at, &ccount);
-        if (!classes) report_return;
+        if (!classes) assert_fail;
 
         // for each eightbyte/class, store it in a location
         for (size_t i = 0; i < ccount; ++i)
@@ -630,7 +630,7 @@ static air_insn_t* blip_volatiles_after(air_insn_t* insn)
 
 void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, air_t* air)
 {
-    if (insn->ops[0]->type != AOP_REGISTER) report_return;
+    if (insn->ops[0]->type != AOP_REGISTER) assert_fail;
 
     // initialize the integer register return sequence
     regid_t integer_return_sequence[] = { X86R_RAX, X86R_RDX };
@@ -657,7 +657,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
     // get the ABI classes of the return type
     size_t ccount = 0;
     arg_class_t* classes = find_classes(ct, &ccount);
-    if (!classes) report_return;
+    if (!classes) assert_fail;
 
     // if there is a single class and it's INTEGER,
     // then the return value is in %rax, so pull it into the result register
@@ -695,13 +695,13 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
 
     // beyond here handles struct/union returns that are <16 bytes in width
     if (ct->class != CTC_STRUCTURE && ct->class != CTC_UNION)
-        report_return;
+        assert_fail;
     
     long long size = type_size(ct);
 
     // bad, obviously
     if (size > 16)
-        report_return;
+        assert_fail;
 
     // create and declare a local variable to load the struct data into
     symbol_t* lv = symbol_table_add(SYMBOL_TABLE, "__anonymous_lv__", symbol_init(NULL));
@@ -765,7 +765,7 @@ void localize_x86_64_func_call_return(air_insn_t* insn, air_routine_t* routine, 
         }
         else
             // TODO: handle long doubles and complex numberss
-            report_return;
+            assert_fail;
     }
 }
 
@@ -839,8 +839,8 @@ void localize_x86_64_divide_modulo(air_insn_t* insn, air_routine_t* routine, air
     if (insn->type == AIR_DIVIDE && !type_is_integer(insn->ct))
         return;
     regid_t hresultreg = insn->type == AIR_DIVIDE ? X86R_RAX : X86R_RDX;
-    if (insn->ops[0]->type != AOP_REGISTER) report_return;
-    if (insn->ops[1]->type != AOP_REGISTER) report_return;
+    if (insn->ops[0]->type != AOP_REGISTER) assert_fail;
+    if (insn->ops[1]->type != AOP_REGISTER) assert_fail;
     air_insn_t* assign_top = air_insn_init(AIR_LOAD, 2);
     assign_top->ct = type_copy(insn->ct);
     assign_top->ops[0] = air_insn_register_operand_init(X86R_RAX);
@@ -892,8 +892,8 @@ void localize_x86_64_direct_divide_modulo(air_insn_t* insn, air_routine_t* routi
     if (insn->type == AIR_DIRECT_DIVIDE && !type_is_integer(insn->ct))
         return;
     regid_t hresultreg = insn->type == AIR_DIRECT_DIVIDE ? X86R_RAX : X86R_RDX;
-    if (insn->ops[0]->type != AOP_REGISTER) report_return;
-    if (insn->ops[1]->type != AOP_REGISTER) report_return;
+    if (insn->ops[0]->type != AOP_REGISTER) assert_fail;
+    if (insn->ops[1]->type != AOP_REGISTER) assert_fail;
     air_insn_t* assign_top = air_insn_init(AIR_LOAD, 2);
     assign_top->ct = type_copy(insn->ct);
     assign_top->ops[0] = air_insn_register_operand_init(X86R_RAX);
@@ -1070,7 +1070,7 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     else if (retop->type == AOP_INDIRECT_REGISTER)
         retreg = retop->content.inreg.id;
     else
-        report_return;
+        assert_fail;
     
     air_insn_operand_delete(retop);
     insn->noops = 0;
@@ -1078,7 +1078,7 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     air_insn_t* pos = insn->prev;
 
     if (!pos)
-        report_return;
+        assert_fail;
 
     if ((rettype->class == CTC_STRUCTURE || rettype->class == CTC_UNION) && type_size(rettype) > 16)
     {
@@ -1129,11 +1129,11 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
     // TODO: handle the garbage
 
     if (rettype->class != CTC_STRUCTURE && rettype->class != CTC_UNION)
-        report_return;
+        assert_fail;
 
     size_t ccount = 0;
     arg_class_t* classes = find_classes(rettype, &ccount);
-    if (!classes) report_return;
+    if (!classes) assert_fail;
 
     for (size_t i = 0; i < ccount; ++i)
     {
@@ -1175,7 +1175,7 @@ void localize_x86_64_return(air_insn_t* insn, air_routine_t* routine, air_t* air
                 ++next_sseretreg;
         }
         else
-            report_return;
+            assert_fail;
     }
     
     free(classes);
@@ -1228,7 +1228,7 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
 
     syntax_component_t* fdeclr = syntax_get_function_declarator(routine->sy->declarer);
 
-    if (!fdeclr) report_return;
+    if (!fdeclr) assert_fail;
 
     if (!fdeclr->fdeclr_parameter_declarations)
     {
@@ -1236,7 +1236,7 @@ void localize_x86_64_routine_before(air_routine_t* routine, air_t* air)
         if (id)
             printf("no parameter declarations found for function: %s\n", id->id);
         // TODO: need to handle K&R functions (maybe?)
-        report_return;
+        assert_fail;
     }
 
     // loop thru all parameters of the function
@@ -1337,9 +1337,9 @@ air_insn_t* localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, a
 {
     symbol_t* fsy = routine->sy;
     syntax_component_t* fdeclr = syntax_get_function_declarator(fsy->declarer);
-    if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) report_return_value(NULL);
+    if (!fdeclr || fdeclr->type != SC_FUNCTION_DECLARATOR) assert_fail;
     vector_t* pdecls = fdeclr->fdeclr_parameter_declarations;
-    if (!pdecls) report_return_value(NULL);
+    if (!pdecls) assert_fail;
 
     long long intoffset = -48;
     long long sseoffset = -176;
@@ -1348,13 +1348,13 @@ air_insn_t* localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, a
     VECTOR_FOR(syntax_component_t*, pdecl, pdecls)
     {
         syntax_component_t* id = syntax_get_declarator_identifier(pdecl->pdecl_declr);
-        if (!id) report_return_value(NULL);
+        if (!id) assert_fail;
         symbol_t* psy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-        if (!psy) report_return_value(NULL);
+        if (!psy) assert_fail;
         c_type_t* pt = psy->type;
         size_t ccount = 0;
         arg_class_t* classes = find_classes(pt, &ccount);
-        if (!classes) report_return_value(NULL);
+        if (!classes) assert_fail;
         for (size_t j = 0; j < ccount; ++j)
         {
             arg_class_t class = classes[i];
@@ -1533,7 +1533,7 @@ void localize_x86_64_shift(air_insn_t* insn, air_routine_t* routine, air_t* air,
         return;
     
     if (insn->ops[index]->type != AOP_REGISTER)
-        report_return;
+        assert_fail;
 
     air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
     ld->ct = type_copy(insn->ct);
@@ -1709,10 +1709,10 @@ void localize_x86_64_lsyscall(air_insn_t* insn, air_routine_t* routine, air_t* a
     for (size_t i = 2; i < insn->noops; ++i)
     {
         air_insn_operand_t* op = insn->ops[i];
-        if (!op || op->type != AOP_REGISTER) report_return;
+        if (!op || op->type != AOP_REGISTER) assert_fail;
 
         air_insn_t* def = air_insn_find_temporary_definition_from_insn(op->content.reg, insn);
-        if (!def) report_return;
+        if (!def) assert_fail;
 
         air_insn_t* ld = air_insn_init(AIR_LOAD, 2);
         ld->ct = type_copy(def->ct);
@@ -1725,7 +1725,7 @@ void localize_x86_64_lsyscall(air_insn_t* insn, air_routine_t* routine, air_t* a
 
     air_insn_operand_t* id_op = insn->ops[1];
 
-    if (!id_op || id_op->type != AOP_INTEGER_CONSTANT) report_return;
+    if (!id_op || id_op->type != AOP_INTEGER_CONSTANT) assert_fail;
 
     air_insn_t* id_load = air_insn_init(AIR_LOAD, 2);
     id_load->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
@@ -1739,7 +1739,7 @@ void localize_x86_64_lsyscall(air_insn_t* insn, air_routine_t* routine, air_t* a
 
     air_insn_operand_t* rop = insn->ops[0];
 
-    if (!rop || rop->type != AOP_REGISTER) report_return;
+    if (!rop || rop->type != AOP_REGISTER) assert_fail;
 
     regid_t rreg = rop->content.reg;
 
@@ -1846,13 +1846,13 @@ void remove_phi_instructions(air_t* air)
             if (insn->type == AIR_PHI)
             {
                 air_insn_operand_t* op1 = insn->ops[0];
-                if (!op1 || op1->type != AOP_REGISTER) report_return;
+                if (!op1 || op1->type != AOP_REGISTER) assert_fail;
                 regid_t reg = op1->content.reg;
 
                 for (int i = 1; i < insn->noops; ++i)
                 {
                     air_insn_operand_t* op = insn->ops[i];
-                    if (!op || op->type != AOP_REGISTER) report_return;
+                    if (!op || op->type != AOP_REGISTER) assert_fail;
                     regid_t opreg = op->content.reg;
 
                     map_add(map, (void*) opreg, (void*) reg);
@@ -1904,7 +1904,7 @@ void localize(air_t* air, air_locale_t locale)
             localize_x86_64(air);
             break;
         default:
-            report_return;
+            assert_fail;
     }
 }
 

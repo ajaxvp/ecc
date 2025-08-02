@@ -328,9 +328,9 @@ static c_type_t* get_type_by_designation(syntax_component_t* desig, syntax_compo
 {
     // get parent components (initializer list and whatever is containing that initializer list)
     syntax_component_t* inlist = desig->parent;
-    if (!inlist || inlist->type != SC_INITIALIZER_LIST) report_return_value(NULL);
+    if (!inlist || inlist->type != SC_INITIALIZER_LIST) assert_fail;
     syntax_component_t* enclosing = inlist->parent;
-    if (!enclosing) report_return_value(NULL);
+    if (!enclosing) assert_fail;
 
     // pass thru additional initializer list levels
 
@@ -343,7 +343,7 @@ static c_type_t* get_type_by_designation(syntax_component_t* desig, syntax_compo
     else if (enclosing->type == SC_INIT_DECLARATOR)
     {
         syntax_component_t* ideclr_id = syntax_get_declarator_identifier(enclosing->ideclr_declarator);
-        if (!ideclr_id) report_return_value(NULL);
+        if (!ideclr_id) assert_fail;
         symbol_t* ideclr_sy = symbol_table_get_syn_id(syntax_get_symbol_table(ideclr_id), ideclr_id);
         if (!ideclr_sy) return NULL;
         trace = type_copy(ideclr_sy->type);
@@ -361,7 +361,7 @@ static c_type_t* get_type_by_designation(syntax_component_t* desig, syntax_compo
         }
     }
     else
-        report_return_value(NULL);
+        assert_fail;
     if (!trace) return NULL;
 
     c_type_t* top = trace;
@@ -2010,19 +2010,19 @@ unsigned long long evaluate_enumeration_constant(syntax_component_t* enumr)
     if (!constexpr_evaluation_succeeded(ce))
     {
         constexpr_delete(ce);
-        report_return_value(0);
+        assert_fail;
     }
     c = ce->ct->class;
     constexpr_convert_class(ce, CTC_INT);
     int result = constexpr_as_i32(ce);
     if (c == CTC_ERROR)
-        report_return_value(0);
+        assert_fail;
     if ((get_integer_type_conversion_rank(c) > get_integer_type_conversion_rank(CTC_INT)) || c == CTC_UNSIGNED_INT)
-        report_return_value(0);
+        assert_fail;
     if (offset != -1)
     {
         if (offset > 0 && result > INT_MAX - offset)
-            report_return_value(0);
+            assert_fail;
         result += offset;
     }
     return constexpr_cast_type(result, c, CTC_INT);

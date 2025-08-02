@@ -1,16 +1,38 @@
 /*
 
-the code for this project is developed to match the specifications of ISO/IEC 9899:1999, otherwise known as the C99 standard
+ecc compilation process overview:
+    - main.c: the program accepts a list of files, which it then reads in.
+        each file goes through the following steps:
+    - lex.c: the text is split into lexical preprocessing tokens
+    - preprocess.c: preprocessing tokens are built into a tree structure reflecting the syntax
+        of a preprocessing file. preprocessing directives are then executed.
+    - tokenize.c: preprocessing tokens are converted to tokens
+    - parse.c: tokens are built into a tree structure reflecting the syntax of a translation unit.
+        symbols are identified in the source program.
+    - type.c: symbols found in the source have their type definitions analyzed and added as semantics.
+    - analyze.c: the syntactic structure is analyzed for invalid semantics and additional semantic
+        information is appended to the tree structure.
+    - air.c: the syntactic structure is converted into a linear intermediate representation, known as AIR.
+        - opt1.c: the optimization phase that runs after this step occurs.
+    - localize.c: AIR routines are localized to a particular architecture. ecc only performs localization
+        to x86-64. this step primarily adds data location requirements demanded by the constraints of the target.
+    - allocate.c: all temporary values in AIR instructions are converted to registers in the target architecture.
+        ecc performs a graph-coloring algorithm to assign registers accordingly.
+    - x86asm.c: AIR is converted into corresponding x86-64 assembly instructions and directives.
+        - opt4.c: the optimization phase that runs after this step occurs.
 
-STD C TRANSLATION PHASES -> FUNCTIONS IN THIS PROJECT:
- - translation phase 1: lex
- - translation phase 2: lex
- - translation phase 3: lex
- - translation phase 4: preprocess
- - translation phase 5: charconvert
- - translation phase 6: strlitconcat
- - translation phase 7: tokenize, parse, type, analyze, linearize, allocate
- - translation phase 8: (handled externally by linker)
+brief descriptions of the other files in this project:
+    - buffer.c: just represents an expandable byte buffer
+    - const.c: contains compile-time constant data
+    - constexpr.c: evaluates constant expressions using a semantically analyzed syntax tree (i.e., valid for invocation after static analysis)
+    - graph.c: adjacency list-based graph implementation
+    - log.c: the ol' logger
+    - map.c: closed, linear probing-based hash table implementation, also provides an API for interacting with the struct as if it's a set
+    - symbol.c: functions for handling the symbol_t struct
+    - syntax.c: functions for handling the syntax_component_t struct
+    - traverse.c: traversal data structure for syntax_component_t
+    - util.c: uncategorized utility functions
+    - vector.c: dynamic array implementation
 
 */
 

@@ -74,10 +74,10 @@ char* process_one_character(preprocessing_token_t* pp_token, tokenizing_settings
             str += (*str == 'u' ? 4 : 8);
         }
         else
-            report_return_value(NULL);
+            assert_fail;
     }
     else if (*str == '\n')
-        report_return_value(NULL)
+        assert_fail;
     else
         value = (value << (length += 8, 8)) | *str;
     *v = value;

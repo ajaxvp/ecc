@@ -1852,7 +1852,7 @@ static int check_if_condition(preprocessing_component_t* condition, preprocessin
             token = next;
         }
         if (!token->next)
-            report_return_value(2);
+            assert_fail;
         preprocessing_token_t* repl = calloc(1, sizeof *repl);
         repl->type = PPT_PP_NUMBER;
         repl->row = defined_token->row;

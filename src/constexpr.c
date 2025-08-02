@@ -583,7 +583,7 @@ static void evaluate(syntax_component_t* expr, constexpr_t* ce);
         case_type((rt), unsigned, CTC_UNSIGNED_INT, op) \
         case_type((rt), unsigned long, CTC_UNSIGNED_LONG_INT, op) \
         case_type((rt), unsigned long long, CTC_UNSIGNED_LONG_LONG_INT, op) \
-        default: report_return; \
+        default: assert_fail; \
     }
 
 #define generate_constexpr_as_function(name, ty) \
@@ -602,7 +602,7 @@ bool constexpr_equals_zero(constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
         // TODO
-        report_return_value(false);
+        assert_fail;
     
     if (type_is_floating(ce->ct))
     {
@@ -611,7 +611,7 @@ bool constexpr_equals_zero(constexpr_t* ce)
             case CTC_FLOAT: return data_as(ce->content.data, float) == 0.0f;
             case CTC_DOUBLE: return data_as(ce->content.data, double) == 0.0;
             case CTC_LONG_DOUBLE: return data_as(ce->content.data, long double) == 0.0L;
-            default: report_return_value(false);
+            default: assert_fail;
         }
     }
     long long size = type_size(ce->ct);
@@ -735,7 +735,7 @@ void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
     }
     else
         // TODO: handle ptr arithmetic
-        report_return;
+        assert_fail;
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -785,7 +785,7 @@ void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
     }
     else
         // TODO: handle ptr arithmetic
-        report_return;
+        assert_fail;
 
     constexpr_delete(lhs);
     constexpr_delete(rhs);
@@ -1542,7 +1542,7 @@ void evaluate_dereference_member_expression(syntax_component_t* expr, constexpr_
         long long index = -1;
         type_get_struct_union_member_info(st, expr->memexpr_id->id, &index, &offset);
         if (index == -1)
-            report_return;
+            assert_fail;
         
         ce->content.addr.offset += offset;
         return;
@@ -1573,7 +1573,7 @@ void evaluate_member_expression(syntax_component_t* expr, constexpr_t* ce)
         long long index = -1;
         type_get_struct_union_member_info(st, expr->memexpr_id->id, &index, &offset);
         if (index == -1)
-            report_return;
+            assert_fail;
         
         ce->content.addr.offset += offset;
         return;
@@ -1602,7 +1602,7 @@ void evaluate_cast_expression(syntax_component_t* expr, constexpr_t* ce)
     constexpr_t* op = constexpr_evaluate_type(expr->caexpr_operand, ce->type);
     constexpr_convert(op, to);
     if (!constexpr_move(ce, op))
-        report_return;
+        assert_fail;
     constexpr_delete(op);
     type_delete(to);
 }
@@ -1706,7 +1706,7 @@ void evaluate_primary_expression_identifier(syntax_component_t* expr, constexpr_
         c_namespace_t* ns = syntax_get_namespace(expr);
         symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, expr, ns);
         namespace_delete(ns);
-        if (!sy) report_return;
+        if (!sy) assert_fail;
         if (symbol_get_storage_duration(sy) != SD_STATIC)
         {
             // ISO: 6.6 (9)
@@ -1724,7 +1724,7 @@ void evaluate_string_literal(syntax_component_t* expr, constexpr_t* ce)
     if (ce->type == CE_ADDRESS)
     {
         symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, expr);
-        if (!sy) report_return;
+        if (!sy) assert_fail;
         ce->content.addr.sy = sy;
         ce->ct = type_copy(sy->type);
         return;
@@ -1736,7 +1736,7 @@ void evaluate_compound_literal(syntax_component_t* expr, constexpr_t* ce)
     if (ce->type == CE_ADDRESS)
     {
         symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, expr);
-        if (!sy) report_return;
+        if (!sy) assert_fail;
         ce->content.addr.sy = sy;
         ce->ct = type_copy(sy->type);
         return;
@@ -1748,7 +1748,7 @@ void evaluate_primary_expression_enumeration_constant(syntax_component_t* expr, 
     c_namespace_t* ns = syntax_get_namespace(expr);
     symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, expr, ns);
     namespace_delete(ns);
-    if (!sy) report_return;
+    if (!sy) assert_fail;
     int value = sy->declarer->parent->enumr_value;
     copy_typed_data(ce, make_basic_type(CTC_INT), to_data(value));
 }

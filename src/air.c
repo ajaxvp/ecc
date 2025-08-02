@@ -78,7 +78,7 @@ void air_data_print(air_data_t* ad, air_t* air, int (*printer)(const char* fmt, 
     printer(" %s {\n", symbol_get_name(ad->sy));
     long long size = type_size(ad->sy->type);
     if (size == -1)
-        report_return;
+        assert_fail;
     for (long long i = 0, j = 0; i < size;)
     {
         if (i % 16 == 0)
@@ -476,7 +476,7 @@ void air_routine_print(air_routine_t* routine, air_t* air, int (*printer)(const 
     type_humanized_print(routine->sy->type->derived_from, printer);
     printer(" %s(", symbol_get_name(routine->sy));
     syntax_component_t* declr = syntax_get_function_declarator(routine->sy->declarer);
-    if (!declr) report_return;
+    assert(declr);
     VECTOR_FOR(c_type_t*, pt, routine->sy->type->function.param_types)
     {
         if (i) printer(", ");
@@ -942,7 +942,7 @@ air_insn_t* air_insn_find_temporary_definition_above(regid_t tmp, air_insn_t* st
     {
         if (!air_insn_creates_temporary(start)) continue;
         air_insn_operand_t* op = start->ops[0];
-        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        assert(op->type == AOP_REGISTER);
         if (op->content.reg == tmp)
             return start;
     }
@@ -955,7 +955,7 @@ air_insn_t* air_insn_find_temporary_definition_below(regid_t tmp, air_insn_t* st
     {
         if (!air_insn_creates_temporary(start)) continue;
         air_insn_operand_t* op = start->ops[0];
-        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        assert(op->type == AOP_REGISTER);
         if (op->content.reg == tmp)
             return start;
     }
@@ -975,7 +975,7 @@ air_insn_t* air_insn_find_temporary_definition(regid_t tmp, air_routine_t* routi
     {
         if (!air_insn_creates_temporary(insn)) continue;
         air_insn_operand_t* op = insn->ops[0];
-        if (op->type != AOP_REGISTER) report_return_value(NULL);
+        assert(op->type == AOP_REGISTER);
         if (op->content.reg == tmp)
             return insn;
     }
@@ -1166,13 +1166,13 @@ static void linearize_function_definition_before(syntax_traverser_t* trav, synta
     air_routine_t* routine = calloc(1, sizeof *routine);
 
     syntax_component_t* declr = syn->fdef_declarator;
-    if (!declr) report_return;
+    assert(declr);
 
     syntax_component_t* id = syntax_get_declarator_identifier(declr);
-    if (!id) report_return;
+    assert(id);
 
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    assert(sy);
 
     routine->sy = sy;
 
@@ -1216,17 +1216,13 @@ static void linearize_function_definition_after(syntax_traverser_t* trav, syntax
     AIRINIZING_TRAVERSER->croutine = NULL;
 }
 
-static void linearize_static_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+static void linearize_static_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
-    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
     // TODO
 }
 
-static void linearize_automatic_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
+static void linearize_automatic_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn, symbol_t* sy)
 {
-    symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_DECLARE, 1);
     insn->ops[0] = air_insn_symbol_operand_init(sy);
@@ -1237,12 +1233,12 @@ static void linearize_automatic_declarator_identifier_after(syntax_traverser_t* 
 static void linearize_declarator_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
+    assert(sy);
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd == SD_STATIC)
-        linearize_static_declarator_identifier_after(trav, syn);
+        linearize_static_declarator_identifier_after(trav, syn, sy);
     else
-        linearize_automatic_declarator_identifier_after(trav, syn);
+        linearize_automatic_declarator_identifier_after(trav, syn, sy);
 }
 
 /*
@@ -1259,7 +1255,7 @@ static void linearize_primary_expression_identifier_after(syntax_traverser_t* tr
     c_namespace_t* ns = syntax_get_namespace(syn);
     symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
     namespace_delete(ns);
-    if (!sy) report_return;
+    assert(sy);
     SETUP_LINEARIZE;
     air_insn_t* insn = NULL;
     if (!syntax_is_in_lvalue_context(syn) && !type_is_sua(sy->type) && sy->type->class != CTC_FUNCTION)
@@ -1283,7 +1279,7 @@ static void linearize_primary_expression_enumeration_constant_after(syntax_trave
     c_namespace_t* ns = syntax_get_namespace(syn);
     symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn, ns);
     namespace_delete(ns);
-    if (!sy) report_return;
+    assert(sy);
     SETUP_LINEARIZE;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = type_copy(syn->ctype);
@@ -1335,7 +1331,7 @@ static void linearize_floating_constant_after(syntax_traverser_t* trav, syntax_c
             data->data = malloc(LONG_DOUBLE_WIDTH);
             *((long double*) (data->data)) = (long double) syn->floc;
             break;
-        default: report_return;
+        default: assert_fail;
     }
     vector_add(air->rodata, data);
 
@@ -1383,11 +1379,11 @@ static void linearize_return_statement_after(syntax_traverser_t* trav, syntax_co
         regid_t reg = syn->retstmt_expression->expr_reg;
 
         syntax_component_t* fdef = syntax_get_enclosing(syn, SC_FUNCTION_DEFINITION);
-        if (!fdef) report_return;
+        assert(fdef);
         syntax_component_t* fdef_id = syntax_get_declarator_identifier(fdef->fdef_declarator);
-        if (!fdef_id) report_return;
+        assert(fdef_id);
         symbol_t* fsy = symbol_table_get_syn_id(SYMBOL_TABLE, fdef_id);
-        if (!fsy) report_return;
+        assert(fsy);
 
         reg = convert(trav, syn->retstmt_expression->ctype, fsy->type->derived_from, reg, &code);
 
@@ -1467,7 +1463,7 @@ static void initialize_string_literal(syntax_component_t* strl, symbol_t* sy, in
                 value = *((unsigned long long*) (str + copied));
                 break;
             default:
-                report_return;
+                assert_fail;
         }
         loaddest->ops[1] = air_insn_integer_constant_operand_init(value);
         ADD_CODE(loaddest);
@@ -1502,7 +1498,7 @@ static void initialize(syntax_traverser_t* trav, syntax_component_t* initializer
         initialize_string_literal(initializer, sy, base_offset + initializer->initializer_offset, &code);
     else if (initializer->type == SC_STRING_LITERAL && initializer->strl_wide && ct->class == CTC_ARRAY && type_is_wchar_compatible(ct->derived_from))
         // TODO
-        report_return;
+        assert_fail;
 
     *c = code;
 }
@@ -1510,7 +1506,7 @@ static void initialize(syntax_traverser_t* trav, syntax_component_t* initializer
 static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     syntax_component_t* enclosing = syn->parent;
-    if (!enclosing) report_return;
+    assert(enclosing);
 
     // nested initializer lists are handled in the highest initializer list
     if (enclosing->type == SC_INITIALIZER_LIST)
@@ -1525,12 +1521,12 @@ static void linearize_initializer_list_after(syntax_traverser_t* trav, syntax_co
     if (enclosing->type == SC_INIT_DECLARATOR)
     {
         syntax_component_t* id = syntax_get_declarator_identifier(enclosing->ideclr_declarator);
-        if (!id) report_return;
+        assert(id);
         sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
     }
     else if (enclosing->type == SC_COMPOUND_LITERAL)
         sy = symbol_table_get_syn_id(SYMBOL_TABLE, enclosing);
-    if (!sy) report_return;
+    assert(sy);
 
     bool is_scalar = type_is_scalar(sy->type);
     bool is_char_array = sy->type->class == CTC_ARRAY && type_is_character(sy->type->derived_from);
@@ -1602,9 +1598,9 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     syntax_component_t* init = syn->ideclr_initializer;
 
     syntax_component_t* id = syntax_get_declarator_identifier(syn->ideclr_declarator);
-    if (!id) report_return;
+    assert(id);
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-    if (!sy) report_return;
+    assert(sy);
 
     storage_duration_t sd = symbol_get_storage_duration(sy);
 
@@ -1664,7 +1660,7 @@ static void linearize_init_declarator_after(syntax_traverser_t* trav, syntax_com
     // ISO: 6.7.8 (13)
     else
     {
-        if (sy->type->class != CTC_STRUCTURE && sy->type->class != CTC_UNION) report_return;
+        assert(sy->type->class == CTC_STRUCTURE || sy->type->class == CTC_UNION);
         long long size = type_size(sy->type);
         for (long long copied = 0; copied < size;)
         {
@@ -1762,7 +1758,7 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
     {
         syntax_component_t* id = syntax_get_declarator_identifier(parent->ideclr_declarator);
         symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, id);
-        if (!sy) report_return;
+        assert(sy);
         if (sy->type->class == CTC_ARRAY &&
             (type_is_character(sy->type->derived_from) || type_is_wchar_compatible(sy->type->derived_from)))
             return;
@@ -1949,7 +1945,7 @@ static void linearize_static_compound_literal_after(syntax_traverser_t* trav, sy
 static void linearize_compound_literal_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     symbol_t* sy = symbol_table_get_syn_id(SYMBOL_TABLE, syn);
-    if (!sy) report_return;
+    assert(sy);
     storage_duration_t sd = symbol_get_storage_duration(sy);
     if (sd == SD_STATIC)
         linearize_static_compound_literal_after(trav, syn, sy);
@@ -1986,7 +1982,7 @@ static void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_co
         case SC_PLUS_EXPRESSION: type = AIR_POSATE; break;
         case SC_COMPLEMENT_EXPRESSION: type = AIR_COMPLEMENT; break;
         case SC_NOT_EXPRESSION: type = AIR_NOT; break;
-        default: report_return;
+        default: assert_fail;
     }
     air_insn_t* insn = air_insn_init(type, 2);
     insn->ct = type_copy(syn->ctype);
@@ -2030,7 +2026,7 @@ static void linearize_sizeof_expression_after(syntax_traverser_t* trav, syntax_c
     long long size = type_size(syn->uexpr_operand->ctype);
     if (size == -1)
         // TODO: VLA garbage
-        report_return;
+        assert_fail;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = make_basic_type(C_TYPE_SIZE_T);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
@@ -2046,7 +2042,7 @@ static void linearize_sizeof_type_expression_after(syntax_traverser_t* trav, syn
     long long size = type_size(ct);
     type_delete(ct);
     if (size == -1)
-        report_return;
+        assert_fail;
     air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
     insn->ct = make_basic_type(C_TYPE_SIZE_T);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
@@ -2105,7 +2101,7 @@ static void linearize_assignment_expression_after(syntax_traverser_t* trav, synt
             type = AIR_DIRECT_XOR;
             break;
         default:
-            report_return;
+            assert_fail;
     }
     regid_t rhs_reg = syn->bexpr_rhs->expr_reg;
     long long lhs_deref_size = 0;
@@ -2132,7 +2128,7 @@ static void linearize_assignment_expression_after(syntax_traverser_t* trav, synt
         ADD_CODE(insn);
     }
     else
-        report_return;
+        assert_fail;
     if (syn->type != SC_ASSIGNMENT_EXPRESSION)
     {
         air_insn_t* insn = air_insn_init(AIR_LOAD, 2);
@@ -2195,7 +2191,7 @@ static void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_c
             type = AIR_OR;
             break;
         default:
-            report_return;
+            assert_fail;
     }
     regid_t lreg = syn->bexpr_lhs->expr_reg;
     regid_t rreg = syn->bexpr_rhs->expr_reg;
@@ -2454,7 +2450,7 @@ static void linearize_goto_statement_after(syntax_traverser_t* trav, syntax_comp
     c_namespace_t* ns = syntax_get_namespace(syn->gtstmt_label_id);
     symbol_t* sy = symbol_table_lookup(SYMBOL_TABLE, syn->gtstmt_label_id, ns);
     namespace_delete(ns);
-    if (!sy) report_return;
+    assert(sy);
 
     air_insn_t* insn = air_insn_init(AIR_JMP, 1);
     insn->ops[0] = air_insn_label_operand_init(sy->declarer->parent->lstmt_uid, 'L');
@@ -2799,7 +2795,7 @@ static void linearize_intrinsic_call_expression_after(syntax_traverser_t* trav, 
     else if (streq(syn->icallexpr_name, "__ecc_lsys_write"))
         linearize_lsyscall_intrinsic_call_expression_after(trav, syn, 1);
     else
-        report_return;
+        assert_fail;
 }
 
 static void linearize_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2810,7 +2806,7 @@ static void linearize_break_statement_after(syntax_traverser_t* trav, syntax_com
         parent->type != SC_WHILE_STATEMENT &&
         parent->type != SC_DO_STATEMENT &&
         parent->type != SC_SWITCH_STATEMENT; parent = parent->parent);
-    if (!parent) report_return;
+    assert(parent);
     if (!parent->break_label_no)
         parent->break_label_no = NEXT_LABEL;
     
@@ -2829,7 +2825,7 @@ static void linearize_continue_statement_after(syntax_traverser_t* trav, syntax_
         loop->type != SC_WHILE_STATEMENT &&
         loop->type != SC_DO_STATEMENT;
         loop = loop->parent);
-    if (!loop) report_return;
+    assert(loop);
     if (!loop->continue_label_no)
         loop->continue_label_no = NEXT_LABEL;
 

@@ -256,7 +256,7 @@ c_type_t* type_compose(c_type_t* t1, c_type_t* t2)
                 c_type_t* t1_pt = vector_get(t1->function.param_types, i);
                 c_type_t* t2_pt = vector_get(t2->function.param_types, i);
                 c_type_t* composed_pt = type_compose(t1_pt, t2_pt);
-                if (!composed_pt) report_return_value(NULL);
+                if (!composed_pt) assert_fail;
                 vector_add(composed->function.param_types, composed_pt);
             }
         }
@@ -1047,7 +1047,7 @@ c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus, 
                 if (!id) continue; // TODO: unnamed bitfields (ugh)
 
                 symbol_t* member_sy = symbol_table_get_syn_id(st, id);
-                if (!member_sy) report_return_value(NULL);
+                if (!member_sy) assert_fail;
 
                 assign_type(errors, member_sy);
 
@@ -1065,7 +1065,7 @@ c_type_t* create_struct_type(analysis_error_t* errors, syntax_component_t* sus, 
                     if (!id) continue; // TODO: unnamed bitfields (ugh)
 
                     symbol_t* member_sy = symbol_table_get_syn_id(st, id);
-                    if (!member_sy) report_return_value(NULL);
+                    if (!member_sy) assert_fail;
 
                     if (member_sy->ns)
                         namespace_delete(member_sy->ns);
@@ -1144,7 +1144,7 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
         case SC_PARAMETER_DECLARATION: declspecs = syn->pdecl_declaration_specifiers; break;
         case SC_FUNCTION_DEFINITION: declspecs = syn->fdef_declaration_specifiers; break;
         case SC_TYPE_NAME: declspecs = syn->tn_specifier_qualifier_list; break;
-        default: report_return_value(NULL);
+        default: assert_fail;
     }
     size_t bts_counter[BTS_NO_ELEMENTS];
     memset(bts_counter, 0, BTS_NO_ELEMENTS * sizeof(size_t));
@@ -1497,6 +1497,9 @@ static c_type_t* process_declspecs(analysis_error_t* errors, syntax_component_t*
         return ct;
     }
 
+    if (check_array[BTS_COMPLEX] == 1 || check_array[BTS_IMAGINARY] == 1)
+        ADD_ERROR(syn, "complex and imaginary types are not supported yet");
+
     // float _Complex
 
     zero_check;
@@ -1648,7 +1651,7 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
     declr = syntax_get_full_declarator(declr);
 
     if (!declr)
-        report_return_value(NULL);
+        assert_fail;
 
     if (declr->type == SC_INIT_DECLARATOR)
         declr = declr->ideclr_declarator;
@@ -1717,10 +1720,10 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
                         {
                             // otherwise, we make sure the identifier-type declarator is typed and we add that type to the vector
                             syntax_component_t* id = syntax_get_declarator_identifier(s->pdecl_declr);
-                            if (!id) report_return_value(NULL);
+                            if (!id) assert_fail;
 
                             symbol_t* param_sy = symbol_table_get_syn_id(st, id);
-                            if (!param_sy) report_return_value(NULL);
+                            if (!param_sy) assert_fail;
 
                             assign_type(errors, param_sy);
 
@@ -1793,10 +1796,10 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
                         {
                             // otherwise, we make sure the identifier-type declarator is typed and we add that type to the vector
                             syntax_component_t* id = syntax_get_declarator_identifier(s->pdecl_declr);
-                            if (!id) report_return_value(NULL);
+                            if (!id) assert_fail;
 
                             symbol_t* param_sy = symbol_table_get_syn_id(st, id);
-                            if (!param_sy) report_return_value(NULL);
+                            if (!param_sy) assert_fail;
 
                             assign_type(errors, param_sy);
 
@@ -1814,7 +1817,7 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
 
             default:
                 printf("%s\n", SYNTAX_COMPONENT_NAMES[declr->type]);
-                report_return_value(NULL);
+                assert_fail;
         }
     }
     return base;
@@ -1871,7 +1874,7 @@ void assign_type(analysis_error_t* errors, symbol_t* sy)
     if (!sy) return;
     if (sy->type) return;
     syntax_component_t* id = sy->declarer;
-    if (!id->parent) report_return;
+    if (!id->parent) assert_fail;
 
     syntax_component_t* parent = id->parent;
 
@@ -1908,7 +1911,7 @@ void assign_type(analysis_error_t* errors, symbol_t* sy)
     // declarator identifier
     sy->ns = make_basic_namespace(NSC_ORDINARY);
     syntax_component_t* specifying = syntax_get_full_declarator(id);
-    if (!specifying) report_return;
+    if (!specifying) assert_fail;
     specifying = specifying->parent;
     sy->type = create_type_with_errors(errors, specifying, id);
 }

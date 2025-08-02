@@ -981,9 +981,9 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
             return make_operand_label(label);
         case AOP_FLOATING_CONSTANT:
         case AOP_TYPE:
-            report_return_value(NULL);
+            assert_fail;
     }
-    report_return_value(NULL);
+    assert_fail;
 }
 
 x86_insn_t* make_basic_x86_insn(x86_insn_type_t type)
@@ -1012,7 +1012,7 @@ x86_insn_t* x86_generate_load(air_insn_t* ainsn, x86_asm_routine_t* routine, x86
     else if (ainsn->ct->class == CTC_DOUBLE)
         type = X86I_MOVSD;
     else
-        report_return_value(NULL);
+        assert_fail;
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
     insn->op2 = air_operand_to_x86_operand(ainsn->ops[0], routine);
@@ -1044,7 +1044,7 @@ x86_insn_t* x86_generate_func_call(air_insn_t* ainsn, x86_asm_routine_t* routine
             insn->op1 = make_operand_label(symbol_get_name(aop->content.sy));
             break;
         default:
-            report_return_value(NULL);
+            assert_fail;
     }
     return insn;
 }
@@ -1083,7 +1083,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_SUBTRACT: type = X86I_SUBSS; break;
             case AIR_MULTIPLY: type = X86I_MULSS; break;
             case AIR_XOR: type = X86I_XORPS; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else if (ainsn->ct->class == CTC_DOUBLE)
@@ -1095,7 +1095,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_SUBTRACT: type = X86I_SUBSD; break;
             case AIR_MULTIPLY: type = X86I_MULSD; break;
             case AIR_XOR: type = X86I_XORPD; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else if (type_is_signed_integer(ainsn->ct) || ainsn->ct->class == CTC_CHAR)
@@ -1112,7 +1112,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_SHIFT_LEFT: type = X86I_SHL; break;
             case AIR_SHIFT_RIGHT: type = X86I_SHR; break;
             case AIR_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else if (type_is_unsigned_integer(ainsn->ct) || ainsn->ct->class == CTC_POINTER)
@@ -1128,7 +1128,7 @@ x86_insn_t* x86_generate_binary_operator(air_insn_t* ainsn, x86_asm_routine_t* r
             case AIR_SHIFT_LEFT: type = X86I_SHL; break;
             case AIR_SHIFT_RIGHT: type = X86I_SHR; break;
             case AIR_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     
@@ -1159,7 +1159,7 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
             case AIR_DIRECT_ADD: type = X86I_ADDSS; break;
             case AIR_DIRECT_SUBTRACT: type = X86I_SUBSS; break;
             case AIR_DIRECT_MULTIPLY: type = X86I_MULSS; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else if (ainsn->ct->class == CTC_DOUBLE)
@@ -1169,10 +1169,10 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
             case AIR_DIRECT_ADD: type = X86I_ADDSD; break;
             case AIR_DIRECT_SUBTRACT: type = X86I_SUBSD; break;
             case AIR_DIRECT_MULTIPLY: type = X86I_MULSD; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
-    else if (type_is_signed_integer(ainsn->ct))
+    else if (type_is_signed_integer(ainsn->ct) || ainsn->ct->class == CTC_CHAR)
     {
         switch (ainsn->type)
         {
@@ -1185,7 +1185,7 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
             case AIR_DIRECT_SHIFT_LEFT: type = X86I_SHL; break;
             case AIR_DIRECT_SHIFT_RIGHT: type = X86I_SHR; break;
             case AIR_DIRECT_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else if (type_is_unsigned_integer(ainsn->ct) || ainsn->ct->class == CTC_POINTER)
@@ -1200,12 +1200,12 @@ x86_insn_t* x86_generate_direct_binary_operator(air_insn_t* ainsn, x86_asm_routi
             case AIR_DIRECT_SHIFT_LEFT: type = X86I_SHL; break;
             case AIR_DIRECT_SHIFT_RIGHT: type = X86I_SHR; break;
             case AIR_DIRECT_SIGNED_SHIFT_RIGHT: type = X86I_SAR; break;
-            default: report_return_value(NULL);
+            default: assert_fail;
         }
     }
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
     
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1286,7 +1286,7 @@ x86_insn_t* x86_generate_not(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_
     }
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
     
     x86_insn_t* sete = make_basic_x86_insn(X86I_SETE);
     sete->size = X86SZ_BYTE;
@@ -1319,10 +1319,10 @@ x86_insn_t* x86_generate_negate(air_insn_t* ainsn, x86_asm_routine_t* routine, x
     }
     else if (type_is_sse_floating(ainsn->ct))
         // negations for SSE operands get removed during localization
-        report_return_value(NULL)
+        assert_fail;
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
 }
 
 x86_insn_t* x86_generate_posate(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
@@ -1335,7 +1335,7 @@ x86_insn_t* x86_generate_posate(air_insn_t* ainsn, x86_asm_routine_t* routine, x
     else if (type_is_integer(ainsn->ct))
         type = X86I_MOV;
     else
-        report_return_value(NULL);
+        assert_fail;
 
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1395,12 +1395,12 @@ x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* 
     {
         case AIR_JZ: type = X86I_JE; break;
         case AIR_JNZ: type = X86I_JNE; break;
-        default: report_return_value(NULL);
+        default: assert_fail;
     }
 
     x86_insn_t* cmp = NULL;
     
-    if (type_is_integer(ainsn->ct))
+    if (type_is_integer(ainsn->ct) || ainsn->ct->class == CTC_POINTER)
     {
         cmp = make_basic_x86_insn(X86I_CMP);
         cmp->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1411,7 +1411,7 @@ x86_insn_t* x86_generate_conditional_jump(air_insn_t* ainsn, x86_asm_routine_t* 
         cmp = x86_generate_sse_conditional_jump_test(ainsn, routine, file);
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
 
     x86_insn_t* jmp = make_basic_x86_insn(type);
     jmp->op1 = air_operand_to_x86_operand(ainsn->ops[0], routine);
@@ -1446,7 +1446,7 @@ x86_insn_t* x86_generate_relational_equality_operator(air_insn_t* ainsn, x86_asm
 {
     // this type should also be equal to ainsn->ops[2]->ct
     c_type_t* opt = ainsn->ops[1]->ct;
-    if (!opt) report_return_value(NULL);
+    if (!opt) assert_fail;
 
     bool opt_sse = type_is_sse_floating(opt);
 
@@ -1492,17 +1492,17 @@ x86_insn_t* x86_generate_relational_equality_operator(air_insn_t* ainsn, x86_asm
             type = X86I_SETNE;
             break;
         default:
-            report_return_value(NULL);
+            assert_fail;
     }
 
     x86_insn_t* cmp = NULL;
-    if (type_is_integer(opt))
+    if (type_is_integer(opt) || opt->class == CTC_POINTER)
         cmp = make_basic_x86_insn(X86I_CMP);
     else if (opt_sse)
         cmp = make_basic_x86_insn(opt->class == CTC_FLOAT ? X86I_COMISS : X86I_COMISD);
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
 
     cmp->size = c_type_to_x86_operand_size(ainsn->ct);
 
@@ -1602,11 +1602,11 @@ x86_insn_t* x86_generate_equality_operator(air_insn_t* ainsn, x86_asm_routine_t*
     c_type_t* opt = ainsn->ops[1]->ct;
     if (type_is_sse_floating(opt))
         return x86_generate_sse_equality_operator(ainsn, routine, file);
-    else if (type_is_integer(opt))
+    else if (type_is_integer(opt) || opt->class == CTC_POINTER)
         return x86_generate_relational_equality_operator(ainsn, routine, file);
     else
         // TODO: support long doubles and complex numbers
-        report_return_value(NULL);
+        assert_fail;
 }
 
 x86_insn_t* x86_generate_extension(air_insn_t* ainsn, x86_asm_routine_t* routine, x86_asm_file_t* file)
@@ -1680,7 +1680,7 @@ x86_insn_t* x86_generate_divide(air_insn_t* ainsn, x86_asm_routine_t* routine, x
         return div;
     }
     else
-        report_return_value(NULL);
+        assert_fail;
     
     x86_insn_t* insn = make_basic_x86_insn(type);
     insn->size = c_type_to_x86_operand_size(ainsn->ct);
@@ -1714,7 +1714,7 @@ x86_insn_t* x86_generate_direct_divide(air_insn_t* ainsn, x86_asm_routine_t* rou
         return div;
     }
     else
-        report_return_value(NULL);
+        assert_fail;
 
     return div;
 }
@@ -2268,7 +2268,7 @@ x86_asm_data_t* x86_generate_data(air_data_t* adata, x86_asm_file_t* file)
     data->alignment = type_alignment(adata->sy->type);
     long long size = type_size(adata->sy->type);
     if (size == -1)
-        report_return_value(NULL);
+        assert_fail;
     data->data = malloc(size);
     memcpy(data->data, adata->data, size);
     data->addresses = vector_init();
