@@ -142,7 +142,7 @@ void print_int_array(int* array, size_t length)
     printf("]\n");
 }
 
-bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
+static bool starts_ends_with_impl(char* str, char* substr, bool ends, int (*char_transform)(int))
 {
     if (!str && !substr)
         return true;
@@ -157,10 +157,25 @@ bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
     size_t i = 0;
     for (; i < substr_len; ++i)
     {
-        if (tolower(str[ends ? (str_len - 1 - i) : i]) != tolower(substr[ends ? (substr_len - 1 - i) : i]))
+        if (char_transform(str[ends ? (str_len - 1 - i) : i]) != char_transform(substr[ends ? (substr_len - 1 - i) : i]))
             return false;
     }
     return true;
+}
+
+static int identity_int(int i)
+{
+    return i;
+}
+
+bool starts_ends_with_ignore_case(char* str, char* substr, bool ends)
+{
+    return starts_ends_with_impl(str, substr, ends, tolower);
+}
+
+bool starts_ends_with(char* str, char* substr, bool ends)
+{
+    return starts_ends_with_impl(str, substr, ends, identity_int);
 }
 
 // not finished but idrc

@@ -508,6 +508,7 @@ typedef struct c_type
             vector_t* member_types; // <c_type_t*>
             vector_t* member_names; // <char*>
             vector_t* member_bitfields; // <syntax_component_t*>
+            int64_t* member_bitfield_lengths;
         } struct_union;
         struct
         {
@@ -1927,6 +1928,8 @@ c_namespace_t* make_basic_namespace(c_namespace_class_t class);
 /* util.c */
 #define ends_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, true)
 #define starts_with_ignore_case(str, substr) starts_ends_with_ignore_case(str, substr, false)
+#define ends_with(str, substr) starts_ends_with(str, substr, true)
+#define starts_with(str, substr) starts_ends_with(str, substr, false)
 
 char* strdup(const char* str);
 int* strdup_wide(const int* str);
@@ -1939,6 +1942,7 @@ bool streq_ignore_case(char* s1, char* s2);
 int int_array_index_max(int* array, size_t length);
 void print_int_array(int* array, size_t length);
 bool starts_ends_with_ignore_case(char* str, char* substr, bool ends);
+bool starts_ends_with(char* str, char* substr, bool ends);
 void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
 char* get_directory_path(char* path);

@@ -553,6 +553,33 @@ int64_t type_get_array_length(c_type_t* ct)
     return ct->array.length;
 }
 
+int64_t type_get_member_bitfield_length(c_type_t* ct, size_t index)
+{
+    if (!ct) return -1;
+    if (ct->class != CTC_STRUCTURE) return -1;
+    if (index >= ct->struct_union.member_bitfields->size) return -1;
+    syntax_component_t* bitfield = vector_get(ct->struct_union.member_bitfields, index);
+    if (!bitfield) return -1;
+    if (!ct->struct_union.member_bitfield_lengths)
+    {
+        ct->struct_union.member_bitfield_lengths = calloc(ct->struct_union.member_bitfields->size, sizeof(int64_t));
+        for (size_t i = 0; i < ct->struct_union.member_bitfields->size; ++i)
+            ct->struct_union.member_bitfield_lengths[i] = -1;
+    }
+    if (ct->struct_union.member_bitfield_lengths[index] != -1)
+        return ct->struct_union.member_bitfield_lengths[index];
+    constexpr_t* ce = constexpr_evaluate_integer(bitfield);
+    if (!constexpr_evaluation_succeeded(ce))
+    {
+        constexpr_delete(ce);
+        return -1;
+    }
+    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
+    ct->struct_union.member_bitfield_lengths[index] = constexpr_as_i64(ce);
+    constexpr_delete(ce);
+    return ct->struct_union.member_bitfield_lengths[index];
+}
+
 c_type_t* integer_promotions(c_type_t* ct)
 {
     if (!ct) return NULL;
@@ -876,8 +903,22 @@ long long type_size(c_type_t* ct)
         {
             long long size = 0;
             long long mma = -1;
+            // int64_t max_bitfield_length = -1;
             VECTOR_FOR(c_type_t*, mct, ct->struct_union.member_types)
             {
+                // int64_t bitfield_length = type_get_member_bitfield_length(ct, i);
+                // if (bitfield_length != -1)
+                // {
+                //     if (max_bitfield_length == -1)
+                //         max_bitfield_length = bitfield_length;
+                //     else
+                //         max_bitfield_length += bitfield_length;
+                // }
+                // else if (max_bitfield_length != -1)
+                // {
+                    
+                //     max_bitfield_length = -1;
+                // }
                 long long msize = type_size(mct);
                 long long ma = type_alignment(mct);
                 if (ma > mma)
@@ -986,6 +1027,7 @@ static void type_delete_internal(c_type_t* ct, bool ignore_owned)
             vector_deep_delete(ct->struct_union.member_types, (void (*)(void*)) type_delete);
             vector_deep_delete(ct->struct_union.member_names, free);
             vector_delete(ct->struct_union.member_bitfields);
+            free(ct->struct_union.member_bitfield_lengths);
             break;
         case CTC_FUNCTION:
             vector_deep_delete(ct->function.param_types, (void (*)(void*)) type_delete);

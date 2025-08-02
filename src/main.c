@@ -320,19 +320,14 @@ char* compile(char* filename, char* target)
     return asm_filepath;
 }
 
-char* assemble(char* filename, char* target)
+char* invoke_assembler(char* filename, char* target)
 {
-    char* asm_filepath = compile(filename, NULL);
-    if (!asm_filepath)
-        return NULL;
     char* obj_filepath = target ? strdup(target) : temp_filepath_gen(".o");
 
     pid_t as_pid = fork();
 
     if (as_pid == -1)
     {
-        remove(asm_filepath);
-        free(asm_filepath);
         free(obj_filepath);
         errorf("failed to spawn assembler process\n");
         return NULL;
@@ -340,11 +335,10 @@ char* assemble(char* filename, char* target)
 
     if (as_pid == 0)
     {
-        char* argv[] = { "/usr/bin/x86_64-linux-gnu-as", asm_filepath, "-o", obj_filepath, NULL };
+        char* argv[] = { "/usr/bin/x86_64-linux-gnu-as", filename, "-o", obj_filepath, NULL };
         int status = execv(argv[0], argv);
         if (status == -1)
         {
-            free(asm_filepath);
             free(obj_filepath);
             errorf("failed to execute assembler\n");
             exit(EXIT_FAILURE);
@@ -357,19 +351,25 @@ char* assemble(char* filename, char* target)
 
     if (as_status)
     {
-        remove(asm_filepath);
         free(obj_filepath);
-        free(asm_filepath);
         errorf("assembler has failed to produce an object file, cannot proceed with compilation\n");
         return NULL;
     }
 
-    remove(asm_filepath);
-    free(asm_filepath);
-
     if (opts.iflag)
         printf("object written to %s\n", obj_filepath);
 
+    return obj_filepath;
+}
+
+char* assemble(char* filename, char* target)
+{
+    char* asm_filepath = compile(filename, NULL);
+    if (!asm_filepath)
+        return NULL;
+    char* obj_filepath = invoke_assembler(asm_filepath, target);
+    remove(asm_filepath);
+    free(asm_filepath);
     return obj_filepath;
 }
 
@@ -382,8 +382,6 @@ char* linker(char** object_files, size_t object_count, char* target)
     {
         free(exec_filepath);
         errorf("failed to spawn linker process\n");
-        for (size_t i = 0; i < object_count; ++i)
-            remove(object_files[i]);
         return NULL;
     }
 
@@ -413,14 +411,10 @@ char* linker(char** object_files, size_t object_count, char* target)
     if (WEXITSTATUS(ld_status))
     {
         free(exec_filepath);
-        for (size_t i = 0; i < object_count; ++i)
-            remove(object_files[i]);
         errorf("failed to execute linker\n");
         return NULL;
     }
 
-    for (size_t i = 0; i < object_count; ++i)
-        remove(object_files[i]);
     return exec_filepath;
 }
 
@@ -542,7 +536,20 @@ int main(int argc, char** argv)
     char** objects = calloc(object_count, sizeof(char*));
     for (int i = optind; i < argc; ++i)
     {
-        char* obj_filepath = assemble(argv[i], NULL);
+        char* filepath = argv[i];
+        char* obj_filepath = NULL;
+        if (ends_with(filepath, ".c"))
+            obj_filepath = assemble(filepath, NULL);
+        else if (ends_with(filepath, ".s"))
+            obj_filepath = invoke_assembler(filepath, NULL);
+        else if (ends_with(filepath, ".o"))
+            obj_filepath = strdup(filepath);
+        else
+        {
+            delete_array((void**) objects, object_count);
+            errorf("file '%s' has an unexpected extension. expected '.c', '.s', or '.o' (C source files, assembly files, or object files)");
+            return EXIT_FAILURE;
+        }
         if (obj_filepath == NULL)
         {
             delete_array((void**) objects, object_count);
@@ -552,6 +559,13 @@ int main(int argc, char** argv)
     }
 
     char* exec_filepath = linker(objects, object_count, opts.oflag);
+
+    for (size_t i = 0; i < object_count; ++i)
+    {
+        if (ends_with(argv[i + optind], ".o"))
+            continue;
+        remove(objects[i]);
+    }
 
     delete_array((void**) objects, object_count);
 
