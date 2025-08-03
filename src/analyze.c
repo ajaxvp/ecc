@@ -2001,7 +2001,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
         if (!constexpr_evaluation_succeeded(ce))
         {
             // ISO: 6.7.2.2 (2)
-            ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+            ADD_ERROR_MESSAGE(enumr, "enumeration constant value must be specified by an integer constant expression");
             constexpr_delete(ce);
             return;
         }
@@ -2010,7 +2010,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
         if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
         {
             // ISO: 6.7.2.2 (2)
-            ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+            ADD_ERROR_MESSAGE(enumr, "enumeration constant value must be representable by type 'int'");
             constexpr_delete(ce);
             return;
         }
@@ -2045,17 +2045,19 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     if (!constexpr_evaluation_succeeded(ce))
     {
         // ISO: 6.7.2.2 (2)
-        ADD_ERROR_MESSAGE(last_er->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+        ADD_ERROR_MESSAGE(last_er, "enumeration constant value must be specified by an integer constant expression");
         constexpr_delete(ce);
         return;
     }
-    constexpr_convert_class(ce, CTC_INT);
+    constexpr_convert_class(ce, CTC_LONG_LONG_INT);
     int64_t value = constexpr_as_i64(ce) + (idx - last);
     if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
     {
         // ISO: 6.7.2.2 (2)
-        ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+        ADD_ERROR_MESSAGE(enumr, "enumeration constant value must be representable by type 'int'");
         constexpr_delete(ce);
+        if (get_program_options()->iflag)
+            printf("value identified at %u:%u: %ld\n", enumr->row, enumr->col, value);
         return;
     }
     constexpr_delete(ce);
