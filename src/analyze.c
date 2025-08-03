@@ -73,9 +73,12 @@ void dump_errors(analysis_error_t* errors)
 }
 
 #define ANALYSIS_TRAVERSER ((analysis_syntax_traverser_t*) trav)
-#define ADD_ERROR_TO_TRAVERSER(trav, syn, fmt, ...) (trav)->errors = error_list_add((trav)->errors, error_init(syn, false, fmt, ## __VA_ARGS__ ))
-#define ADD_ERROR(syn, fmt, ...) ADD_ERROR_TO_TRAVERSER(ANALYSIS_TRAVERSER, syn, fmt, ## __VA_ARGS__ )
-#define ADD_WARNING(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt, ## __VA_ARGS__ ))
+#define ADD_ERROR_TO_TRAVERSER(trav, syn, fmt, ...) (trav)->errors = error_list_add((trav)->errors, error_init(syn, false, fmt, __VA_ARGS__))
+#define ADD_ERROR_MESSAGE_TO_TRAVERSER(trav, syn, fmt) (trav)->errors = error_list_add((trav)->errors, error_init(syn, false, fmt))
+#define ADD_ERROR(syn, fmt, ...) ADD_ERROR_TO_TRAVERSER(ANALYSIS_TRAVERSER, syn, fmt, __VA_ARGS__)
+#define ADD_ERROR_MESSAGE(syn, fmt) ADD_ERROR_MESSAGE_TO_TRAVERSER(ANALYSIS_TRAVERSER, syn, fmt)
+#define ADD_WARNING(syn, fmt, ...) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt, __VA_ARGS__))
+#define ADD_WARNING_MESSAGE(syn, fmt) ANALYSIS_TRAVERSER->errors = error_list_add(ANALYSIS_TRAVERSER->errors, error_init(syn, true, fmt))
 
 #define SYMBOL_TABLE (trav->tlu->tlu_st)
 
@@ -129,7 +132,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     if (nav->class != CTC_STRUCTURE && nav->class != CTC_UNION)
                     {
                         // ISO: 6.7.8 (7)
-                        ADD_ERROR(desigr, "struct initialization designators may not be used to initialize non-struct and non-union types");
+                        ADD_ERROR_MESSAGE(desigr, "struct initialization designators may not be used to initialize non-struct and non-union types");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
                         return;
@@ -140,7 +143,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     if (midx == -1)
                     {
                         // ISO: 6.7.8 (7)
-                        ADD_ERROR(desigr, "struct initialization designators must specify a valid member of the struct or union it is initializing");
+                        ADD_ERROR_MESSAGE(desigr, "struct initialization designators must specify a valid member of the struct or union it is initializing");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
                         return;
@@ -154,7 +157,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     if (nav->class != CTC_ARRAY)
                     {
                         // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators may not be used to initialize non-array types");
+                        ADD_ERROR_MESSAGE(desigr, "array initialization designators may not be used to initialize non-array types");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
                         return;
@@ -163,7 +166,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     if (!constexpr_evaluation_succeeded(ce))
                     {
                         // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators must have a constant expression for its index");
+                        ADD_ERROR_MESSAGE(desigr, "array initialization designators must have a constant expression for its index");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
                         constexpr_delete(ce);
@@ -175,7 +178,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
                     if (value < 0)
                     {
                         // ISO: 6.7.8 (6)
-                        ADD_ERROR(desigr, "array initialization designators must have a non-negative index");
+                        ADD_ERROR_MESSAGE(desigr, "array initialization designators must have a non-negative index");
                         vector_delete(cot_stack);
                         vector_delete(coei_stack);
                         return;
@@ -193,7 +196,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
         {
             // ISO: 6.7.8 (2)
             init->initializer_offset = -1;
-            ADD_ERROR(init, "this initializer and any after it would write outside the object being initialized");
+            ADD_ERROR_MESSAGE(init, "this initializer and any after it would write outside the object being initialized");
             break;
         }
 
@@ -205,7 +208,7 @@ static void add_initializer_list_semantics(syntax_traverser_t* trav, syntax_comp
         if (!type_is_object_type(et) && (et->class != CTC_ARRAY || type_is_vla(et)))
         {
             // ISO: 6.7.8 (3)
-            ADD_ERROR(init, "initialization target must be an object type or an array of unknown size that is not variable-length");
+            ADD_ERROR_MESSAGE(init, "initialization target must be an object type or an array of unknown size that is not variable-length");
             return;
         }
 
@@ -632,7 +635,7 @@ static void enforce_6_7_para_2(syntax_traverser_t* trav, syntax_component_t* syn
         }
     }
     // ISO: 6.7 (2)
-    ADD_ERROR(syn, "a declaration must declare an identifier, struct/union/enum tag, or an enumeration constant");
+    ADD_ERROR_MESSAGE(syn, "a declaration must declare an identifier, struct/union/enum tag, or an enumeration constant");
 }
 
 void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -649,7 +652,7 @@ void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_compone
     }
     else if (array->ctype->class != CTC_ARRAY && array->ctype->class != CTC_POINTER)
         // ISO: 6.5.2.1 (1)
-        ADD_ERROR(syn, "subscript can only be applied to array and pointer types");
+        ADD_ERROR_MESSAGE(syn, "subscript can only be applied to array and pointer types");
     else
         pass = true;
     
@@ -661,7 +664,7 @@ void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_compone
         else
         {
             // ISO: 6.5.2.1 (1)
-            ADD_ERROR(syn, "subscript index expression can only be of integer type");
+            ADD_ERROR_MESSAGE(syn, "subscript index expression can only be of integer type");
         }
     }
 
@@ -724,14 +727,14 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
     else if (called_type->class != CTC_POINTER || called_type->derived_from->class != CTC_FUNCTION)
     {
         // ISO: 6.5.2.2 (1)
-        ADD_ERROR(syn, "calling expression in function call must be of function or function pointer type");
+        ADD_ERROR_MESSAGE(syn, "calling expression in function call must be of function or function pointer type");
         pass = false;
     }
     else if (called_type->derived_from->derived_from->class != CTC_VOID && (!type_is_object_type(called_type->derived_from->derived_from) ||
         called_type->derived_from->derived_from->class == CTC_ARRAY))
     {
         // ISO: 6.5.2.2 (1)
-        ADD_ERROR(syn, "function to be called must have a return type of void or an object type besides an array type");
+        ADD_ERROR_MESSAGE(syn, "function to be called must have a return type of void or an object type besides an array type");
         pass = false;
     }
 
@@ -785,7 +788,7 @@ void analyze_function_call_expression_after(syntax_traverser_t* trav, syntax_com
         if (!type_is_object_type(arg->ctype))
         {
             // ISO: 6.5.2.2 (4)
-            ADD_ERROR(arg, "argument in function call needs to be of object type");
+            ADD_ERROR_MESSAGE(arg, "argument in function call needs to be of object type");
             pass = false;
         }
     }
@@ -809,14 +812,14 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
 {
     if (syn->icallexpr_args->size != 2)
     {
-        ADD_ERROR(syn, "va_arg invocation requires two arguments: a va_list and a type for the argument returned");
+        ADD_ERROR_MESSAGE(syn, "va_arg invocation requires two arguments: a va_list and a type for the argument returned");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
-        ADD_ERROR(syn, "cannot find va_list declaration for va_arg invocation");
+        ADD_ERROR_MESSAGE(syn, "cannot find va_list declaration for va_arg invocation");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
@@ -824,13 +827,13 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
     syntax_component_t* arg_type = vector_get(syn->icallexpr_args, 1);
     if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
     {
-        ADD_ERROR(syn, "first parameter of va_arg invocation must be a va_list");
+        ADD_ERROR_MESSAGE(syn, "first parameter of va_arg invocation must be a va_list");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     if (arg_type->type != SC_TYPE_NAME)
     {
-        ADD_ERROR(syn, "second parameter of va_arg invocation must be a type name");
+        ADD_ERROR_MESSAGE(syn, "second parameter of va_arg invocation must be a type name");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
@@ -842,7 +845,7 @@ void analyze_va_arg_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
         syn->ctype->class == CTC_LONG_DOUBLE ||
         type_is_complex(syn->ctype))
     {
-        ADD_ERROR(syn, "this type is not yet supported by va_arg");
+        ADD_ERROR_MESSAGE(syn, "this type is not yet supported by va_arg");
         type_delete(syn->ctype);
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
@@ -853,21 +856,21 @@ void analyze_va_start_intrinsic_call_expression_after(syntax_traverser_t* trav, 
 {
     if (syn->icallexpr_args->size != 2)
     {
-        ADD_ERROR(syn, "va_start invocation requires two arguments: a va_list and the last non-variadic parameter of this function");
+        ADD_ERROR_MESSAGE(syn, "va_start invocation requires two arguments: a va_list and the last non-variadic parameter of this function");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
-        ADD_ERROR(syn, "cannot find va_list declaration for va_start invocation");
+        ADD_ERROR_MESSAGE(syn, "cannot find va_list declaration for va_start invocation");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
     if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
     {
-        ADD_ERROR(syn, "first parameter of va_start invocation must be a va_list");
+        ADD_ERROR_MESSAGE(syn, "first parameter of va_start invocation must be a va_list");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
@@ -878,21 +881,21 @@ void analyze_va_end_intrinsic_call_expression_after(syntax_traverser_t* trav, sy
 {
     if (syn->icallexpr_args->size != 1)
     {
-        ADD_ERROR(syn, "va_end invocation requires one argument: a va_list");
+        ADD_ERROR_MESSAGE(syn, "va_end invocation requires one argument: a va_list");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     symbol_t* sy = symbol_table_get_by_classes(SYMBOL_TABLE, "__ecc_va_list", CTC_STRUCTURE, NSC_STRUCT);
     if (!sy)
     {
-        ADD_ERROR(syn, "cannot find va_list declaration for va_end invocation");
+        ADD_ERROR_MESSAGE(syn, "cannot find va_list declaration for va_end invocation");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
     syntax_component_t* arg_ap = vector_get(syn->icallexpr_args, 0);
     if (!type_is_compatible_ignore_qualifiers(arg_ap->ctype, sy->type))
     {
-        ADD_ERROR(syn, "parameter of va_end invocation must be a va_list");
+        ADD_ERROR_MESSAGE(syn, "parameter of va_end invocation must be a va_list");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
@@ -1024,7 +1027,7 @@ void analyze_dereference_member_expression_after(syntax_traverser_t* trav, synta
     {
         // ISO: 6.5.2.3 (2)
         pass = false;
-        ADD_ERROR(syn, "left hand side of dereferencing member access expression must be of struct/union type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of dereferencing member access expression must be of struct/union type");
     }
     else if (!tlhs->derived_from->struct_union.member_names ||
         (mem_idx = vector_contains(tlhs->derived_from->struct_union.member_names, id->id, (int (*)(void*, void*)) strcmp)) == -1)
@@ -1058,7 +1061,7 @@ void analyze_member_expression_after(syntax_traverser_t* trav, syntax_component_
     {
         // ISO: 6.5.2.3 (1)
         pass = false;
-        ADD_ERROR(syn, "left hand side of member access expression must be of struct/union type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of member access expression must be of struct/union type");
     }
     else if (!tlhs->struct_union.member_names || (mem_idx = vector_contains(tlhs->struct_union.member_names, id->id, (int (*)(void*, void*)) strcmp)) == -1)
     {
@@ -1234,7 +1237,7 @@ static void check_initializations(syntax_traverser_t* trav, syntax_component_t* 
             printf("\n");
         }
         // ISO: 6.7.8 (11)
-        ADD_ERROR(syn, "invalid initialization");
+        ADD_ERROR_MESSAGE(syn, "invalid initialization");
     }
 }
 
@@ -1247,7 +1250,7 @@ void analyze_compound_literal_expression_after(syntax_traverser_t* trav, syntax_
     if (!type_is_object_type(ct) && (ct->class != CTC_ARRAY || ct->array.length_expression || type_is_vla(ct)))
     {
         // ISO: 6.5.2.5 (1)
-        ADD_ERROR(syn, "compound literals may not have a variable-length array type");
+        ADD_ERROR_MESSAGE(syn, "compound literals may not have a variable-length array type");
         pass = false;
     }
 
@@ -1293,7 +1296,7 @@ void analyze_inc_dec_expression_after(syntax_traverser_t* trav, syntax_component
         syn->ctype = expression_type_copy(otype, trav, syn);
     else
     {
-        ADD_ERROR(syn, "invalid operand to increment/decrement operator");
+        ADD_ERROR_MESSAGE(syn, "invalid operand to increment/decrement operator");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -1305,7 +1308,7 @@ void analyze_dereference_expression_after(syntax_traverser_t* trav, syntax_compo
     if (otype->class != CTC_POINTER)
     {
         // ISO: 6.5.3.2 (2)
-        ADD_ERROR(syn, "dereference operand must be of pointer type");
+        ADD_ERROR_MESSAGE(syn, "dereference operand must be of pointer type");
         pass = false;
     }
     if (pass)
@@ -1416,7 +1419,7 @@ finish:
         if (context[0])
             ADD_ERROR(syn, "invalid operand to address-of operator: %s", context);
         else
-            ADD_ERROR(syn, "invalid operand to address-of operator");
+            ADD_ERROR_MESSAGE(syn, "invalid operand to address-of operator");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -1428,7 +1431,7 @@ void analyze_plus_minus_expression_after(syntax_traverser_t* trav, syntax_compon
     if (!type_is_arithmetic(otype))
     {
         // ISO: 6.5.3.3 (1)
-        ADD_ERROR(syn, "plus/minus operand must be of arithmetic type");
+        ADD_ERROR_MESSAGE(syn, "plus/minus operand must be of arithmetic type");
         pass = false;
     }
     if (pass)
@@ -1445,7 +1448,7 @@ void analyze_complement_expression_after(syntax_traverser_t* trav, syntax_compon
     if (!type_is_integer(otype))
     {
         // ISO: 6.5.3.3 (1)
-        ADD_ERROR(syn, "complement operand must of integer type");
+        ADD_ERROR_MESSAGE(syn, "complement operand must of integer type");
         pass = false;
     }
     if (pass)
@@ -1462,7 +1465,7 @@ void analyze_not_expression_after(syntax_traverser_t* trav, syntax_component_t* 
     if (!type_is_scalar(otype))
     {
         // ISO: 6.5.3.3 (1)
-        ADD_ERROR(syn, "not ('!') operand must be of scalar type");
+        ADD_ERROR_MESSAGE(syn, "not ('!') operand must be of scalar type");
         pass = false;
     }
     if (pass)
@@ -1489,13 +1492,13 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
     if (otype->class == CTC_FUNCTION)
     {
         // ISO: 6.5.3.4 (1)
-        ADD_ERROR(syn, "sizeof operand cannot be of function type");
+        ADD_ERROR_MESSAGE(syn, "sizeof operand cannot be of function type");
         pass = false;
     }
     if (!type_is_complete(otype))
     {
         // ISO: 6.5.3.4 (1)
-        ADD_ERROR(syn, "sizeof operand cannot be of incomplete type");
+        ADD_ERROR_MESSAGE(syn, "sizeof operand cannot be of incomplete type");
         pass = false;
     }
     if (syn->type == SC_SIZEOF_TYPE_EXPRESSION)
@@ -1512,7 +1515,7 @@ void analyze_sizeof_expression_after(syntax_traverser_t* trav, syntax_component_
         if (sdeclr->sdeclr_bits_expression)
         {
             // ISO: 6.5.3.4 (1)
-            ADD_ERROR(syn, "sizeof operand cannot be a bitfield member");
+            ADD_ERROR_MESSAGE(syn, "sizeof operand cannot be a bitfield member");
             pass = false;
         }
     }
@@ -1535,7 +1538,7 @@ void analyze_cast_expression_after(syntax_traverser_t* trav, syntax_component_t*
     if (ct->class != CTC_VOID && !type_is_scalar(ct))
     {
         // ISO: 6.5.4 (2)
-        ADD_ERROR(syn, "type name of cast expression must be of scalar type");
+        ADD_ERROR_MESSAGE(syn, "type name of cast expression must be of scalar type");
         pass = false;
     }
     if (pass)
@@ -1556,13 +1559,13 @@ void analyze_modular_expression_after(syntax_traverser_t* trav, syntax_component
     if (!type_is_integer(tlhs))
     {
         // ISO: 6.5.5 (2)
-        ADD_ERROR(syn, "left hand side of modular expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of modular expression must have an integer type");
         pass = false;
     }
     if (!type_is_integer(trhs))
     {
         // ISO: 6.5.5 (2)
-        ADD_ERROR(syn, "right hand side of modular expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "right hand side of modular expression must have an integer type");
         pass = false;
     }
     if (pass)
@@ -1580,13 +1583,13 @@ void analyze_mult_div_expression_after(syntax_traverser_t* trav, syntax_componen
     if (!type_is_arithmetic(tlhs))
     {
         // ISO: 6.5.5 (2)
-        ADD_ERROR(syn, "left hand side of multiplication/division expression must have an arithmetic type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of multiplication/division expression must have an arithmetic type");
         pass = false;
     }
     if (!type_is_arithmetic(trhs))
     {
         // ISO: 6.5.5 (2)
-        ADD_ERROR(syn, "right hand side of multiplication/division expression must have an arithmetic type");
+        ADD_ERROR_MESSAGE(syn, "right hand side of multiplication/division expression must have an arithmetic type");
         pass = false;
     }
     if (pass)
@@ -1612,7 +1615,7 @@ void analyze_addition_expression_after(syntax_traverser_t* trav, syntax_componen
         ct = type_copy(tlhs);
     if (!ct)
     {
-        ADD_ERROR(syn, "invalid operands of addition expression");
+        ADD_ERROR_MESSAGE(syn, "invalid operands of addition expression");
         ct = make_basic_type(CTC_ERROR);
     }
     syn->ctype = ct;
@@ -1636,7 +1639,7 @@ void analyze_subtraction_expression_after(syntax_traverser_t* trav, syntax_compo
         ct = make_basic_type(C_TYPE_PTRSIZE_T);
     if (!ct)
     {
-        ADD_ERROR(syn, "invalid operands of subtraction expression");
+        ADD_ERROR_MESSAGE(syn, "invalid operands of subtraction expression");
         ct = make_basic_type(CTC_ERROR);
     }
     syn->ctype = ct;
@@ -1650,13 +1653,13 @@ void analyze_shift_expression_after(syntax_traverser_t* trav, syntax_component_t
     if (!type_is_integer(tlhs))
     {
         // ISO: 6.5.7 (2)
-        ADD_ERROR(syn, "left hand side of shift expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of shift expression must have an integer type");
         pass = false;
     }
     if (!type_is_integer(trhs))
     {
         // ISO: 6.5.7 (2)
-        ADD_ERROR(syn, "right hand side of shift expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "right hand side of shift expression must have an integer type");
         pass = false;
     }
     if (pass)
@@ -1689,7 +1692,7 @@ void analyze_relational_expression_after(syntax_traverser_t* trav, syntax_compon
     }
     else
     {
-        ADD_ERROR(syn, "invalid operands of relational expression");
+        ADD_ERROR_MESSAGE(syn, "invalid operands of relational expression");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -1728,7 +1731,7 @@ void analyze_equality_expression_after(syntax_traverser_t* trav, syntax_componen
     }
     else
     {
-        ADD_ERROR(syn, "invalid operands of equality expression");
+        ADD_ERROR_MESSAGE(syn, "invalid operands of equality expression");
         syn->ctype = make_basic_type(CTC_ERROR);
     }
 }
@@ -1739,13 +1742,13 @@ void analyze_bitwise_expression_after(syntax_traverser_t* trav, syntax_component
     if (!type_is_integer(syn->bexpr_lhs->ctype))
     {
         // ISO: 6.5.10 (2), 6.5.11 (2), 6.5.12 (2)
-        ADD_ERROR(syn, "left hand side of bitwise expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of bitwise expression must have an integer type");
         pass = false;
     }
     if (!type_is_integer(syn->bexpr_rhs->ctype))
     {
         // ISO: 6.5.10 (2), 6.5.11 (2), 6.5.12 (2)
-        ADD_ERROR(syn, "right hand side of bitwise expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "right hand side of bitwise expression must have an integer type");
         pass = false;
     }
     if (pass)
@@ -1761,13 +1764,13 @@ void analyze_logical_expression_after(syntax_traverser_t* trav, syntax_component
     if (!type_is_scalar(syn->bexpr_lhs->ctype))
     {
         // ISO: 6.5.13 (2), 6.5.14 (2)
-        ADD_ERROR(syn, "left hand side of logical expression must have a scalar type");
+        ADD_ERROR_MESSAGE(syn, "left hand side of logical expression must have a scalar type");
         pass = false;
     }
     if (!type_is_scalar(syn->bexpr_rhs->ctype))
     {
         // ISO: 6.5.13 (2), 6.5.14 (2)
-        ADD_ERROR(syn, "right hand side of logical expression must have a scalar type");
+        ADD_ERROR_MESSAGE(syn, "right hand side of logical expression must have a scalar type");
         pass = false;
     }
     if (pass)
@@ -1783,7 +1786,7 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
     if (!type_is_scalar(syn->cexpr_condition->ctype))
     {
         // ISO: 6.5.15 (2)
-        ADD_ERROR(syn, "condition of a conditional expression must have a scalar type");
+        ADD_ERROR_MESSAGE(syn, "condition of a conditional expression must have a scalar type");
         ft = make_basic_type(CTC_ERROR);
     }
     
@@ -1881,7 +1884,7 @@ void analyze_conditional_expression_after(syntax_traverser_t* trav, syntax_compo
     if (!ft)
     {
         // ISO: 6.5.15 (6)
-        ADD_ERROR(syn, "invalid operands of conditional expression");
+        ADD_ERROR_MESSAGE(syn, "invalid operands of conditional expression");
         syn->ctype = make_basic_type(CTC_ERROR);
         return;
     }
@@ -1894,7 +1897,7 @@ void analyze_simple_assignment_expression_after(syntax_traverser_t* trav, syntax
     if (!can_assign(syn->bexpr_lhs->ctype, syn->bexpr_rhs->ctype, syn->bexpr_rhs))
     {
         // TODO: come back and make this more useful of an error message
-        ADD_ERROR(syn, "simple assignment operation is invalid");
+        ADD_ERROR_MESSAGE(syn, "simple assignment operation is invalid");
         if (syn->ctype) type_delete(syn->ctype);
         syn->ctype = make_basic_type(CTC_ERROR);
     }
@@ -1942,7 +1945,7 @@ void analyze_compound_assignment_expression_after(syntax_traverser_t* trav, synt
     if (!pass)
     {
         // TODO: come back and make this more useful of an error message
-        ADD_ERROR(syn, "compound assignment operation has invalid operands");
+        ADD_ERROR_MESSAGE(syn, "compound assignment operation has invalid operands");
         if (syn->ctype) type_delete(syn->ctype);
         syn->ctype = make_basic_type(CTC_ERROR);
     }
@@ -1955,7 +1958,7 @@ void analyze_assignment_expression_after(syntax_traverser_t* trav, syntax_compon
     if (!syntax_is_modifiable_lvalue(syn->bexpr_lhs))
     {
         // ISO: 6.5.16 (2)
-        ADD_ERROR(syn, "left-hand side of assignment expression must be a modifiable lvalue");
+        ADD_ERROR_MESSAGE(syn, "left-hand side of assignment expression must be a modifiable lvalue");
         ft = make_basic_type(CTC_ERROR);
     }
     if (!ft)
@@ -1998,7 +2001,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
         if (!constexpr_evaluation_succeeded(ce))
         {
             // ISO: 6.7.2.2 (2)
-            ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+            ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
             constexpr_delete(ce);
             return;
         }
@@ -2007,7 +2010,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
         if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
         {
             // ISO: 6.7.2.2 (2)
-            ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+            ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
             constexpr_delete(ce);
             return;
         }
@@ -2042,7 +2045,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     if (!constexpr_evaluation_succeeded(ce))
     {
         // ISO: 6.7.2.2 (2)
-        ADD_ERROR(last_er->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
+        ADD_ERROR_MESSAGE(last_er->enumr_expression, "enumeration constant value must be specified by an integer constant expression");
         constexpr_delete(ce);
         return;
     }
@@ -2051,7 +2054,7 @@ void analyze_enumeration_constant_after(syntax_traverser_t* trav, syntax_compone
     if (value < -0x80000000LL || value > 0x7FFFFFFFLL)
     {
         // ISO: 6.7.2.2 (2)
-        ADD_ERROR(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
+        ADD_ERROR_MESSAGE(enumr->enumr_expression, "enumeration constant value must be representable by type 'int'");
         constexpr_delete(ce);
         return;
     }
@@ -2079,13 +2082,13 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         if (fsy != sy && !(sy->type->qualifiers & TQ_B_CONST) && sd == SD_STATIC && type_is_function_inline(fsy->type))
         {
             // ISO: 6.7.4 (3)
-            ADD_ERROR(syn, "an inline function may not declare a non-const identifier with static storage duration");
+            ADD_ERROR_MESSAGE(syn, "an inline function may not declare a non-const identifier with static storage duration");
         }
     }
 
     if (sy->type->class == CTC_FUNCTION && streq(symbol_get_name(sy), "main") && type_is_function_inline(sy->type))
         // ISO: 6.7.4 (4)
-        ADD_ERROR(syn, "'main' should not have the 'inline' function specifier");
+        ADD_ERROR_MESSAGE(syn, "'main' should not have the 'inline' function specifier");
 
     if (sy->type->class == CTC_ARRAY)
     {
@@ -2094,7 +2097,7 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         if (et && type_has_flexible_array_member(et))
         {
             // ISO: 6.7.2.1 (2)
-            ADD_ERROR(syn, "an array may not have elements of a struct or union type that has a flexible array member");
+            ADD_ERROR_MESSAGE(syn, "an array may not have elements of a struct or union type that has a flexible array member");
         }
     }
 
@@ -2103,11 +2106,11 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         sy->type->class != CTC_ENUMERATED &&
         lk == LK_NONE && symbols->size > 1)
         // ISO: 6.7 (3)
-        ADD_ERROR(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
+        ADD_ERROR_MESSAGE(syn, "symbol with no linkage may not be declared twice with the same scope and namespace");
     
     if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && syntax_has_initializer(syn) && scope_is_block(scope))
         // ISO: 6.7.8 (5)
-        ADD_ERROR(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
+        ADD_ERROR_MESSAGE(syn, "symbol declared with external or internal linkage at block scope may not be initialized");
     
     syntax_component_t* decl = NULL;
     if ((decl = syntax_get_declarator_declaration(syn)) &&
@@ -2117,7 +2120,7 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
         syntax_no_specifiers(decl->decl_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER) > 0)
         // NOTE: GCC on -std=c99 -pedantic-errors does not complain about typedef (which seems fine semantically, but appears to break this rule)
         // ISO: 6.7.1 (5)
-        ADD_ERROR(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
+        ADD_ERROR_MESSAGE(syn, "function declarations at block scope may only have the 'extern' storage class specifier");
     
     if (syntax_is_tentative_definition(syn))
     {
@@ -2126,7 +2129,7 @@ void analyze_declaring_identifier_after(syntax_traverser_t* trav, syntax_compone
             !type_is_complete(sy->type))
         {
             // ISO: 6.9.2 (3)
-            ADD_ERROR(syn, "tentative definitions with internal linkage may not have an incomplete type");
+            ADD_ERROR_MESSAGE(syn, "tentative definitions with internal linkage may not have an incomplete type");
         }
     }
 
@@ -2167,7 +2170,7 @@ void analyze_designating_identifier_after(syntax_traverser_t* trav, syntax_compo
         if (lk == LK_INTERNAL && type_is_function_inline(fsy->type))
         {
             // ISO: 6.7.4 (3)
-            ADD_ERROR(syn, "an inline function may not contain a reference to an identifier declared with internal linkage");
+            ADD_ERROR_MESSAGE(syn, "an inline function may not contain a reference to an identifier declared with internal linkage");
         }
     }
 
@@ -2228,7 +2231,7 @@ static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* s
     if (sy->type->class == CTC_FUNCTION)
         return;
     // ISO: 6.9.1 (2)
-    ADD_ERROR(syn, "declarator of function must be of function type");
+    ADD_ERROR_MESSAGE(syn, "declarator of function must be of function type");
 }
 
 static void enforce_6_9_1_para_3(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2243,7 +2246,7 @@ static void enforce_6_9_1_para_3(syntax_traverser_t* trav, syntax_component_t* s
     if (ct->derived_from->class == CTC_VOID || (type_is_object_type(ct->derived_from) && ct->derived_from->class != CTC_ARRAY))
         return;
     // ISO: 6.9.1 (3)
-    ADD_ERROR(syn, "function may only have a void or object (other than array) return type");
+    ADD_ERROR_MESSAGE(syn, "function may only have a void or object (other than array) return type");
 }
 
 static void enforce_6_9_1_para_4(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2251,12 +2254,12 @@ static void enforce_6_9_1_para_4(syntax_traverser_t* trav, syntax_component_t* s
     size_t no_scs = syntax_no_specifiers(syn->fdef_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER);
     if (no_scs > 1)
         // ISO: 6.9.1 (4)
-        ADD_ERROR(syn, "function definition should not have more than one storage class specifier");
+        ADD_ERROR_MESSAGE(syn, "function definition should not have more than one storage class specifier");
     if (no_scs == 1 &&
         !syntax_has_specifier(syn->fdef_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_EXTERN) &&
         !syntax_has_specifier(syn->fdef_declaration_specifiers, SC_STORAGE_CLASS_SPECIFIER, SCS_STATIC))
         // ISO: 6.9.1 (4)
-        ADD_ERROR(syn, "'static' and 'extern' are the only allowed storage class specifiers for function definitions");
+        ADD_ERROR_MESSAGE(syn, "'static' and 'extern' are the only allowed storage class specifiers for function definitions");
 }
 
 static void enforce_6_9_1_para_5(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2269,7 +2272,7 @@ static void enforce_6_9_1_para_5(syntax_traverser_t* trav, syntax_component_t* s
         return;
     if (syn->fdef_knr_declarations && syn->fdef_knr_declarations->size > 0)
         // ISO: 6.9.1 (5)
-        ADD_ERROR(syn, "declaration list in function definition not allowed if there is a parameter list");
+        ADD_ERROR_MESSAGE(syn, "declaration list in function definition not allowed if there is a parameter list");
     if (declr->fdeclr_parameter_declarations->size == 1)
     {
         syntax_component_t* pdecl = vector_get(declr->fdeclr_parameter_declarations, 0);
@@ -2284,7 +2287,7 @@ static void enforce_6_9_1_para_5(syntax_traverser_t* trav, syntax_component_t* s
         if (!syntax_get_declarator_identifier(pdecl->pdecl_declr))
         {
             // ISO: 6.9.1 (5)
-            ADD_ERROR(syn, "all parameters in a function definition must have identifiers");
+            ADD_ERROR_MESSAGE(syn, "all parameters in a function definition must have identifiers");
             break;
         }
     }
@@ -2306,19 +2309,19 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
         {
             if (declspec->type == SC_STORAGE_CLASS_SPECIFIER && declspec->scs != SCS_REGISTER)
                 // ISO: 6.9.1 (6)
-                ADD_ERROR(declspec, "declarations in the function declaration list may only have the storage class specifier 'register'");
+                ADD_ERROR_MESSAGE(declspec, "declarations in the function declaration list may only have the storage class specifier 'register'");
         }
         if (knr_decl->decl_init_declarators->size < 1)
         {
             // ISO: 6.9.1 (6)
-            ADD_ERROR(knr_decl, "declarations in the function declaration list must include at least one declarator");
+            ADD_ERROR_MESSAGE(knr_decl, "declarations in the function declaration list must include at least one declarator");
             continue;
         }
         VECTOR_FOR(syntax_component_t*, ideclr, knr_decl->decl_init_declarators)
         {
             if (ideclr->ideclr_initializer)
                 // ISO: 6.9.1 (6)
-                ADD_ERROR(ideclr->ideclr_initializer, "declarations in the function declaration list cannot have initializers");
+                ADD_ERROR_MESSAGE(ideclr->ideclr_initializer, "declarations in the function declaration list cannot have initializers");
             syntax_component_t* id = syntax_get_declarator_identifier(ideclr->ideclr_declarator);
             if (!id) assert_fail;
             if (vector_contains(declr->fdeclr_knr_identifiers, id, (int (*)(void*, void*)) strcmp) == -1)
@@ -2331,7 +2334,7 @@ static void enforce_6_9_1_para_6(syntax_traverser_t* trav, syntax_component_t* s
 
     if (found != declr->fdeclr_knr_identifiers->size)
         // ISO: 6.9.1 (6)
-        ADD_ERROR(syn, "each identifier must have exactly one declaration in the declaration list");
+        ADD_ERROR_MESSAGE(syn, "each identifier must have exactly one declaration in the declaration list");
     
     // "An identifier declared as a typedef name shall not be redeclared as a parameter"
     // ^ this is another requirement specified by this paragraph, and i'm not exactly sure what it entails tbh
@@ -2351,7 +2354,7 @@ static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t
         return; // this is handled in enforce_6_9_1_para_2
     c_type_t* ct = sy->type;
     if (ct->derived_from->class != CTC_INT)
-        ADD_ERROR(syn, "'main' should have an int return type");
+        ADD_ERROR_MESSAGE(syn, "'main' should have an int return type");
     // check for (void), (int, char**), or (int, char*[]), or no prototype
     bool good_prototype = false;
     if (ct->function.param_types)
@@ -2373,7 +2376,7 @@ static void enforce_main_definition(syntax_traverser_t* trav, syntax_component_t
     else
         good_prototype = true;
     if (!good_prototype)
-        ADD_ERROR(syn, "the function prototype for 'main', if any, should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
+        ADD_ERROR_MESSAGE(syn, "the function prototype for 'main', if any, should be either 'int main(void)' or 'int main(int argc, char *argv[])'");
 }
 
 void analyze_function_definition_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2397,7 +2400,7 @@ void enforce_6_7_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
             if (found)
             {
                 // ISO: 6.7.1 (2)
-                ADD_ERROR(syn, "only one storage class specifier allowed in declaration");
+                ADD_ERROR_MESSAGE(syn, "only one storage class specifier allowed in declaration");
                 break;
             }
             found = true;
@@ -2424,7 +2427,7 @@ void enforce_6_8_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)
     
     if (!syntax_get_enclosing(syn, SC_SWITCH_STATEMENT))
         // ISO: 6.8.1 (2)
-        ADD_ERROR(syn, "case and default labels may only exist within a switch statement");
+        ADD_ERROR_MESSAGE(syn, "case and default labels may only exist within a switch statement");
 }
 
 void analyze_labeled_statement_before(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2441,7 +2444,7 @@ void analyze_if_statement_after(syntax_traverser_t* trav, syntax_component_t* sy
 {
     if (!type_is_scalar(syn->ifstmt_condition->ctype))
         // ISO: 6.8.4.1 (1)
-        ADD_ERROR(syn->ifstmt_condition, "controlling expression of an if statement must be of scalar type");
+        ADD_ERROR_MESSAGE(syn->ifstmt_condition, "controlling expression of an if statement must be of scalar type");
 }
 
 #define SWBODY_ANALYSIS_TRAVERSER (((swbody_traverser_t*) trav)->analysis_traverser)
@@ -2466,7 +2469,7 @@ void swbody_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t
         if (!constexpr_evaluation_succeeded(ce))
         {
             // ISO: 6.8.4.2 (3)
-            ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "case statement must have a constant expression");
+            ADD_ERROR_MESSAGE_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "case statement must have a constant expression");
             constexpr_delete(ce);
             return;
         }
@@ -2491,7 +2494,7 @@ void swbody_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t
     if (swstmt->swstmt_default)
     {
         // ISO: 6.8.4.2 (3)
-        ADD_ERROR_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "multiple default cases are not allowed within a switch statement");
+        ADD_ERROR_MESSAGE_TO_TRAVERSER(SWBODY_ANALYSIS_TRAVERSER, syn, "multiple default cases are not allowed within a switch statement");
         return;
     }
     swstmt->swstmt_default = syn;
@@ -2499,11 +2502,11 @@ void swbody_labeled_statement_after(syntax_traverser_t* trav, syntax_component_t
 
 void analyze_switch_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
-    ADD_WARNING(syn, "switch statements are not checked for identifiers with variably-modified types, use with your own risk");
+    ADD_WARNING_MESSAGE(syn, "switch statements are not checked for identifiers with variably-modified types, use with your own risk");
     if (!type_is_integer(syn->swstmt_condition->ctype))
     {
         // ISO: 6.8.4.2 (1)
-        ADD_ERROR(syn->swstmt_condition, "controlling expression of a switch statement must be of integer type");
+        ADD_ERROR_MESSAGE(syn->swstmt_condition, "controlling expression of a switch statement must be of integer type");
         return;
     }
     syn->swstmt_cases = vector_init();
@@ -2542,7 +2545,7 @@ void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_componen
                 }
                 if (bad)
                     // ISO: 6.8.5 (3)
-                    ADD_ERROR(decl, "for loop initializing declaration may only have storage class specifiers of 'auto' or 'register'");
+                    ADD_ERROR_MESSAGE(decl, "for loop initializing declaration may only have storage class specifiers of 'auto' or 'register'");
             }
             break;
         default:
@@ -2550,7 +2553,7 @@ void analyze_iteration_statement_after(syntax_traverser_t* trav, syntax_componen
     }
     if (controlling && !type_is_scalar(controlling->ctype))
         // ISO: 6.8.5 (2)
-        ADD_ERROR(controlling, "controlling expression of a loop must be of scalar type");
+        ADD_ERROR_MESSAGE(controlling, "controlling expression of a loop must be of scalar type");
 }
 
 void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2559,7 +2562,7 @@ void analyze_continue_statement_after(syntax_traverser_t* trav, syntax_component
     for (; loop && loop->type != SC_FOR_STATEMENT && loop->type != SC_WHILE_STATEMENT && loop->type != SC_DO_STATEMENT; loop = loop->parent);
     if (!loop)
         // ISO: 6.8.6.2 (1)
-        ADD_ERROR(syn, "continue statements are only allowed within loops");
+        ADD_ERROR_MESSAGE(syn, "continue statements are only allowed within loops");
 }
 
 void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2572,7 +2575,7 @@ void analyze_break_statement_after(syntax_traverser_t* trav, syntax_component_t*
         parent->type != SC_SWITCH_STATEMENT; parent = parent->parent);
     if (!parent)
         // ISO: 6.8.6.3 (1)
-        ADD_ERROR(syn, "break statements are only allowed within loops and switch statements");
+        ADD_ERROR_MESSAGE(syn, "break statements are only allowed within loops and switch statements");
 }
 
 void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2586,10 +2589,10 @@ void analyze_return_statement_after(syntax_traverser_t* trav, syntax_component_t
     if (!sy->type) assert_fail;
     if (sy->type->derived_from->class == CTC_VOID && syn->retstmt_expression)
         // ISO: 6.8.6.4 (1)
-        ADD_ERROR(syn, "return values are not allowed for return statements if their function has a void return type");
+        ADD_ERROR_MESSAGE(syn, "return values are not allowed for return statements if their function has a void return type");
     if (sy->type->derived_from->class != CTC_VOID && !syn->retstmt_expression)
         // ISO: 6.8.6.4 (1)
-        ADD_ERROR(syn, "return values are required for return statements if their function has a non-void return type");
+        ADD_ERROR_MESSAGE(syn, "return values are required for return statements if their function has a non-void return type");
 }
 
 void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2611,7 +2614,7 @@ void analyze_init_declarator_after(syntax_traverser_t* trav, syntax_component_t*
     if ((lk == LK_EXTERNAL || lk == LK_INTERNAL) && scope_is_block(scope) && init)
     {
         // ISO: 6.7.8 (4)
-        ADD_ERROR(syn, "identifiers with external or internal linkage may not be initialized at block scope");
+        ADD_ERROR_MESSAGE(syn, "identifiers with external or internal linkage may not be initialized at block scope");
         return;
     }
     
@@ -2659,13 +2662,13 @@ void analyze_array_declarator_length_after(syntax_traverser_t* trav, syntax_comp
     if (!type_is_integer(syn->adeclr_length_expression->ctype))
     {
         // ISO: 6.7.5.2 (1)
-        ADD_ERROR(syn, "array length expression must have an integer type");
+        ADD_ERROR_MESSAGE(syn, "array length expression must have an integer type");
         return;
     }
     constexpr_t* ce = constexpr_evaluate_integer(syn->adeclr_length_expression);
     if (!constexpr_evaluation_succeeded(ce))
     {
-        ADD_ERROR(syn, "variable-length arrays are not supported yet");
+        ADD_ERROR_MESSAGE(syn, "variable-length arrays are not supported yet");
         constexpr_delete(ce);
         return;
     }
@@ -2674,7 +2677,7 @@ void analyze_array_declarator_length_after(syntax_traverser_t* trav, syntax_comp
     constexpr_delete(ce);
     if (value <= 0)
     {
-        ADD_ERROR(syn, "constant array length must be greater than zero");
+        ADD_ERROR_MESSAGE(syn, "constant array length must be greater than zero");
         return;
     }
 }
@@ -2695,7 +2698,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
         {
             if (sdeclr->sdeclr_bits_expression)
             {
-                ADD_ERROR(sdeclr->sdeclr_bits_expression, "struct and union bitfields are not supported yet");
+                ADD_ERROR_MESSAGE(sdeclr->sdeclr_bits_expression, "struct and union bitfields are not supported yet");
 
                 c_type_t* mt = create_type_with_errors(ANALYSIS_TRAVERSER->errors, sdecl, sdeclr);
                 if (mt->class == CTC_ERROR)
@@ -2706,7 +2709,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
                 if (mt->class != CTC_BOOL && mt->class != CTC_INT && mt->class != CTC_UNSIGNED_INT)
                 {
                     // ISO: 6.7.2.1 (4)
-                    ADD_ERROR(sdeclr, "bitfield must have a type of bool, int, or unsigned int");
+                    ADD_ERROR_MESSAGE(sdeclr, "bitfield must have a type of bool, int, or unsigned int");
                     type_delete(mt);
                     continue;
                 }
@@ -2715,7 +2718,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
                 if (!constexpr_evaluation_succeeded(ce))
                 {
                     // ISO: 6.7.2.1 (3)
-                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must be an integer constant expression");
+                    ADD_ERROR_MESSAGE(sdeclr->sdeclr_bits_expression, "bitfield width must be an integer constant expression");
                     constexpr_delete(ce);
                     type_delete(mt);
                     continue;
@@ -2728,7 +2731,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
                 if (width < 0)
                 {
                     // ISO: 6.7.2.1 (3)
-                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must be nonnegative");
+                    ADD_ERROR_MESSAGE(sdeclr->sdeclr_bits_expression, "bitfield width must be nonnegative");
                     type_delete(mt);
                     continue;
                 }
@@ -2736,7 +2739,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
                 if (width > type_size(mt) * 8)
                 {
                     // ISO: 6.7.2.1 (3)
-                    ADD_ERROR(sdeclr->sdeclr_bits_expression, "bitfield width must not exceed the typical width of its declaring type");
+                    ADD_ERROR_MESSAGE(sdeclr->sdeclr_bits_expression, "bitfield width must not exceed the typical width of its declaring type");
                     type_delete(mt);
                     continue;
                 }
@@ -2746,7 +2749,7 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
                 if (width == 0 && sdeclr->sdeclr_declarator)
                 {
                     // ISO: 6.7.2.1 (3)
-                    ADD_ERROR(sdeclr->sdeclr_declarator, "zero-width bitfields may not declare an identifier");
+                    ADD_ERROR_MESSAGE(sdeclr->sdeclr_declarator, "zero-width bitfields may not declare an identifier");
                     continue;
                 }
 
@@ -2761,13 +2764,13 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
             if (type_has_flexible_array_member(sy->type))
             {
                 // ISO: 6.7.2.1 (2)
-                ADD_ERROR(sdeclr, "member with a struct or union type may not have a flexible array member");
+                ADD_ERROR_MESSAGE(sdeclr, "member with a struct or union type may not have a flexible array member");
                 continue;
             }
             if (sy->type->class == CTC_FUNCTION)
             {
                 // ISO: 6.7.2.1 (2)
-                ADD_ERROR(sdeclr, "struct or union members may not have a function type");
+                ADD_ERROR_MESSAGE(sdeclr, "struct or union members may not have a function type");
                 continue;
             }
             // a manual check is necessary here to see if a member has the same type as the struct itself
@@ -2778,16 +2781,16 @@ void analyze_complete_struct_union_specifier_after(syntax_traverser_t* trav, syn
             {
                 // ISO: 6.7.2.1 (2)
                 if (sy->type->class == CTC_ARRAY)
-                    ADD_ERROR(sdeclr, "flexible array members are only allowed at the end of a struct or union");
+                    ADD_ERROR_MESSAGE(sdeclr, "flexible array members are only allowed at the end of a struct or union");
                 else
-                    ADD_ERROR(sdeclr, "incomplete types are not allowed within structs and unions");
+                    ADD_ERROR_MESSAGE(sdeclr, "incomplete types are not allowed within structs and unions");
             }
             if (flexible && syntax_get_enclosing(syn->parent, SC_STRUCT_UNION_SPECIFIER))
                 // ISO: 6.7.2.1 (2)
-                ADD_ERROR(sdeclr, "flexible array members are not permitted at the end of nested structs and unions");
+                ADD_ERROR_MESSAGE(sdeclr, "flexible array members are not permitted at the end of nested structs and unions");
             if (flexible && count == 1)
                 // ISO: 6.7.2.1 (2)
-                ADD_ERROR(sdeclr, "flexible array members cannot be a part of an otherwise empty struct or union");
+                ADD_ERROR_MESSAGE(sdeclr, "flexible array members cannot be a part of an otherwise empty struct or union");
         }
     }
 }
@@ -2805,7 +2808,7 @@ void analyze_floating_constant_after(syntax_traverser_t* trav, syntax_component_
 {
     if (syn->ctype->class == CTC_LONG_DOUBLE || type_is_complex(syn->ctype))
     {
-        ADD_ERROR(syn, "long double literals and complex numbers are not supported yet");
+        ADD_ERROR_MESSAGE(syn, "long double literals and complex numbers are not supported yet");
         return;
     }
     const size_t len = 4 + MAX_STRINGIFIED_INTEGER_LENGTH + 1; // __fc(number)(null)
@@ -2821,11 +2824,11 @@ void analyze_floating_constant_after(syntax_traverser_t* trav, syntax_component_
 void analyze_function_declarator_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (!syn->fdeclr_parameter_declarations)
-        ADD_ERROR(syn, "functions without prototypes are not supported yet");
+        ADD_ERROR_MESSAGE(syn, "functions without prototypes are not supported yet");
     if (syn->parent->type != SC_FUNCTION_DEFINITION && syn->fdeclr_knr_identifiers && syn->fdeclr_knr_identifiers->size > 0)
     {
         // ISO: 6.7.5.3 (3)
-        ADD_ERROR(syn, "function declarations which are not definitions must have an empty identifier list");
+        ADD_ERROR_MESSAGE(syn, "function declarations which are not definitions must have an empty identifier list");
         return;
     }
 }
@@ -2833,7 +2836,7 @@ void analyze_function_declarator_after(syntax_traverser_t* trav, syntax_componen
 void analyze_storage_class_specifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
     if (syn->scs == SCS_REGISTER)
-        ADD_WARNING(syn, "the 'register' storage class will not prioritize an object to remain in a register");
+        ADD_WARNING_MESSAGE(syn, "the 'register' storage class will not prioritize an object to remain in a register");
 }
 
 static void analyze_parameter_declaration_after(syntax_traverser_t* trav, syntax_component_t* syn)
@@ -2843,7 +2846,7 @@ static void analyze_parameter_declaration_after(syntax_traverser_t* trav, syntax
         if (spec->type == SC_STORAGE_CLASS_SPECIFIER && spec->scs != SCS_REGISTER)
         {
             // ISO: 6.7.5.3 (2)
-            ADD_ERROR(syn, "only the 'register' storage class specifier may appear in a parameter declaration");
+            ADD_ERROR_MESSAGE(syn, "only the 'register' storage class specifier may appear in a parameter declaration");
         }
     }
 }

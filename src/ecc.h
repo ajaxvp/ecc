@@ -8,7 +8,7 @@
 
 #define debug in_debug()
 
-#define assert(x) ((x) ? 0 : (errorf("assertion failed (%s:%d)\n", __FILE__, __LINE__), exit(1)))
+#define assert(x) ((x) ? 0 : (errorf("assertion failed (%s:%d)\n", __FILE__, __LINE__), exit(1), 1))
 #define assert_fail assert(0)
 
 #define VECTOR_FOR(type, var, vec) type var = (type) vector_get((vec), 0); for (unsigned i = 0; i < (vec)->size; ++i, var = (type) vector_get((vec), i))
@@ -347,7 +347,7 @@ typedef struct x86_asm_init_address
     uint64_t data_location;
 } x86_asm_init_address_t;
 
-typedef struct preprocessing_token
+struct preprocessing_token
 {
     preprocessor_token_type_t type;
     unsigned row, col;
@@ -393,7 +393,7 @@ typedef struct preprocessing_token
         // PPT_OTHER
         unsigned char other;
     };
-} preprocessing_token_t;
+};
 
 typedef struct preprocessing_table
 {
@@ -413,7 +413,7 @@ typedef struct preprocessing_settings
     preprocessing_table_t* table;
 } preprocessing_settings_t;
 
-typedef struct token
+struct token
 {
     token_type_t type;
     unsigned row, col;
@@ -457,7 +457,7 @@ typedef struct token
         // T_PUNCTUATOR
         punctuator_type_t punctuator;
     };
-} token_t;
+};
 
 typedef struct tokenizing_settings
 {
@@ -479,16 +479,16 @@ typedef struct buffer_t
     unsigned size;
 } buffer_t;
 
-typedef struct vector_t
+struct vector_t
 {
     void** data;
     unsigned capacity;
     unsigned size;
-} vector_t;
+};
 
 typedef struct c_type c_type_t;
 
-typedef struct c_type
+struct c_type
 {
     c_type_class_t class;
     unsigned char qualifiers;
@@ -522,7 +522,7 @@ typedef struct c_type
             vector_t* constant_expressions; // <syntax_component_t*>
         } enumerated;
     };
-} c_type_t;
+};
 
 typedef enum linkage
 {
@@ -697,7 +697,7 @@ typedef enum air_insn_type {
 
 typedef struct air_insn air_insn_t;
 
-typedef struct air_insn {
+struct air_insn {
     air_insn_type_t type;
     c_type_t* ct;
     air_insn_t* prev;
@@ -708,7 +708,7 @@ typedef struct air_insn {
         // function calls that return structs have C type "pointer to struct." this disambiguates struct returns from ptr to struct returns. 
         bool fcall_sret;
     } metadata;
-} air_insn_t;
+};
 
 typedef struct air_data {
     bool readonly;
@@ -885,7 +885,7 @@ typedef enum x86_insn_type
     X86I_NO_ELEMENTS
 } x86_insn_type_t;
 
-typedef struct x86_insn
+struct x86_insn
 {
     x86_insn_type_t type;
     x86_insn_size_t size;
@@ -893,7 +893,7 @@ typedef struct x86_insn
     x86_operand_t* op2;
     x86_operand_t* op3;
     x86_insn_t* next;
-} x86_insn_t;
+};
 
 typedef struct x86_asm_data
 {
@@ -1148,7 +1148,7 @@ typedef enum syntax_component_type_t
 // SC_CONSTANT = SC_INTEGER_CONSTANT | SC_FLOATING_CONSTANT | SC_ENUMERATION_CONSTANT | SC_CHARACTER_CONSTANT
 
 // THE GREATEST STRUCT OF ALL TIME
-typedef struct syntax_component_t
+struct syntax_component_t
 {
     syntax_component_type_t type;
     unsigned row, col;
@@ -1537,7 +1537,7 @@ typedef struct syntax_component_t
             int err_depth;
         };
     };
-} syntax_component_t;
+};
 
 /*
 
@@ -1587,7 +1587,7 @@ typedef enum constexpr_type
     CE_ADDRESS
 } constexpr_type_t;
 
-typedef struct constexpr
+struct constexpr
 {
     constexpr_type_t type;
     c_type_t* ct;
@@ -1604,9 +1604,9 @@ typedef struct constexpr
             int64_t offset;
         } addr;
     } content;
-} constexpr_t;
+};
 
-typedef struct symbol_t
+struct symbol_t
 {
     syntax_component_t* declarer; // the declaring identifier for this symbol in the syntax tree
     c_type_t* type;
@@ -1618,28 +1618,28 @@ typedef struct symbol_t
     uint8_t* data; // initializing content for this symbol, if needed
     vector_t* addresses; // symbol and location information about addresses in the initializing content, if needed
     struct symbol_t* next; // next symbol in list (if in a list, otherwise NULL)
-} symbol_t;
+};
 
-typedef struct symbol_table_t
+struct symbol_table_t
 {
     char** key;
     symbol_t** value;
     unsigned size;
     unsigned capacity;
     vector_t* unique_types; // <c_type_t*>
-} symbol_table_t;
+};
 
-typedef struct analysis_error
+struct analysis_error
 {
     unsigned row, col;
     char* message;
     bool warning;
     analysis_error_t* next;
-} analysis_error_t;
+};
 
 typedef void (*traversal_function)(syntax_traverser_t* trav, syntax_component_t* syn);
 
-typedef struct syntax_traverser
+struct syntax_traverser
 {
     syntax_component_t* tlu;
 
@@ -1648,7 +1648,7 @@ typedef struct syntax_traverser
 
     traversal_function before[SC_NO_ELEMENTS];
     traversal_function after[SC_NO_ELEMENTS];
-} syntax_traverser_t;
+};
 
 typedef struct map_t
 {

@@ -1,6 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "ecc.h"
 
 static opt4_options_t opt_profile_basic = {

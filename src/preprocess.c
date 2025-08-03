@@ -1128,8 +1128,8 @@ static void pp_component_print_indented(preprocessing_component_t* comp, unsigne
         ps("]\n"); \
     }
 
-create_vector_printer(print_vector_indented, preprocessing_component_t*, pp_component_print_indented(el, indent + 1, printer));
-create_vector_printer(print_string_vector_indented, char*, pf("%s\n", el));
+create_vector_printer(print_vector_indented, preprocessing_component_t*, pp_component_print_indented(el, indent + 1, printer))
+create_vector_printer(print_string_vector_indented, char*, pf("%s\n", el))
 
 static void pp_component_print_indented(preprocessing_component_t* comp, unsigned indent, int (*printer)(const char* fmt, ...))
 {

@@ -972,10 +972,10 @@ x86_operand_t* air_operand_to_x86_operand(air_insn_operand_t* aop, x86_asm_routi
             long long size = type_size(sy->type);
             long long alignment = type_alignment(sy->type);
             syoffset -= size;
-            syoffset -= abs(syoffset % alignment);
+            syoffset -= llabs(syoffset % alignment);
             return make_operand_deref_register(X86R_RBP, (routine->stackalloc = sy->stack_offset = syoffset) + offset);
         }
-        case AOP_LABEL:
+        case AOP_LABEL:;
             char label[MAX_CONSTANT_LOCAL_LABEL_LENGTH];
             snprintf(label, MAX_CONSTANT_LOCAL_LABEL_LENGTH, ".L%c%llu", aop->content.label.disambiguator, aop->content.label.id);
             return make_operand_label(label);

@@ -4,7 +4,8 @@
 #include "ecc.h"
 
 #define SYMBOL_TABLE (syntax_get_translation_unit(expr)->tlu_st)
-#define SET_ERROR(syn, fmt, ...) (free(ce->error), ce->error = NULL, ce->error = malloc(MAX_ERROR_LENGTH), ce->err_row = (syn)->row, ce->err_col = (syn)->col, snprintf(ce->error, MAX_ERROR_LENGTH, fmt, ## __VA_ARGS__))
+#define SET_ERROR(syn, fmt, ...) (free(ce->error), ce->error = NULL, ce->error = malloc(MAX_ERROR_LENGTH), ce->err_row = (syn)->row, ce->err_col = (syn)->col, snprintf(ce->error, MAX_ERROR_LENGTH, fmt, __VA_ARGS__))
+#define SET_ERROR_MESSAGE(syn, fmt) (free(ce->error), ce->error = NULL, ce->error = malloc(MAX_ERROR_LENGTH), ce->err_row = (syn)->row, ce->err_col = (syn)->col, snprintf(ce->error, MAX_ERROR_LENGTH, fmt))
 
 void constexpr_delete(constexpr_t* ce)
 {
@@ -647,7 +648,7 @@ void evaluate_plus_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "unary plus operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "unary plus operator is not allowed in an address constant");
         return;
     }
 
@@ -671,7 +672,7 @@ void evaluate_minus_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "unary minus operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "unary minus operator is not allowed in an address constant");
         return;
     }
 
@@ -695,7 +696,7 @@ void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "addition operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "addition operator is not allowed in an address constant");
         return;
     }
 
@@ -725,7 +726,7 @@ void evaluate_addition_expression(syntax_component_t* expr, constexpr_t* ce)
 
         if (!constexpr_addition_representable(lhs, rhs, expr->ctype))
         {
-            SET_ERROR(expr, "addition in constant expression does not fit within its size");
+            SET_ERROR_MESSAGE(expr, "addition in constant expression does not fit within its size");
             constexpr_delete(lhs);
             constexpr_delete(rhs);
             return;
@@ -745,7 +746,7 @@ void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "subtraction operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "subtraction operator is not allowed in an address constant");
         return;
     }
 
@@ -775,7 +776,7 @@ void evaluate_subtraction_expression(syntax_component_t* expr, constexpr_t* ce)
 
         if (!constexpr_subtraction_representable(lhs, rhs, expr->ctype))
         {
-            SET_ERROR(expr, "subtraction in constant expression does not fit within its size");
+            SET_ERROR_MESSAGE(expr, "subtraction in constant expression does not fit within its size");
             constexpr_delete(lhs);
             constexpr_delete(rhs);
             return;
@@ -795,7 +796,7 @@ void evaluate_multiplication_expression(syntax_component_t* expr, constexpr_t* c
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "multiplication operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "multiplication operator is not allowed in an address constant");
         return;
     }
 
@@ -823,7 +824,7 @@ void evaluate_multiplication_expression(syntax_component_t* expr, constexpr_t* c
 
     if (!constexpr_multiplication_representable(lhs, rhs, expr->ctype))
     {
-        SET_ERROR(expr, "multiplication in constant expression does not fit within its size");
+        SET_ERROR_MESSAGE(expr, "multiplication in constant expression does not fit within its size");
         constexpr_delete(lhs);
         constexpr_delete(rhs);
         return;
@@ -839,7 +840,7 @@ void evaluate_division_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "division operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "division operator is not allowed in an address constant");
         return;
     }
 
@@ -875,7 +876,7 @@ void evaluate_modular_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "modulo operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "modulo operator is not allowed in an address constant");
         return;
     }
 
@@ -911,7 +912,7 @@ void evaluate_complement_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "complement operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "complement operator is not allowed in an address constant");
         return;
     }
 
@@ -935,7 +936,7 @@ void evaluate_bitwise_and_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "bitwise AND operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "bitwise AND operator is not allowed in an address constant");
         return;
     }
 
@@ -971,7 +972,7 @@ void evaluate_bitwise_or_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "bitwise OR operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "bitwise OR operator is not allowed in an address constant");
         return;
     }
 
@@ -1007,7 +1008,7 @@ void evaluate_bitwise_xor_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "bitwise XOR operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "bitwise XOR operator is not allowed in an address constant");
         return;
     }
 
@@ -1043,7 +1044,7 @@ void evaluate_bitwise_left_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "left shift operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "left shift operator is not allowed in an address constant");
         return;
     }
 
@@ -1079,7 +1080,7 @@ void evaluate_bitwise_right_expression(syntax_component_t* expr, constexpr_t* ce
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "right shift operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "right shift operator is not allowed in an address constant");
         return;
     }
 
@@ -1115,7 +1116,7 @@ void evaluate_not_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "NOT operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "NOT operator is not allowed in an address constant");
         return;
     }
 
@@ -1139,7 +1140,7 @@ void evaluate_logical_and_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "logical AND operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "logical AND operator is not allowed in an address constant");
         return;
     }
 
@@ -1182,7 +1183,7 @@ void evaluate_logical_or_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "logical OR operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "logical OR operator is not allowed in an address constant");
         return;
     }
 
@@ -1225,7 +1226,7 @@ void evaluate_equality_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "equality operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "equality operator is not allowed in an address constant");
         return;
     }
 
@@ -1261,7 +1262,7 @@ void evaluate_inequality_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "inequality operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "inequality operator is not allowed in an address constant");
         return;
     }
 
@@ -1297,7 +1298,7 @@ void evaluate_less_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "less than operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "less than operator is not allowed in an address constant");
         return;
     }
 
@@ -1333,7 +1334,7 @@ void evaluate_less_equal_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "less than or equal operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "less than or equal operator is not allowed in an address constant");
         return;
     }
 
@@ -1369,7 +1370,7 @@ void evaluate_greater_expression(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "greater than operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "greater than operator is not allowed in an address constant");
         return;
     }
 
@@ -1405,7 +1406,7 @@ void evaluate_greater_equal_expression(syntax_component_t* expr, constexpr_t* ce
 {
     if (ce->type == CE_ADDRESS)
     {
-        SET_ERROR(expr, "greater than or equal operator is not allowed in an address constant");
+        SET_ERROR_MESSAGE(expr, "greater than or equal operator is not allowed in an address constant");
         return;
     }
 
@@ -1475,7 +1476,7 @@ void evaluate_subscript_expression(syntax_component_t* expr, constexpr_t* ce)
         return;
     }
     // ISO: 6.6 (9)
-    SET_ERROR(expr, "the subscript operator may not be used to access the value of an object");
+    SET_ERROR_MESSAGE(expr, "the subscript operator may not be used to access the value of an object");
 }
 
 void evaluate_dereference_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1496,7 +1497,7 @@ void evaluate_dereference_expression(syntax_component_t* expr, constexpr_t* ce)
         return;
     }
     // ISO: 6.6 (9)
-    SET_ERROR(expr, "the dereference operator may not be used to access the value of an object");
+    SET_ERROR_MESSAGE(expr, "the dereference operator may not be used to access the value of an object");
 }
 
 void evaluate_reference_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1517,7 +1518,7 @@ void evaluate_reference_expression(syntax_component_t* expr, constexpr_t* ce)
         return;
     }
     // ISO: 6.6 (9)
-    SET_ERROR(expr, "the address-of operator may not be used to access the value of an object");
+    SET_ERROR_MESSAGE(expr, "the address-of operator may not be used to access the value of an object");
 }
 
 void evaluate_dereference_member_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1548,7 +1549,7 @@ void evaluate_dereference_member_expression(syntax_component_t* expr, constexpr_
         return;
     }
     // ISO: 6.6 (9)
-    SET_ERROR(expr, "the pointer-to member access operator may not be used to access the value of an object");
+    SET_ERROR_MESSAGE(expr, "the pointer-to member access operator may not be used to access the value of an object");
 }
 
 void evaluate_member_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1579,7 +1580,7 @@ void evaluate_member_expression(syntax_component_t* expr, constexpr_t* ce)
         return;
     }
     // ISO: 6.6 (9)
-    SET_ERROR(expr, "the member access operator may not be used to access the value of an object");
+    SET_ERROR_MESSAGE(expr, "the member access operator may not be used to access the value of an object");
 }
 
 void evaluate_cast_expression(syntax_component_t* expr, constexpr_t* ce)
@@ -1588,14 +1589,14 @@ void evaluate_cast_expression(syntax_component_t* expr, constexpr_t* ce)
     if (ce->type == CE_INTEGER && (!type_is_arithmetic(expr->caexpr_operand->ctype) || !type_is_integer(to)))
     {
         // ISO: 6.6 (6)
-        SET_ERROR(expr, "casts in an integer constant expression may only convert arithmetic types to integer types");
+        SET_ERROR_MESSAGE(expr, "casts in an integer constant expression may only convert arithmetic types to integer types");
         type_delete(to);
         return;
     }
     if (ce->type == CE_ARITHMETIC && (!type_is_arithmetic(expr->caexpr_operand->ctype) || !type_is_arithmetic(to)))
     {
         // ISO: 6.6 (8)
-        SET_ERROR(expr, "casts in an arithmetic constant expression may only convert arithmetic types to other arithmetic types");
+        SET_ERROR_MESSAGE(expr, "casts in an arithmetic constant expression may only convert arithmetic types to other arithmetic types");
         type_delete(to);
         return;
     }
@@ -1656,7 +1657,7 @@ void evaluate_sizeof_expression(syntax_component_t* expr, constexpr_t* ce)
     if (size == -1)
     {
         // ISO: 6.6 (6), 6.6 (8)
-        SET_ERROR(expr, "the 'sizeof' operator may only be applied to non-VLA type expressions in a constant expression");
+        SET_ERROR_MESSAGE(expr, "the 'sizeof' operator may only be applied to non-VLA type expressions in a constant expression");
         return;
     }
     copy_typed_data(ce, type_copy(expr->ctype), to_data(size));
@@ -1670,7 +1671,7 @@ void evaluate_sizeof_type_expression(syntax_component_t* expr, constexpr_t* ce)
     if (size == -1)
     {
         // ISO: 6.6 (6), 6.6 (8)
-        SET_ERROR(expr, "the 'sizeof' operator may only be applied to non-VLA type expressions in a constant expression");
+        SET_ERROR_MESSAGE(expr, "the 'sizeof' operator may only be applied to non-VLA type expressions in a constant expression");
         return;
     }
     copy_typed_data(ce, type_copy(expr->ctype), to_data(size));
@@ -1694,7 +1695,7 @@ void evaluate_integer_constant(syntax_component_t* expr, constexpr_t* ce)
         // case CTC_UNSIGNED_CHAR:
         // case CTC_UNSIGNED_SHORT_INT:
         default:
-            SET_ERROR(expr, "integer constant encountered with unexpected type");
+            SET_ERROR_MESSAGE(expr, "integer constant encountered with unexpected type");
             break;
     }
 }
@@ -1710,7 +1711,7 @@ void evaluate_primary_expression_identifier(syntax_component_t* expr, constexpr_
         if (symbol_get_storage_duration(sy) != SD_STATIC)
         {
             // ISO: 6.6 (9)
-            SET_ERROR(expr, "objects designated in an address constant must have static storage duration");
+            SET_ERROR_MESSAGE(expr, "objects designated in an address constant must have static storage duration");
             return;
         }
         ce->content.addr.sy = sy;
@@ -1757,7 +1758,7 @@ void evaluate_character_constant(syntax_component_t* expr, constexpr_t* ce)
 {
     if (expr->ctype->class != CTC_INT)
     {
-        SET_ERROR(expr, "character constant encountered with unexpected type");
+        SET_ERROR_MESSAGE(expr, "character constant encountered with unexpected type");
         return;
     }
     copy_typed_data(ce, make_basic_type(CTC_INT), to_data(expr->charc_value));
@@ -1767,25 +1768,25 @@ void evaluate_floating_constant(syntax_component_t* expr, constexpr_t* ce)
 {
     if (ce->type == CE_INTEGER && expr->parent->type != SC_CAST_EXPRESSION)
     {
-        SET_ERROR(expr, "floating constants are disallowed in integer constant expressions unless if one is an immediate operand to a cast");
+        SET_ERROR_MESSAGE(expr, "floating constants are disallowed in integer constant expressions unless if one is an immediate operand to a cast");
         return;
     }
     switch (expr->ctype->class)
     {
-        case CTC_FLOAT:
+        case CTC_FLOAT:;
             float f = (float) expr->floc;
             copy_typed_data(ce, make_basic_type(CTC_FLOAT), to_data(f));
             break;
-        case CTC_DOUBLE:
+        case CTC_DOUBLE:;
             double d = (double) expr->floc;
             copy_typed_data(ce, make_basic_type(CTC_DOUBLE), to_data(d));
             break;
-        case CTC_LONG_DOUBLE:
+        case CTC_LONG_DOUBLE:;
             long double ld = (long double) expr->floc;
             copy_typed_data(ce, make_basic_type(CTC_LONG_DOUBLE), to_data(ld));
             break;
         default:
-            SET_ERROR(expr, "floating constant encountered with unexpected type");
+            SET_ERROR_MESSAGE(expr, "floating constant encountered with unexpected type");
             break;
     }
 }
@@ -1845,25 +1846,25 @@ static void evaluate(syntax_component_t* expr, constexpr_t* ce)
         case SC_BITWISE_AND_ASSIGNMENT_EXPRESSION:
         case SC_BITWISE_OR_ASSIGNMENT_EXPRESSION:
         case SC_BITWISE_XOR_ASSIGNMENT_EXPRESSION:
-            SET_ERROR(expr, "assignment operators are disallowed within constant expressions");
+            SET_ERROR_MESSAGE(expr, "assignment operators are disallowed within constant expressions");
             break;
         
         case SC_PREFIX_INCREMENT_EXPRESSION:
         case SC_POSTFIX_INCREMENT_EXPRESSION:
-            SET_ERROR(expr, "increment operators are disallowed within constant expressions");
+            SET_ERROR_MESSAGE(expr, "increment operators are disallowed within constant expressions");
             break;
     
         case SC_PREFIX_DECREMENT_EXPRESSION:
         case SC_POSTFIX_DECREMENT_EXPRESSION:
-            SET_ERROR(expr, "decrement operators are disallowed within constant expressions");
+            SET_ERROR_MESSAGE(expr, "decrement operators are disallowed within constant expressions");
             break;
         
         case SC_FUNCTION_CALL_EXPRESSION:
-            SET_ERROR(expr, "function calls are disallowed within constant expressions");
+            SET_ERROR_MESSAGE(expr, "function calls are disallowed within constant expressions");
             break;
 
         case SC_EXPRESSION:
-            SET_ERROR(expr, "the comma operator is disallowed within constant expressions");
+            SET_ERROR_MESSAGE(expr, "the comma operator is disallowed within constant expressions");
             break;
 
         default: break;
@@ -1884,16 +1885,16 @@ static constexpr_t* constexpr_evaluate_type(syntax_component_t* expr, constexpr_
     ce->ct = make_basic_type(CTC_ERROR);
     if (!expr->ctype)
     {
-        SET_ERROR(expr, "expression is not typed");
+        SET_ERROR_MESSAGE(expr, "expression is not typed");
         return ce;
     }
     evaluate(expr, ce);
     if (type == CE_INTEGER && !ce->error && !type_is_integer(ce->ct))
         // ISO: 6.6 (6)
-        SET_ERROR(expr, "integer constant expression must have an integer type");
+        SET_ERROR_MESSAGE(expr, "integer constant expression must have an integer type");
     if (type == CE_ARITHMETIC && !ce->error && !type_is_arithmetic(ce->ct))
         // ISO: 6.6 (8)
-        SET_ERROR(expr, "arithmetic constant expression must have an arithmetic type");
+        SET_ERROR_MESSAGE(expr, "arithmetic constant expression must have an arithmetic type");
     return ce;
 }
 
@@ -1932,7 +1933,7 @@ constexpr_t* constexpr_evaluate_address(syntax_component_t* expr)
     ce->ct = make_basic_type(CTC_ERROR);
     if (!expr->ctype)
     {
-        SET_ERROR(expr, "expression is not typed");
+        SET_ERROR_MESSAGE(expr, "expression is not typed");
         return ce;
     }
     if (expr->type == SC_CAST_EXPRESSION)

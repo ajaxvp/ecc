@@ -1399,7 +1399,7 @@ air_insn_t* localize_x86_64_va_start(air_insn_t* insn, air_routine_t* routine, a
     air_insn_t* sub = air_insn_init(AIR_DIRECT_SUBTRACT, 2);
     sub->ct = make_basic_type(CTC_UNSIGNED_LONG_LONG_INT);
     sub->ops[0] = air_insn_register_operand_init(reg);
-    sub->ops[1] = air_insn_integer_constant_operand_init(abs(sseoffset));
+    sub->ops[1] = air_insn_integer_constant_operand_init(llabs(sseoffset));
     air_insn_insert_before(sub, insn);
 
     air_insn_t* ld_ssepos = air_insn_init(AIR_ASSIGN, 2);

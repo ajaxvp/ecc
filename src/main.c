@@ -510,6 +510,11 @@ int handle_c_flag(int argc, char** argv)
     return EXIT_SUCCESS;
 }
 
+static int clean_exit(int code)
+{
+    return code;
+}
+
 int main(int argc, char** argv)
 {
     PROGRAM_NAME = argv[0];
@@ -517,11 +522,11 @@ int main(int argc, char** argv)
     if (argc <= 1)
     {
         errorf("no input files\n");
-        return EXIT_FAILURE;
+        return clean_exit(EXIT_FAILURE);
     }
 
     if (!get_options(argc, argv))
-        return EXIT_FAILURE;
+        return clean_exit(EXIT_FAILURE);
     
     if (opts.hflag)
         return usage();
@@ -548,12 +553,12 @@ int main(int argc, char** argv)
         {
             delete_array((void**) objects, object_count);
             errorf("file '%s' has an unexpected extension. expected '.c', '.s', or '.o' (C source files, assembly files, or object files)");
-            return EXIT_FAILURE;
+            return clean_exit(EXIT_FAILURE);
         }
         if (obj_filepath == NULL)
         {
             delete_array((void**) objects, object_count);
-            return EXIT_FAILURE;
+            return clean_exit(EXIT_FAILURE);
         }
         objects[i - optind] = obj_filepath;
     }
@@ -572,9 +577,9 @@ int main(int argc, char** argv)
     if (!exec_filepath)
     {
         errorf("linker has failed to produce an executable\n");
-        return EXIT_FAILURE;
+        return clean_exit(EXIT_FAILURE);
     }
 
     free(exec_filepath);
-    return EXIT_SUCCESS;
+    return clean_exit(EXIT_SUCCESS);
 }

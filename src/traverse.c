@@ -454,5 +454,5 @@ static void traverse_syntax(syntax_traverser_t* trav, syntax_component_t* syn)
 
 void traverse(syntax_traverser_t* trav)
 {
-    return traverse_syntax(trav, trav->tlu);
+    traverse_syntax(trav, trav->tlu);
 }

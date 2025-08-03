@@ -834,7 +834,7 @@ bool air_insn_produces_side_effect(air_insn_t* insn)
         case AIR_DIRECT_SIGNED_SHIFT_RIGHT:
         case AIR_DIRECT_AND:
         case AIR_DIRECT_XOR:
-        case AIR_DIRECT_OR:
+        case AIR_DIRECT_OR:;
             air_insn_operand_type_t optype = insn->ops[0]->type;
             if (optype == AOP_INDIRECT_REGISTER ||
                 optype == AOP_INDIRECT_SYMBOL ||

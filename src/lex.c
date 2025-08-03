@@ -516,11 +516,12 @@ typedef preprocessing_token_t* (*lex_function)(lex_state_t* state);
 #define cleanup_retreat jump(o)
 #define cleanup_helper cleanup_retreat
 #define cleanup_lex_fail cleanup_retreat, pp_token_delete(token), state->found = false
-#define cleanup_lex_pass state->counting ? (cleanup_retreat, pp_token_delete(token), state->found = true) : (void) 0
+#define cleanup_lex_pass state->counting ? (cleanup_retreat, pp_token_delete(token), state->found = true) : 0
 #define read (++state->counter, c = read_impl(state))
 #define unread (--state->counter, unread_impl(state))
 #define peek (p = read_impl(state), p != EOF ? unread_impl(state) : false, p)
-#define SET_ERROR(fmt, ...) snerrorf(state->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt "\n", state->row, state->col, ## __VA_ARGS__)
+#define SET_ERROR(fmt, ...) snerrorf(state->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt "\n", state->row, state->col, __VA_ARGS__)
+#define SET_ERROR_MESSAGE(fmt) snerrorf(state->error, MAX_ERROR_LENGTH, "[%u:%u] " fmt "\n", state->row, state->col)
 
 preprocessing_token_t* lex_header_name(lex_state_t* state)
 {
@@ -528,7 +529,7 @@ preprocessing_token_t* lex_header_name(lex_state_t* state)
     if (peek != '<' && peek != '"')
     {
         cleanup_lex_fail;
-        SET_ERROR("expected '<' or '\"' for start of header name");
+        SET_ERROR_MESSAGE("expected '<' or '\"' for start of header name");
         return NULL;
     }
     read;
@@ -559,7 +560,7 @@ char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
     {
         cleanup_helper;
         buffer_delete(buf);
-        SET_ERROR("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
+        SET_ERROR_MESSAGE("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
         return NULL;
     }
     buffer_append(buf, read);
@@ -567,7 +568,7 @@ char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
     {
         cleanup_helper;
         buffer_delete(buf);
-        SET_ERROR("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
+        SET_ERROR_MESSAGE("expected universal character of form '\\uXXXX' or '\\UXXXXXXXX'");
         return NULL;
     }
     int type = read;
@@ -590,7 +591,7 @@ char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
         {
             cleanup_helper;
             buffer_delete(buf);
-            SET_ERROR("universal character should have 8 hex digits with '\\U' prefix");
+            SET_ERROR_MESSAGE("universal character should have 8 hex digits with '\\U' prefix");
         }
     }
     char* unichar = buffer_export(buf);
@@ -601,7 +602,7 @@ char* lex_universal_character(lex_state_t* state, preprocessing_token_t* token)
         cleanup_helper;
         free(unichar);
         // ISO: 6.4.3 (2)
-        SET_ERROR("invalid universal character name");
+        SET_ERROR_MESSAGE("invalid universal character name");
         return NULL;
     }
     return unichar;
@@ -644,7 +645,7 @@ preprocessing_token_t* lex_identifier(lex_state_t* state)
     {
         cleanup_lex_fail;
         buffer_delete(buf);
-        SET_ERROR("identifier cannot be empty");
+        SET_ERROR_MESSAGE("identifier cannot be empty");
         return NULL;
     }
     token->identifier = buffer_export(buf);
@@ -665,7 +666,7 @@ preprocessing_token_t* lex_pp_number(lex_state_t* state)
     {
         cleanup_lex_fail;
         buffer_delete(buf);
-        SET_ERROR("expected at least one digit in number");
+        SET_ERROR_MESSAGE("expected at least one digit in number");
         return NULL;
     }
     read;
@@ -729,7 +730,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
     if (peek != '\'')
     {
         cleanup_lex_fail;
-        SET_ERROR("expected single quotes enclosing character constant");
+        SET_ERROR_MESSAGE("expected single quotes enclosing character constant");
         return NULL;
     }
     buffer_t* buf = buffer_init();
@@ -738,7 +739,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
     {
         cleanup_lex_fail;
         buffer_delete(buf);
-        SET_ERROR("character constant cannot be empty");
+        SET_ERROR_MESSAGE("character constant cannot be empty");
         return NULL;
     }
     for (;;)
@@ -752,7 +753,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
         {
             cleanup_lex_fail;
             buffer_delete(buf);
-            SET_ERROR("newlines not allowed in character constant");
+            SET_ERROR_MESSAGE("newlines not allowed in character constant");
             return NULL;
         }
         if (peek == '\\')
@@ -781,7 +782,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
                     cleanup_lex_fail;
                     buffer_delete(buf);
                     // ISO: 6.4.4.4 (1)
-                    SET_ERROR("hex escape sequence should have at least 1 hex digit");
+                    SET_ERROR_MESSAGE("hex escape sequence should have at least 1 hex digit");
                     return NULL;
                 }
             }
@@ -816,7 +817,7 @@ preprocessing_token_t* lex_character_constant(lex_state_t* state)
                 unread;
                 cleanup_lex_fail;
                 buffer_delete(buf);
-                SET_ERROR("invalid escape sequence in character constant");
+                SET_ERROR_MESSAGE("invalid escape sequence in character constant");
                 return NULL;
             }
             continue;
@@ -840,7 +841,7 @@ preprocessing_token_t* lex_string_literal(lex_state_t* state)
     if (peek != '"')
     {
         cleanup_lex_fail;
-        SET_ERROR("expected double quotes enclosing string literal");
+        SET_ERROR_MESSAGE("expected double quotes enclosing string literal");
         return NULL;
     }
     read;
@@ -856,7 +857,7 @@ preprocessing_token_t* lex_string_literal(lex_state_t* state)
         {
             cleanup_lex_fail;
             buffer_delete(buf);
-            SET_ERROR("newlines not allowed in string literal");
+            SET_ERROR_MESSAGE("newlines not allowed in string literal");
             return NULL;
         }
         if (peek == '\\')
@@ -885,7 +886,7 @@ preprocessing_token_t* lex_string_literal(lex_state_t* state)
                     cleanup_lex_fail;
                     buffer_delete(buf);
                     // ISO: 6.4.4.4 (1)
-                    SET_ERROR("hex escape sequence should have at least 1 hex digit");
+                    SET_ERROR_MESSAGE("hex escape sequence should have at least 1 hex digit");
                     return NULL;
                 }
             }
@@ -920,7 +921,7 @@ preprocessing_token_t* lex_string_literal(lex_state_t* state)
                 unread;
                 cleanup_lex_fail;
                 buffer_delete(buf);
-                SET_ERROR("invalid escape sequence in character constant");
+                SET_ERROR_MESSAGE("invalid escape sequence in character constant");
                 return NULL;
             }
             continue;
@@ -1162,7 +1163,7 @@ preprocessing_token_t* lex_punctuator(lex_state_t* state)
     #undef single_check
 
     cleanup_lex_fail;
-    SET_ERROR("unknown punctuator");
+    SET_ERROR_MESSAGE("unknown punctuator");
     return NULL;
 }
 
@@ -1213,7 +1214,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
     init_lex(PPT_WHITESPACE);
     if (peek != '/')
     {
-        SET_ERROR("comment must start with '//' or '/*'");
+        SET_ERROR_MESSAGE("comment must start with '//' or '/*'");
         cleanup_lex_fail;
         return NULL;
     }
@@ -1226,7 +1227,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
             read;
             if (c == EOF)
             {
-                SET_ERROR("source file must end with a newline");
+                SET_ERROR_MESSAGE("source file must end with a newline");
                 cleanup_lex_fail;
                 return NULL;
             }
@@ -1250,7 +1251,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
             read;
             if (c == EOF)
             {
-                SET_ERROR("source file must not end in a comment");
+                SET_ERROR_MESSAGE("source file must not end in a comment");
                 cleanup_lex_fail;
                 return NULL;
             }
@@ -1272,7 +1273,7 @@ preprocessing_token_t* lex_comment(lex_state_t* state)
         cleanup_lex_pass;
         return token;
     }
-    SET_ERROR("comment must start with '//' or '/*'");
+    SET_ERROR_MESSAGE("comment must start with '//' or '/*'");
     cleanup_lex_fail;
     return NULL;
 }

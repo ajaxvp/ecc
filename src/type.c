@@ -76,7 +76,7 @@ bool type_is_compatible(c_type_t* t1, c_type_t* t2)
         return false;
     switch (t1->class)
     {
-        case CTC_ARRAY:
+        case CTC_ARRAY:;
             int64_t len1 = type_get_array_length(t1);
             int64_t len2 = type_get_array_length(t2);
             // ISO: 6.7.5.2 (6)
@@ -970,7 +970,7 @@ void type_humanized_print(c_type_t* ct, int (*printer)(const char*, ...))
             if (ct->enumerated.name)
                 printer(" %s", ct->enumerated.name);
             break;
-        case CTC_ARRAY:
+        case CTC_ARRAY:;
             int64_t length = type_get_array_length(ct);
             if (length != -1)
                 printer("[%lld]", length);

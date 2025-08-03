@@ -77,9 +77,9 @@ RULES TO FOLLOW:
     if (token) syn->row = token->row, syn->col = token->col; \
     syn->parent = parent;
 
-#define try_parse(type, name, ...) \
+#define try_parse(type, name) \
     parse_status_code_t name##_stat = UNKNOWN_STATUS; \
-    syntax_component_t* name = parse_##type(&token, OPTIONAL, &name##_stat, tlu, next_depth, parent, ## __VA_ARGS__); \
+    syntax_component_t* name = parse_##type(&token, OPTIONAL, &name##_stat, tlu, next_depth, parent); \
     if (name##_stat == FOUND) \
     { \
         update_status(FOUND); \
@@ -87,7 +87,7 @@ RULES TO FOLLOW:
     }
 
 // updates status with fail for the given request and prepares error for printing if needed
-// does NOT free anything. you should do this!
+// does NOT free anything.
 #define fail_parse(token, fmt, ...) \
     fail_status; \
     if (req == EXPECTED) \
@@ -1471,7 +1471,7 @@ syntax_component_t* parse_primary_expression(token_t** tokens, parse_request_cod
     if (id_stat == FOUND)
     {
         if (stat) *stat = (FOUND);
-        if ((FOUND) == FOUND) *tokens = token;
+        *tokens = token;
         return id;
     }
     try_parse(floating_constant, fcon)
@@ -2121,7 +2121,7 @@ define_basic_parse_expression(
     relational,
     SC_EQUALITY_EXPRESSION, SC_INEQUALITY_EXPRESSION, SC_UNKNOWN, SC_UNKNOWN,
     P_EQUAL, P_INEQUAL, 0, 0
-);
+)
 define_basic_parse_expression(
     bitwise_and,
     equality,
@@ -2286,7 +2286,13 @@ syntax_component_t* parse_assignment_expression(token_t** tokens, parse_request_
 {
     init_parse;
     try_expression(actual_assignment, aexo);
-    try_parse(conditional_expression, cexpr, SC_CONDITIONAL_EXPRESSION);
+    parse_status_code_t cexpr_stat = UNKNOWN_STATUS;
+    syntax_component_t *cexpr = parse_conditional_expression(
+        &token, OPTIONAL, &cexpr_stat, tlu, (depth + 1), parent, SC_CONDITIONAL_EXPRESSION);
+    if (cexpr_stat == FOUND) {
+        update_status(FOUND);
+        return cexpr;
+    }
     fail_parse(token, "expected expression");
     return NULL;
 }
