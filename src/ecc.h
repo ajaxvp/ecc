@@ -8,7 +8,7 @@
 
 #define debug in_debug()
 
-#define assert(x) ((x) ? 0 : (errorf("assertion failed (%s:%d)\n", __FILE__, __LINE__), exit(1), 1))
+#define assert(x) ((x) ? (void) 0 : (errorf("assertion failed (%s:%d)\n", __FILE__, __LINE__), exit(1)))
 #define assert_fail assert(0)
 
 #define VECTOR_FOR(type, var, vec) type var = (type) vector_get((vec), 0); for (unsigned i = 0; i < (vec)->size; ++i, var = (type) vector_get((vec), i))
