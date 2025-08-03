@@ -643,16 +643,16 @@ void analyze_subscript_expression_after(syntax_traverser_t* trav, syntax_compone
     bool pass = false;
     syntax_component_t* array = syn->subsexpr_expression;
     syntax_component_t* index = syn->subsexpr_index_expression;
-    if (index->ctype->class == CTC_ARRAY || index->ctype->class == CTC_POINTER)
+    if ((index->ctype->class == CTC_ARRAY || index->ctype->class == CTC_POINTER) && type_is_object_type(index->ctype->derived_from))
     {
         syntax_component_t* tmp = array;
         array = index;
         index = tmp;
         pass = true;
     }
-    else if (array->ctype->class != CTC_ARRAY && array->ctype->class != CTC_POINTER)
+    else if ((array->ctype->class != CTC_ARRAY && array->ctype->class != CTC_POINTER) || !type_is_object_type(array->ctype->derived_from))
         // ISO: 6.5.2.1 (1)
-        ADD_ERROR_MESSAGE(syn, "subscript can only be applied to array and pointer types");
+        ADD_ERROR_MESSAGE(syn, "subscript can only be applied to arrays and pointers to object types");
     else
         pass = true;
     

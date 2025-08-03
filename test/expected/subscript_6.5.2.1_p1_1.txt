@@ -1,0 +1,4 @@
+ecc: error: [14:7] subscript can only be applied to arrays and pointers to object types
+ecc: error: [17:10] subscript can only be applied to arrays and pointers to object types
+ecc: error: [21:7] subscript can only be applied to arrays and pointers to object types
+ecc: error: [24:10] subscript can only be applied to arrays and pointers to object types
