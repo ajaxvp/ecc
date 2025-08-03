@@ -29,6 +29,10 @@
 #define MAX_STRINGIFIED_INTEGER_LENGTH 30
 #define LINUX_MAX_PATH_LENGTH 4096
 
+#define NO_LIBRARIES 2
+#define NO_LIBRARY_SEARCH_DIRECTORIES 3
+#define NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES 3
+
 #define STACKFRAME_ALIGNMENT 16
 #define STRUCT_UNION_ALIGNMENT 8
 #define ALIGN(x, req) ((x) + ((req) - ((x) % (req))))
@@ -1758,7 +1762,9 @@ extern const char* C_NAMESPACE_CLASS_NAMES[7];
 extern const char* PP_TOKEN_NAMES[PPT_NO_ELEMENTS];
 extern const char* TOKEN_NAMES[T_NO_ELEMENTS];
 extern const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS];
-extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[4];
+extern const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES];
+extern const char* LIBRARY_SEARCH_DIRECTORIES[NO_LIBRARY_SEARCH_DIRECTORIES];
+extern const char* LIBRARIES[NO_LIBRARIES];
 extern const char* X86_INSN_NAMES[X86I_NO_ELEMENTS];
 extern const char* X86_64_BYTE_REGISTERS[];
 extern const char* X86_64_WORD_REGISTERS[];
@@ -1948,6 +1954,7 @@ void repr_print(char* str, int (*printer)(const char* fmt, ...));
 unsigned long hash(char* str);
 char* get_directory_path(char* path);
 char* get_file_name(char* path, bool m);
+bool file_exists(char* path);
 int contains(void** array, unsigned length, void* el, int (*c)(void*, void*));
 int regid_comparator(regid_t r1, regid_t r2);
 unsigned long regid_hash(regid_t x);

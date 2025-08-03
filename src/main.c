@@ -373,6 +373,27 @@ char* assemble(char* filename, char* target)
     return obj_filepath;
 }
 
+char** find_libraries(void)
+{
+    char** libraries = calloc(NO_LIBRARIES, sizeof(char*));
+    char* buffer = malloc(LINUX_MAX_PATH_LENGTH);
+    for (size_t i = 0; i < NO_LIBRARY_SEARCH_DIRECTORIES; ++i)
+    {
+        const char* directory = LIBRARY_SEARCH_DIRECTORIES[i];
+        for (size_t j = 0; j < NO_LIBRARIES; ++j)
+        {
+            if (libraries[j])
+                continue;
+            snprintf(buffer, LINUX_MAX_PATH_LENGTH, "%s/%s", directory, LIBRARIES[j]);
+            if (!file_exists(buffer))
+                continue;
+            libraries[j] = strdup(buffer);
+        }
+    }
+    free(buffer);
+    return libraries;
+}
+
 char* linker(char** object_files, size_t object_count, char* target)
 {
     char* exec_filepath = target ? strdup(target) : strdup("a.out");
@@ -387,21 +408,34 @@ char* linker(char** object_files, size_t object_count, char* target)
 
     if (ld_pid == 0)
     {
-        #define NO_LIBRARIES 2
+        char** libraries = find_libraries();
+
         char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
         argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
         for (size_t i = 0; i < object_count; ++i)
             argv[i + 1] = object_files[i];
-        argv[1 + object_count] = "libecc/libecc.a";
-        argv[2 + object_count] = "libc/libc.a";
+        for (size_t i = 0; i < NO_LIBRARIES; ++i)
+        {
+            if (!libraries[i])
+            {
+                delete_array((void**) libraries, NO_LIBRARIES);
+                free(exec_filepath);
+                free(argv);
+                errorf("could not locate a required library: %s\n", libraries[i]);
+                exit(EXIT_FAILURE);
+            }
+            argv[1 + i + object_count] = libraries[i];
+        }
         argv[1 + object_count + NO_LIBRARIES] = "-o";
         argv[2 + object_count + NO_LIBRARIES] = exec_filepath;
         argv[3 + object_count + NO_LIBRARIES] = NULL;
         int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
         if (status == -1)
         {
+            delete_array((void**) libraries, NO_LIBRARIES);
             free(exec_filepath);
             free(argv);
+            errorf("failed to start linker process\n");
             exit(EXIT_FAILURE);
         }
     }
@@ -411,7 +445,6 @@ char* linker(char** object_files, size_t object_count, char* target)
     if (WEXITSTATUS(ld_status))
     {
         free(exec_filepath);
-        errorf("failed to execute linker\n");
         return NULL;
     }
 

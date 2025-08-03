@@ -468,9 +468,21 @@ const char* PUNCTUATOR_STRING_REPRS[P_NO_ELEMENTS] = {
     "%:%:"
 };
 
-const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[] = {
+const char* LIBRARIES[NO_LIBRARIES] = {
+    "libc.a",
+    "libecc.a",
+};
+
+const char* LIBRARY_SEARCH_DIRECTORIES[NO_LIBRARY_SEARCH_DIRECTORIES] = {
+    "libc",
+    "/usr/lib/ecc",
+    "~/lib/ecc"
+};
+
+const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES] = {
     "libc/include",
-    "/usr/lib/ecc/include"
+    "/usr/lib/ecc/include",
+    "~/lib/ecc/include"
 };
 
 const char* X86_INSN_NAMES[X86I_NO_ELEMENTS] = {

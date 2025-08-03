@@ -3,8 +3,15 @@
 #define _DEFAULT_SOURCE 1
 
 #include <libgen.h>
+#include <unistd.h>
 
 #elif defined(_WIN32) || defined(__CYGWIN__)
+
+#error ecc does not support Windows systems currently
+
+#else
+
+#error ecc only supports compliations for Linux currently
 
 #endif
 
@@ -259,6 +266,27 @@ char* get_file_name(char* path, bool m)
     #else
 
     return NULL;
+
+    #endif
+}
+
+bool file_exists(char* path)
+{
+    #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+    return access(path, F_OK) == 0;
+
+    #elif defined(_WIN32) || defined(__CYGWIN__)
+
+    errorf("'file_exists' function is not supported for Windows systems. please contact the developer\n");
+    assert_fail;
+    return false;
+
+    #else
+
+    errorf("unknown system encountered while calling 'file_exists'. please contact the developer\n");
+    assert_fail;
+    return false;
 
     #endif
 }

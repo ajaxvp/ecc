@@ -2002,7 +2002,7 @@ FILE* open_include_path(char* inc, bool quote_delimited, preprocessing_state_t* 
     }
 
     // if not or if just in angled brackets, search in the list of directories
-    for (int i = 0; i < sizeof(ANGLED_INCLUDE_SEARCH_DIRECTORIES) / sizeof(ANGLED_INCLUDE_SEARCH_DIRECTORIES[0]); ++i)
+    for (int i = 0; i < NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES; ++i)
     {
         snprintf(*path, LINUX_MAX_PATH_LENGTH, "%s/%s", ANGLED_INCLUDE_SEARCH_DIRECTORIES[i], inc);
         FILE* file = fopen(*path, "r");
