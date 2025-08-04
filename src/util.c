@@ -4,6 +4,7 @@
 
 #include <libgen.h>
 #include <unistd.h>
+#include <pwd.h>
 
 #elif defined(_WIN32) || defined(__CYGWIN__)
 
@@ -285,6 +286,28 @@ bool file_exists(char* path)
     #else
 
     errorf("unknown system encountered while calling 'file_exists'. please contact the developer\n");
+    assert_fail;
+    return false;
+
+    #endif
+}
+
+char* get_home_directory(void)
+{
+    #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+
+    struct passwd* pw = getpwuid(getuid());
+    return pw ? pw->pw_dir : NULL;
+
+    #elif defined(_WIN32) || defined(__CYGWIN__)
+
+    errorf("'get_home_directory' function is not supported for Windows systems. please contact the developer\n");
+    assert_fail;
+    return false;
+
+    #else
+
+    errorf("unknown system encountered while calling 'get_home_directory'. please contact the developer\n");
     assert_fail;
     return false;
 

@@ -384,7 +384,10 @@ char** find_libraries(void)
         {
             if (libraries[j])
                 continue;
-            snprintf(buffer, LINUX_MAX_PATH_LENGTH, "%s/%s", directory, LIBRARIES[j]);
+            if (directory[0] == '~')
+                snprintf(buffer, LINUX_MAX_PATH_LENGTH, "%s%s/%s", get_home_directory(), directory + 1, LIBRARIES[j]);
+            else
+                snprintf(buffer, LINUX_MAX_PATH_LENGTH, "%s/%s", directory, LIBRARIES[j]);
             if (!file_exists(buffer))
                 continue;
             libraries[j] = strdup(buffer);
@@ -421,7 +424,7 @@ char* linker(char** object_files, size_t object_count, char* target)
                 delete_array((void**) libraries, NO_LIBRARIES);
                 free(exec_filepath);
                 free(argv);
-                errorf("could not locate a required library: %s\n", libraries[i]);
+                errorf("could not locate a required library: %s\n", LIBRARIES[i]);
                 exit(EXIT_FAILURE);
             }
             argv[1 + i + object_count] = libraries[i];

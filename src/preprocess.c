@@ -963,7 +963,7 @@ typedef enum preprocessing_component_type
 
 typedef struct preprocessing_component preprocessing_component_t;
 
-typedef struct preprocessing_component
+struct preprocessing_component
 {
     preprocessing_component_type_t type;
     preprocessing_token_t* start;
@@ -1027,7 +1027,7 @@ typedef struct preprocessing_component
         // PPC_PRAGMA_LINE
         preprocessing_component_t* pragl_sequence; // PPC_TOKEN_SEQUENCE
     };
-} preprocessing_component_t;
+};
 
 void pp_component_delete(preprocessing_component_t* comp)
 {
@@ -2004,7 +2004,11 @@ FILE* open_include_path(char* inc, bool quote_delimited, preprocessing_state_t* 
     // if not or if just in angled brackets, search in the list of directories
     for (int i = 0; i < NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES; ++i)
     {
-        snprintf(*path, LINUX_MAX_PATH_LENGTH, "%s/%s", ANGLED_INCLUDE_SEARCH_DIRECTORIES[i], inc);
+        const char* directory = ANGLED_INCLUDE_SEARCH_DIRECTORIES[i];
+        if (directory[0] == '~')
+            snprintf(*path, LINUX_MAX_PATH_LENGTH, "%s%s/%s", get_home_directory(), directory + 1, inc);
+        else
+            snprintf(*path, LINUX_MAX_PATH_LENGTH, "%s/%s", directory, inc);
         FILE* file = fopen(*path, "r");
         if (file)
             return file;

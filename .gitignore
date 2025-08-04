@@ -85,3 +85,6 @@ std
 test/actual
 test/asm
 test/diff
+
+# Program sync script
+psync.sh

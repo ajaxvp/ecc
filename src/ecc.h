@@ -1955,6 +1955,7 @@ unsigned long hash(char* str);
 char* get_directory_path(char* path);
 char* get_file_name(char* path, bool m);
 bool file_exists(char* path);
+char* get_home_directory(void);
 int contains(void** array, unsigned length, void* el, int (*c)(void*, void*));
 int regid_comparator(regid_t r1, regid_t r2);
 unsigned long regid_hash(regid_t x);
