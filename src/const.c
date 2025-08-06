@@ -482,6 +482,7 @@ const char* LIBRARY_SEARCH_DIRECTORIES[NO_LIBRARY_SEARCH_DIRECTORIES] = {
 
 const char* ANGLED_INCLUDE_SEARCH_DIRECTORIES[NO_ANGLED_INCLUDE_SEARCH_DIRECTORIES] = {
     "libc/include",
+    "libecc/include",
     "/usr/lib/ecc/include",
     "~/lib/ecc/include"
 };
