@@ -1024,6 +1024,7 @@ static void type_delete_internal(c_type_t* ct, bool ignore_owned)
     {
         case CTC_STRUCTURE:
         case CTC_UNION:
+            free(ct->struct_union.name);
             vector_deep_delete(ct->struct_union.member_types, (void (*)(void*)) type_delete);
             vector_deep_delete(ct->struct_union.member_names, free);
             vector_delete(ct->struct_union.member_bitfields);
@@ -1128,7 +1129,8 @@ void assign_sus_type(analysis_error_t* errors, symbol_t* sy)
     syntax_component_t* sus = sy->declarer->parent;
     sy->type = create_struct_type(errors, sus, &sy->type);
     vector_add(syntax_get_translation_unit(sus)->tlu_st->unique_types, sy->type);
-    sy->ns = make_basic_namespace(sy->type->class == CTC_STRUCTURE ? NSC_STRUCT : NSC_UNION);
+    if (!sy->ns)
+        sy->ns = make_basic_namespace(sy->type->class == CTC_STRUCTURE ? NSC_STRUCT : NSC_UNION);
 }
 
 void assign_es_type(analysis_error_t* errors, symbol_t* sy)
@@ -1155,7 +1157,8 @@ void assign_es_type(analysis_error_t* errors, symbol_t* sy)
     }
 
     sy->type = ct;
-    sy->ns = make_basic_namespace(NSC_ENUM);
+    if (!sy->ns)
+        sy->ns = make_basic_namespace(NSC_ENUM);
 }
 
 static bool bts_counter_check(size_t* bts_counter, size_t* check)

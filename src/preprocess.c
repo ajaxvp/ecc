@@ -2071,6 +2071,7 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
     FILE* file = open_include_path(hn->header_name.name, hn->header_name.quote_delimited, state, &path);
     if (!file)
     {
+        free(path);
         (void) fail(hn, "could not open file '%s'", hn->header_name.name);
         return false;
     }
@@ -2078,10 +2079,12 @@ bool preprocess_include_line(preprocessing_component_t* comp, preprocessing_stat
     preprocessing_token_t* included = NULL;
     if (!preprocess_include_file(file, path, state, &included))
     {
+        free(path);
         fclose(file);
         return false;
     }
     
+    free(path);
     fclose(file);
 
     if (included)

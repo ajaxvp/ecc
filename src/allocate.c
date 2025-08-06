@@ -49,6 +49,7 @@ void allocator_delete(allocator_t* a)
 {
     if (!a) return;
     map_delete(a->map);
+    map_delete(a->aliases);
     map_delete(a->replacements);
     free(a);
 }

@@ -2222,6 +2222,7 @@ void analyze_identifier_after(syntax_traverser_t* trav, syntax_component_t* syn)
         analyze_declaring_identifier_after(trav, syn, sy, first, symbols);
     else
         analyze_designating_identifier_after(trav, syn, sy);
+    vector_delete(symbols);
 }
 
 static void enforce_6_9_1_para_2(syntax_traverser_t* trav, syntax_component_t* syn)

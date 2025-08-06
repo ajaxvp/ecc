@@ -461,6 +461,7 @@ symbol_t* symbol_table_remove(symbol_table_t* t, syntax_component_t* id)
                 return NULL;
             if (!sy)
             {
+                free(t->key[i]);
                 t->key[i] = NULL;
                 --(t->size);
             }

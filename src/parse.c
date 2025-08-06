@@ -736,6 +736,7 @@ syntax_component_t* parse_pointer(token_t** tokens, parse_request_code_t req, pa
     {
         // ISO: 6.7.5 (1)
         fail_parse(token, "expected pointer");
+        free_syntax(syn, tlu);
         return NULL;
     }
     advance_token;
@@ -1738,6 +1739,7 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
         if (!is_punctuator(token, P_LEFT_PARENTHESIS))
         {
             fail_parse(token, "expected left parenthesis for compound literal type");
+            free_syntax(syn, tlu);
             return NULL;
         }
         advance_token;
@@ -1746,6 +1748,7 @@ syntax_component_t* parse_postfix_expression(token_t** tokens, parse_request_cod
         if (tn_stat == ABORT)
         {
             fail_status;
+            free_syntax(syn, tlu);
             return NULL;
         }
         if (!is_punctuator(token, P_RIGHT_PARENTHESIS))

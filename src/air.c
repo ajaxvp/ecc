@@ -1770,12 +1770,14 @@ static void linearize_string_literal_after(syntax_traverser_t* trav, syntax_comp
     if (syn->strl_reg)
     {
         data->data = calloc(syn->strl_length->intc + 1, sizeof(unsigned char));
-        memcpy(data->data, syn->strl_reg, syn->strl_length->intc + 1);
+        memcpy(data->data, syn->strl_reg, syn->strl_length->intc);
+        data->data[syn->strl_length->intc] = '\0';
     }
     else
     {
         data->data = calloc(syn->strl_length->intc + 1, sizeof(int));
-        memcpy(data->data, syn->strl_wide, sizeof(int) * (syn->strl_length->intc + 1));
+        memcpy(data->data, syn->strl_wide, sizeof(int) * syn->strl_length->intc);
+        ((int*) data->data)[syn->strl_length->intc] = '\0';
     }
     vector_add(air->rodata, data);
     SETUP_LINEARIZE;

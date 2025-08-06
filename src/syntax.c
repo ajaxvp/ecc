@@ -1593,6 +1593,7 @@ void free_syntax(syntax_component_t* syn, syntax_component_t* tlu)
         }
         case SC_STRING_LITERAL:
         {
+            free_syntax(syn->strl_length, tlu);
             free(syn->strl_reg);
             free(syn->strl_wide);
             free(syn->strl_id);
