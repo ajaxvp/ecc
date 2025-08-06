@@ -1887,6 +1887,15 @@ c_type_t* create_type_with_errors(analysis_error_t* errors, syntax_component_t* 
         return make_basic_type(CTC_ERROR);
     }
 
+    if (ct->class == CTC_FUNCTION &&
+        (ct->derived_from->class == CTC_ARRAY || ct->derived_from->class == CTC_FUNCTION))
+    {
+        // ISO: 6.7.5.3 (1)
+        ADD_ERROR(specifying, "functions may not specify array or function return types");
+        type_delete(ct);
+        return make_basic_type(CTC_ERROR);
+    }
+
     return ct;
 }
 

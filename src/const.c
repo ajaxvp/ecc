@@ -475,6 +475,7 @@ const char* LIBRARIES[NO_LIBRARIES] = {
 
 const char* LIBRARY_SEARCH_DIRECTORIES[NO_LIBRARY_SEARCH_DIRECTORIES] = {
     "libc",
+    "libecc",
     "/usr/lib/ecc",
     "~/lib/ecc"
 };

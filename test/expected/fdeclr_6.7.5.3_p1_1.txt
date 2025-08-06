@@ -1,0 +1,2 @@
+ecc: error: [3:1] functions may not specify array or function return types
+ecc: error: [5:1] functions may not specify array or function return types
