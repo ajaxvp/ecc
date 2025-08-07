@@ -2,6 +2,7 @@
 #include "../include/stdint.h"
 #include "../include/string.h"
 #include "../include/stdlib.h"
+#include "../../libecc/include/lsys.h"
 
 #define O_RDONLY 00
 #define O_WRONLY 01
