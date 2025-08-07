@@ -305,7 +305,6 @@ typedef enum intrinsic_function
     IF_LSYS_WRITE,
     IF_LSYS_OPEN,
     IF_LSYS_CLOSE,
-    IF_LSYS_MMAP,
 
     IF_NO_ELEMENTS
 } intrinsic_function_t;
