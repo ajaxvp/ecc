@@ -1970,9 +1970,27 @@ static void linearize_type_name_after(syntax_traverser_t* trav, syntax_component
     FINALIZE_LINEARIZE;
 }
 
+static void linearize_ptr_offset_expression_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_type_t type);
+
 static void linearize_reference_expression_after(syntax_traverser_t* trav, syntax_component_t* syn)
 {
+    // ISO: 6.5.3.2 (3)
+    // an expression like &x[y] does not evaluate & or the subscript and instead does x + y.
+    if (syn->uexpr_operand->type == SC_SUBSCRIPT_EXPRESSION)
+    {
+        linearize_ptr_offset_expression_after(trav, syn, AIR_ADD);
+        return;
+    }
     SETUP_LINEARIZE;
+    // ISO: 6.5.3.2 (3)
+    // an expression like &*x does not evaluate & or *.
+    if (syn->uexpr_operand->type == SC_DEREFERENCE_EXPRESSION)
+    {
+        COPY_CODE(syn->uexpr_operand->uexpr_operand);
+        syn->expr_reg = syn->uexpr_operand->uexpr_operand->expr_reg;
+        FINALIZE_LINEARIZE;
+        return;
+    }
     COPY_CODE(syn->uexpr_operand);
     syn->expr_reg = syn->uexpr_operand->expr_reg;
     FINALIZE_LINEARIZE;
@@ -2226,30 +2244,43 @@ static void linearize_binary_expression_after(syntax_traverser_t* trav, syntax_c
 
 static void linearize_ptr_offset_expression_after(syntax_traverser_t* trav, syntax_component_t* syn, air_insn_type_t type)
 {
+    syntax_component_t* lhs = NULL, * rhs = NULL;
+    // reference expression linearization function invokes this function if its
+    // operand is a subscript operator
+    if (syn->type == SC_REFERENCE_EXPRESSION && syn->uexpr_operand->type == SC_SUBSCRIPT_EXPRESSION)
+    {
+        lhs = syn->uexpr_operand->subsexpr_expression;
+        rhs = syn->uexpr_operand->subsexpr_index_expression;
+    }
+    else
+    {
+        lhs = syn->bexpr_lhs;
+        rhs = syn->bexpr_rhs;
+    }
     SETUP_LINEARIZE;
-    COPY_CODE(syn->bexpr_lhs);
-    bool scale_on_left = syn->bexpr_rhs->ctype->class == CTC_POINTER;
-    regid_t reg = scale_on_left ? syn->bexpr_lhs->expr_reg : syn->bexpr_rhs->expr_reg;
-    long long size = type_size(scale_on_left ? syn->bexpr_rhs->ctype->derived_from : syn->bexpr_lhs->ctype->derived_from);
+    COPY_CODE(lhs);
+    bool scale_on_left = rhs->ctype->class == CTC_POINTER;
+    regid_t reg = scale_on_left ? lhs->expr_reg : rhs->expr_reg;
+    long long size = type_size(scale_on_left ? rhs->ctype->derived_from : lhs->ctype->derived_from);
     air_insn_t* mul = NULL;
     if (size != 1)
     {
         mul = air_insn_init(AIR_MULTIPLY, 3);
-        mul->ct = type_copy(scale_on_left ? syn->bexpr_lhs->ctype : syn->bexpr_rhs->ctype);
+        mul->ct = type_copy(scale_on_left ? lhs->ctype : rhs->ctype);
         mul->ops[0] = air_insn_register_operand_init(reg = NEXT_VIRTUAL_REGISTER);
-        mul->ops[1] = air_insn_register_operand_init(scale_on_left ? syn->bexpr_lhs->expr_reg : syn->bexpr_rhs->expr_reg);
+        mul->ops[1] = air_insn_register_operand_init(scale_on_left ? lhs->expr_reg : rhs->expr_reg);
         mul->ops[2] = air_insn_integer_constant_operand_init(size);
     }
     if (mul && scale_on_left)
         ADD_CODE(mul);
-    COPY_CODE(syn->bexpr_rhs);
+    COPY_CODE(rhs);
     if (mul && !scale_on_left)
         ADD_CODE(mul);
     air_insn_t* insn = air_insn_init(type, 3);
     insn->ct = type_copy(syn->ctype);
     insn->ops[0] = air_insn_register_operand_init(syn->expr_reg = NEXT_VIRTUAL_REGISTER);
-    insn->ops[1] = air_insn_register_operand_init(scale_on_left ? reg : syn->bexpr_lhs->expr_reg);
-    insn->ops[2] = air_insn_register_operand_init(scale_on_left ? syn->bexpr_rhs->expr_reg : reg);
+    insn->ops[1] = air_insn_register_operand_init(scale_on_left ? reg : lhs->expr_reg);
+    insn->ops[2] = air_insn_register_operand_init(scale_on_left ? rhs->expr_reg : reg);
     ADD_CODE(insn);
     FINALIZE_LINEARIZE;
 }
