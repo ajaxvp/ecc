@@ -2,6 +2,7 @@
 #define _STDIO_H
 
 #include "stdint.h"
+#include "stdlib.h"
 
 #define FOPEN_MAX 16
 #define EOF (-1)
@@ -24,6 +25,10 @@ int putchar(int c);
 
 int puts(const char* str);
 
-int printf(const char* fmt, ...);
+int printf(const char* format, ...);
+
+int scanf(const char* format, ...);
+
+int snprintf(char* s, size_t n, const char* format, ...);
 
 #endif

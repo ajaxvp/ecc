@@ -2028,12 +2028,12 @@ static void linearize_unary_expression_after(syntax_traverser_t* trav, syntax_co
     if (syn->type == SC_DEREFERENCE_EXPRESSION)
     {
         c_type_t* dt = syn->uexpr_operand->ctype->derived_from;
-        if (dt->class == CTC_STRUCTURE || dt->class == CTC_UNION)
+        if (dt->class == CTC_STRUCTURE || dt->class == CTC_UNION || syntax_is_in_lvalue_context(syn))
         {
             type_delete(insn->ct);
             insn->ct = make_reference_type(dt);
         }
-        if (!type_is_sua(dt))
+        if (!type_is_sua(dt) && !syntax_is_in_lvalue_context(syn))
             insn->ops[1] = air_insn_indirect_register_operand_init(srcreg, 0, INVALID_VREGID, 1);
         else
             insn->ops[1] = air_insn_register_operand_init(srcreg);

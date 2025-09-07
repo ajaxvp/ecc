@@ -336,6 +336,7 @@ typedef struct program_options
     bool ssflag;
     bool cflag;
     char* oflag;
+    bool gflag;
 } program_options_t;
 
 typedef struct init_address

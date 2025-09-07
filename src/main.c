@@ -72,6 +72,7 @@ int usage(void)
     printf("  %-*sSet output filepath\n", OPTION_DESCRIPTION_LENGTH, "-o");
     printf("  %-*sCompile, but do not assemble or link\n", OPTION_DESCRIPTION_LENGTH, "-S");
     printf("  %-*sCompile and assemble, but do not link\n", OPTION_DESCRIPTION_LENGTH, "-c");
+    printf("  %-*sLink against default GNU libraries\n", OPTION_DESCRIPTION_LENGTH, "-g");
     printf("  %-*sDisplay internal states (tokens, IRs, etc.)\n", OPTION_DESCRIPTION_LENGTH, "-i");
     printf("  %-*sPreprocess\n", OPTION_DESCRIPTION_LENGTH, "-P");
     printf("  %-*sParse\n", OPTION_DESCRIPTION_LENGTH, "-p");
@@ -411,35 +412,56 @@ char* linker(char** object_files, size_t object_count, char* target)
 
     if (ld_pid == 0)
     {
-        char** libraries = find_libraries();
-
-        char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
-        argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
-        for (size_t i = 0; i < object_count; ++i)
-            argv[i + 1] = object_files[i];
-        for (size_t i = 0; i < NO_LIBRARIES; ++i)
+        if (!opts.gflag)
         {
-            if (!libraries[i])
+            char** libraries = find_libraries();
+
+            char** argv = calloc(object_count + NO_LIBRARIES + 4, sizeof(char*));
+            argv[0] = "/usr/bin/x86_64-linux-gnu-ld";
+            for (size_t i = 0; i < object_count; ++i)
+                argv[i + 1] = object_files[i];
+            for (size_t i = 0; i < NO_LIBRARIES; ++i)
+            {
+                if (!libraries[i])
+                {
+                    delete_array((void**) libraries, NO_LIBRARIES);
+                    free(exec_filepath);
+                    free(argv);
+                    errorf("could not locate a required library: %s\n", LIBRARIES[i]);
+                    exit(EXIT_FAILURE);
+                }
+                argv[1 + i + object_count] = libraries[i];
+            }
+            argv[1 + object_count + NO_LIBRARIES] = "-o";
+            argv[2 + object_count + NO_LIBRARIES] = exec_filepath;
+            argv[3 + object_count + NO_LIBRARIES] = NULL;
+            int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
+            if (status == -1)
             {
                 delete_array((void**) libraries, NO_LIBRARIES);
                 free(exec_filepath);
                 free(argv);
-                errorf("could not locate a required library: %s\n", LIBRARIES[i]);
+                errorf("failed to start linker process\n");
                 exit(EXIT_FAILURE);
             }
-            argv[1 + i + object_count] = libraries[i];
         }
-        argv[1 + object_count + NO_LIBRARIES] = "-o";
-        argv[2 + object_count + NO_LIBRARIES] = exec_filepath;
-        argv[3 + object_count + NO_LIBRARIES] = NULL;
-        int status = execv("/usr/bin/x86_64-linux-gnu-ld", argv);
-        if (status == -1)
+        else
         {
-            delete_array((void**) libraries, NO_LIBRARIES);
-            free(exec_filepath);
-            free(argv);
-            errorf("failed to start linker process\n");
-            exit(EXIT_FAILURE);
+            char** argv = calloc(object_count + 4, sizeof(char*));
+            argv[0] = "/usr/bin/gcc";
+            for (size_t i = 0; i < object_count; ++i)
+                argv[i + 1] = object_files[i];
+            argv[1 + object_count] = "-o";
+            argv[2 + object_count] = exec_filepath;
+            argv[3 + object_count] = NULL;
+            int status = execv("/usr/bin/gcc", argv);
+            if (status == -1)
+            {
+                free(exec_filepath);
+                free(argv);
+                errorf("failed to start linker process\n");
+                exit(EXIT_FAILURE);
+            }
         }
     }
 
@@ -457,7 +479,7 @@ char* linker(char** object_files, size_t object_count, char* target)
 bool get_options(int argc, char** argv)
 {
     memset(&opts, 0, sizeof(program_options_t));
-    for (int c; (c = getopt(argc, argv, "hiPpaxLArcSo:")) != -1;)
+    for (int c; (c = getopt(argc, argv, "hiPpaxLArcSgo:")) != -1;)
     {
         switch (c)
         {
@@ -496,6 +518,9 @@ bool get_options(int argc, char** argv)
                 break;
             case 'o':
                 opts.oflag = optarg;
+                break;
+            case 'g':
+                opts.gflag = true;
                 break;
             case '?':
             default:
