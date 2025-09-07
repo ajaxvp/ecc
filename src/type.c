@@ -1834,9 +1834,11 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
                     // loop over every parameter declaration
                     VECTOR_FOR(syntax_component_t*, s, declr->fdeclr_parameter_declarations)
                     {
+                        c_type_t* pt = NULL;
+
                         // if the parameter declarator is abstract, find the type of it
                         if (!s->pdecl_declr || syntax_is_abstract_declarator_type(s->pdecl_declr->type))
-                            vector_add(ct->function.param_types, create_type_with_errors(errors, s, s->pdecl_declr));
+                            vector_add(ct->function.param_types, pt = create_type_with_errors(errors, s, s->pdecl_declr));
                         else
                         {
                             // otherwise, we make sure the identifier-type declarator is typed and we add that type to the vector
@@ -1848,7 +1850,13 @@ static c_type_t* create_type_impl(analysis_error_t* errors, syntax_component_t* 
 
                             assign_type(errors, param_sy);
 
-                            vector_add(ct->function.param_types, type_copy(param_sy->type));
+                            vector_add(ct->function.param_types, pt = type_copy(param_sy->type));
+                        }
+
+                        if (pt->class == CTC_ARRAY || pt->class == CTC_FUNCTION)
+                        {
+                            // TODO
+                            ADD_ERROR(s, "array or function parameter types are not supported yet");
                         }
                     }
                 }
