@@ -22,7 +22,7 @@ static vector_t* vector_resize(vector_t* v, unsigned capacity)
 
 vector_t* vector_add(vector_t* v, void* el)
 {
-    if (v->capacity == v->size)
+    if (v->size >= v->capacity)
         vector_resize(v, v->capacity + (v->capacity / 2));
     v->data[(v->size)++] = el;
     return v;

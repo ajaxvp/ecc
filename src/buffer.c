@@ -21,7 +21,7 @@ static buffer_t* buffer_resize(buffer_t* b, unsigned capacity)
 
 buffer_t* buffer_append(buffer_t* b, char c)
 {
-    if (b->capacity >= b->size)
+    if (b->size >= b->capacity)
         buffer_resize(b, b->capacity + (b->capacity / 2));
     b->data[(b->size)++] = c;
     return b;
@@ -29,7 +29,7 @@ buffer_t* buffer_append(buffer_t* b, char c)
 
 buffer_t* buffer_append_wide(buffer_t* b, int c)
 {
-    if (b->capacity >= b->size)
+    if (b->size >= b->capacity)
         buffer_resize(b, b->capacity + (b->capacity / 2));
     *((int*) (b->data + b->size)) = c;
     b->size += sizeof(int);
